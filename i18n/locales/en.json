@@ -1,0 +1,181 @@
+{
+  "login": {
+    "title": "Welcome back!",
+    "email": "Email",
+    "emailPlaceholder": "Enter your email",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "remember": "Remember me",
+    "submit": "Sign in",
+    "noAccount": "Don't have an account?",
+    "signUp": "Sign up",
+    "forgotPassword": "Forgot password?",
+    "or": "or",
+    "providers": {
+      "google": "Google",
+      "github": "GitHub"
+    },
+    "success": {
+      "title": "Success",
+      "description": "You have logged in."
+    },
+    "fail":{
+      "title": "Login error",
+      "description": "Failed to log in. Check your email and password."
+    },
+    "validation": {
+      "email": "Invalid email",
+      "passwordMin": "Must be at least {min} characters"
+    }
+  },
+  "terms": {
+    "agree": "By signing in, you agree to our",
+    "terms": "Terms of Service"
+  },
+  "logout": {
+    "successTitle": "Logged out",
+    "successDescription": "Your session has ended. See you soon!",
+    "errorTitle": "Logout failed",
+    "errorDescription": "Could not end the session. Please try again."
+  },
+  "signup": {
+    "title": "Create an account",
+    "name": "Name",
+    "namePlaceholder": "Enter your name",
+    "email": "Email",
+    "emailPlaceholder": "Enter your email",
+    "password": "Password",
+    "passwordPlaceholder": "Enter your password",
+    "passwordConfirm": "Confirm Password",
+    "passwordConfirmPlaceholder": "Confirm your password",
+    "submit": "Create account",
+    "haveAccount": "Already have an account?",
+    "login": "Login",
+    "termsPrefix": "By signing up, you agree to our",
+    "termsLink": "Terms of Service",
+    "validation": {
+      "name": "Name is required (min 2 characters)",
+      "email": "Invalid email",
+      "passwordMin": "Password must be at least {min} characters",
+      "passwordMismatch": "Passwords do not match"
+    },
+    "success": {
+      "title": "Success",
+      "description": "You have successfully registered!"
+    },
+    "fail": {
+      "title": "Error",
+      "description": "Registration failed. Please try again."
+    }
+  },
+  "forgot": {
+    "title": "Reset password",
+    "description": "Forgot your password? \nEnter your email and we'll send a reset link.",
+    "email": "Email",
+    "emailPlaceholder": "Enter your email",
+    "submit": "Send reset link",
+    "backToLogin": "Back to login",
+    "validation": {
+      "email": "Invalid email"
+    },
+    "success": {
+      "title": "Email sent",
+      "description": "Check your inbox to reset your password."
+    },
+    "fail": {
+      "title": "Error",
+      "description": "Could not send the email. Please try again."
+    },
+    "sent": {
+      "title": "Email sent",
+      "description": "We sent a password reset link to your email. Check your inbox."
+    }
+  },
+  "reset": {
+    "title": "Reset password",
+    "description": "Enter a new password for your account.",
+    "password": "New password",
+    "passwordPlaceholder": "Enter new password",
+    "passwordConfirm": "Confirm password",
+    "passwordConfirmPlaceholder": "Repeat new password",
+    "submit": "Reset password",
+    "validation": {
+      "passwordMin": "Password must be at least {min} characters",
+      "passwordMismatch": "Passwords do not match"
+    },
+    "success": {
+      "title": "Password changed",
+      "description": "Your password has been successfully reset. You can now log in."
+    },
+    "fail": {
+      "title": "Error",
+      "description": "Could not reset password. The link may have expired."
+    }
+  },
+  "profile": {
+    "title": "User profile",
+    "subtitle": "Personal data of {name}",
+    "fields": {
+      "last_name": "Last name",
+      "first_name": "First name",
+      "middle_name": "Middle name",
+      "birth_year": "Year of birth",
+      "gender": "Gender",
+      "country": "Country",
+      "direction": "Interface direction"
+    },
+    "placeholders": {
+      "gender": "Select gender",
+      "country": "Select country",
+      "search": "Search..."
+    },
+    "gender": {
+      "male": "Male",
+      "female": "Female"
+    },
+    "actions": {
+      "save": "Save"
+    },
+    "validation": {
+      "birth_year": "Invalid year of birth"
+    },
+    "messages": {
+      "saved": "Profile saved",
+      "save_error": "Save error",
+      "unknown_error": "Something went wrong"
+    },
+    "direction": {
+      "ltr": "Left to right (right-handed)",
+      "rtl": "Right to left (left-handed)"
+    },
+    "help": {
+      "direction": "Changes the layout of menus, icons, and text to fit your hand"
+    }
+  },
+  "roles": {
+    "page": {
+      "title": "Choose your roles",
+      "description": "Select the roles that fit you"
+    },
+    "loading": "Loading roles...",
+    "error": "Could not load roles. Please try again later.",
+    "selected": "Selected {selected} of {total}",
+    "switchLabel": "I am {role}",
+    "submit": "Next",
+    "validation": {
+      "empty": "Select at least one role",
+      "max": "You can select no more than {max} roles"
+    },
+    "messages": {
+      "saved": "Roles saved",
+      "save_error": "Save error",
+      "unknown_error": "Something went wrong"
+    },
+    "names": {
+      "student": "Student",
+      "teacher": "Teacher",
+      "parent": "Parent",
+      "methodologist": "Methodologist"
+    }
+  }
+}

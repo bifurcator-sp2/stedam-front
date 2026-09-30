@@ -1,0 +1,184 @@
+{
+  "login": {
+    "title": "С возвращением!",
+    "email": "Email",
+    "emailPlaceholder": "Введите ваш email",
+    "password": "Пароль",
+    "passwordPlaceholder": "Введите пароль",
+    "remember": "Запомнить меня",
+    "submit": "Войти",
+    "noAccount": "Нет аккаунта?",
+    "signUp": "Зарегистрироваться",
+    "forgotPassword": "Забыли пароль?",
+    "or": "или",
+    "providers": {
+      "google": "Google",
+      "github": "GitHub"
+    },
+    "success": {
+      "title": "Успешно",
+      "description": "Вы вошли в систему"
+    },
+    "fail":{
+      "title": "Ошибка входа",
+      "description": "Не удалось войти. Проверьте email и пароль."
+    },
+    "validation": {
+      "email": "Некорректный email",
+      "passwordMin": "Пароль должен быть не менее {min} символов"
+    }
+  },
+  "terms": {
+    "agree": "Входя в систему, вы соглашаетесь с нашими",
+    "terms": "Условиями обслуживания"
+  },
+  "logout": {
+    "successTitle": "Вы вышли",
+    "successDescription": "Сессия завершена. До встречи!",
+    "errorTitle": "Ошибка выхода",
+    "errorDescription": "Не удалось завершить сессию. Попробуйте ещё раз."
+  },
+  "signup": {
+    "title": "Создать аккаунт",
+    "name": "Имя",
+    "namePlaceholder": "Введите ваше имя",
+    "email": "Email",
+    "emailPlaceholder": "Введите ваш email",
+    "password": "Пароль",
+    "passwordPlaceholder": "Введите пароль",
+    "passwordConfirm": "Подтвердите пароль",
+    "passwordConfirmPlaceholder": "Повторите пароль",
+    "submit": "Создать аккаунт",
+    "haveAccount": "Уже есть аккаунт?",
+    "login": "Войти",
+    "termsPrefix": "Регистрируясь, вы соглашаетесь с нашими",
+    "termsLink": "Условиями обслуживания",
+    "validation": {
+      "name": "Имя обязательно (минимум 2 символа)",
+      "email": "Некорректный email",
+      "passwordMin": "Пароль должен быть не менее {min} символов",
+      "passwordMismatch": "Пароли не совпадают"
+    },
+    "success": {
+      "title": "Успех",
+      "description": "Вы успешно зарегистрированы!"
+    },
+    "fail": {
+      "title": "Ошибка",
+      "description": "Ошибка регистрации. Попробуйте еще раз."
+    }
+  },
+  "forgot": {
+    "title": "Восстановление пароля",
+    "description": "Забыли пароль?\nВведите ваш email, и мы отправим ссылку для сброса.",
+    "email": "Email",
+    "emailPlaceholder": "Введите ваш email",
+    "submit": "Отправить ссылку",
+    "backToLogin": "Вернуться к входу",
+    "validation": {
+      "email": "Некорректный email"
+    },
+    "success": {
+      "title": "Письмо отправлено",
+      "description": "Проверьте вашу почту для сброса пароля."
+    },
+    "fail": {
+      "title": "Ошибка",
+      "description": "Не удалось отправить письмо. Попробуйте ещё раз."
+    },
+    "sent": {
+      "title": "Письмо отправлено",
+      "description": "Мы отправили ссылку для сброса пароля на ваш email. Проверьте почту."
+    }
+  },
+  "reset": {
+    "title": "Сброс пароля",
+    "description": "Введите новый пароль для вашего аккаунта.",
+    "password": "Новый пароль",
+    "passwordPlaceholder": "Введите новый пароль",
+    "passwordConfirm": "Подтвердите пароль",
+    "passwordConfirmPlaceholder": "Повторите новый пароль",
+    "submit": "Сбросить пароль",
+    "validation": {
+      "passwordMin": "Пароль должен быть не менее {min} символов",
+      "passwordMismatch": "Пароли не совпадают"
+    },
+    "success": {
+      "title": "Пароль изменён",
+      "description": "Ваш пароль успешно сброшен. Теперь вы можете войти."
+    },
+    "fail": {
+      "title": "Ошибка",
+      "description": "Не удалось сбросить пароль. Возможно, ссылка устарела."
+    }
+  },
+  "profile": {
+    "title": "Профиль пользователя",
+    "subtitle": "Личные данные пользователя {name}",
+    "fields": {
+      "last_name": "Фамилия",
+      "first_name": "Имя",
+      "middle_name": "Отчество",
+      "birth_year": "Год рождения",
+      "gender": "Пол",
+      "country": "Страна",
+      "direction": "Направление интерфейса"
+    },
+    "placeholders": {
+      "gender": "Выберите пол",
+      "country": "Выберите страну",
+      "search": "Поиск..."
+    },
+    "gender": {
+      "male": "Мужской",
+      "female": "Женский"
+    },
+    "actions": {
+      "save": "Сохранить"
+    },
+    "validation": {
+      "birth_year": "Некорректный год рождения"
+    },
+    "messages": {
+      "saved": "Профиль сохранён",
+      "save_error": "Ошибка сохранения",
+      "unknown_error": "Что-то пошло не так"
+    },
+    "direction": {
+      "ltr": "Слева направо (для правши)",
+      "rtl": "Справа налево (для левши)"
+    },
+    "help": {
+      "direction": "Меняет расположение меню, иконок и текста под удобную руку"
+    }
+  },
+  "selectMenu":{
+    "search": "Поиск..."
+  },
+  "roles": {
+    "page": {
+      "title": "Выбор ролей на проекте",
+      "description": "Выберите роли, которые вам подходят"
+    },
+    "loading": "Загрузка ролей...",
+    "error": "Не удалось загрузить роли. Попробуйте позже.",
+    "selected": "Выбрано {selected} из {total}",
+    "switchLabel": "Я {role}",
+    "submit": "Далее",
+    "validation": {
+      "empty": "Выберите хотя бы одну роль",
+      "max": "Можно выбрать не более {max} ролей"
+    },
+    "messages": {
+      "saved": "Роли сохранены",
+      "save_error": "Ошибка сохранения",
+      "unknown_error": "Что-то пошло не так"
+    },
+    "names": {
+      "student": "Ученик",
+      "teacher": "Учитель",
+      "parent": "Родитель",
+      "methodologist": "Методист"
+    }
+  }
+}
