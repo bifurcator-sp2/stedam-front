@@ -2,7 +2,7 @@
 interface SettingItem {
   key: string
   label: string
-  type: 'string' | 'select' | 'int'
+  type: 'string' | 'select' | 'int' | 'color'
   default?: any
   allowed?: any[]
   children?: SettingItem[]
@@ -43,6 +43,13 @@ function updateChild(index: number, updated: SettingItem) {
           v-model="model.default"
           :items="model.allowed"
           size="xs"
+          class="field-control"
+        />
+        <ColorPicker
+          v-else-if="model.type === 'color'"
+          v-model="model.default"
+          :items="model.allowed ?? []"
+          :columns="6"
           class="field-control"
         />
         <UInputNumber

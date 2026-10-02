@@ -46,7 +46,7 @@ export default defineNuxtConfig({
     baseURL: '/app/',
     head: {
       link: [
-
+        { rel: 'stylesheet', href: '/_tokens.css' }
       ],
     },
   },

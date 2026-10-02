@@ -74,7 +74,14 @@ const previewTitle = computed(() => getDefault(value.value, 'text.title'))
 const previewText = computed(() => getDefault(value.value, 'text.text'))
 const tag = computed(() => `Prose${getDefault(value.value, 'text.header-type').toUpperCase()}`)
 const textSize = computed(() => ' ' + getDefault(value.value, 'text.text-size') + ' ')
-const textBcgClass = computed(() => ' ' + getDefault(value.value, 'text.background-color') + ' ')
+//const textBcgClass = computed(() => ' ' + getDefault(value.value, 'text.background-color') + ' ')
+
+const textBcgStyle = computed(() => {
+  const v = getDefault(value.value, 'text.background-color')
+  // v = 'bg-definition'
+  const name = v?.replace(/^bg-/, '')
+  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+})
 
 const paddings = computed(() => ({
   'padding-top': getDefault(value.value, 'text.padding-top'),
@@ -110,7 +117,15 @@ const textBlockStyle = computed(() => ({
 }))
 
 // ==================== Картинки ====================
-const imagesBcgClass = computed(() => ' ' + getDefault(value.value, 'images.background-color') + ' ')
+//const imagesBcgClass = computed(() => ' ' + getDefault(value.value, 'images.background-color') + ' ')
+const imagesBcgStyle = computed(() => {
+  const v = getDefault(value.value, 'images.background-color')
+  // v = 'bg-definition'
+  const name = v?.replace(/^bg-/, '')
+  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+})
+
+
 
 const imagesCount = computed(() => {
   const def = Number(getDefault(value.value, 'images.count'))
@@ -231,8 +246,8 @@ const textCols = computed(() =>
         <div :class="'flex items-start justify-center ' + layoutClass">
           <div
             v-if="needDisplayImage"
-            :class="[imagesContainerClass, imagesBcgClass]"
-            :style="imagesContainerStyle"
+            :class="[imagesContainerClass]"
+            :style="[imagesContainerStyle, imagesBcgStyle]"
           >
             <img
               v-for="i in imagesCount"
@@ -243,7 +258,7 @@ const textCols = computed(() =>
             />
           </div>
 
-          <div v-if="needDisplayText" :class="textBcgClass" :style="textBlockStyle">
+          <div v-if="needDisplayText" :style="[textBlockStyle, textBcgStyle]">
             <component :is="tag" class="mt-0">{{ previewTitle }}</component>
             <ProseP :style="{ columnCount: textCols }" :class="textSize">
               {{ previewText }}
