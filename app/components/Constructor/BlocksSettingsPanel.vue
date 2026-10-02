@@ -29,7 +29,7 @@ function updateItem(index: number, updated: SettingItem) {
     </template>
 
     <div v-else class="empty-state">
-      <UIcon name="i-heroicons-adjustments-horizontal" class="empty-icon" />
+      <UIcon name="i-lucide-sliders-horizontal" class="empty-icon" />
       <span>Нет настроек</span>
     </div>
   </div>
@@ -37,25 +37,25 @@ function updateItem(index: number, updated: SettingItem) {
 
 <style scoped>
 .properties {
-  padding: 16px;
+  padding: 10px 10px 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
 }
 
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 32px 16px;
+  gap: 6px;
+  padding: 28px 12px;
   text-align: center;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ui-text-muted, #9ca3af);
 }
 
 .empty-icon {
-  font-size: 24px;
-  opacity: 0.6;
+  font-size: 20px;
+  opacity: 0.55;
 }
 </style>

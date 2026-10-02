@@ -40,7 +40,7 @@ const MIN_RIGHT = 200
 const MAX_RIGHT = 600
 
 const leftWidth = ref(260)
-const rightWidth = ref(300)
+const rightWidth = ref(500)
 
 type Side = 'left' | 'right' | null
 const resizing = ref<Side>(null)
@@ -194,6 +194,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
 
 
             <div
+              v-show="false"
               v-for="block in blocks"
               :key="block.id"
               class="block-item"
@@ -212,6 +213,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
                 <UIcon name="i-lucide-x" class="w-4 h-4" />
               </button>
             </div>
+
           </div>
         </div>
       </main>
