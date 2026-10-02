@@ -66,6 +66,7 @@ function startResize(e: MouseEvent) {
     </template>
 
     <template #body>
+      {{value}}
       <div
         v-inline-edit="{
           get: () => value,

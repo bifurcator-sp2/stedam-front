@@ -35,9 +35,9 @@ function nextId() {
   return `block-${Date.now()}-${uid++}`
 }
 
-// --- Загрузка компонентов из папки Compontnts ---
+// --- Загрузка компонентов из папки Components ---
 const blockComponents = import.meta.glob(
-  '~/components/Constructor/Compontnts/*.vue',
+  '~/components/Constructor/Components/*.vue',
   { eager: true },
 )
 
