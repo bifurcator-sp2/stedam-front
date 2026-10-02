@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+// ==================== Модель ====================
 const value = defineModel<[]>({ default: () => [] })
 
 const props = defineProps<{
   mode?: 'form' | 'body'
 }>()
 
+// ==================== Общие утилиты ====================
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
@@ -40,7 +42,21 @@ function toPx(v: unknown): string | undefined {
   return `${n * 4}px` // 1 = 4px, как в Tailwind
 }
 
-function paddingStyle(settings: Record<string, any>) {
+function toPxBorder(v: unknown): string | undefined {
+  if (v === null || v === undefined || v === '') return undefined
+  const n = Number(v)
+  if (Number.isNaN(n)) return undefined
+  return `${n}px` // толщина бордера 1 = 1px
+}
+
+function toPxRadius(v: unknown): string | undefined {
+  if (v === null || v === undefined || v === '') return undefined
+  const n = Number(v)
+  if (Number.isNaN(n)) return undefined
+  return `${n * 4}px` // радиус 1 = 4px
+}
+
+function paddingStyle(settings: Record<string, any>): Record<string, string> {
   const s: Record<string, string> = {}
   const map = {
     'padding-top': 'paddingTop',
@@ -56,8 +72,75 @@ function paddingStyle(settings: Record<string, any>) {
   return s
 }
 
-const previewImage = 'https://img.magnific.com/premium-photo/trees-park-autumn_1048944-1833622.jpg?semt=ais_hybrid&w=740&q=80'
+function borderStyle(settings: Record<string, any>): Record<string, string> {
+  const s: Record<string, string> = {}
 
+  // Цвет
+  const colorRaw = settings['color']
+  if (typeof colorRaw === 'string' && colorRaw) {
+    const name = colorRaw.replace(/^border-/, '')
+    if (name) {
+      s.borderColor = `var(--border-${name})`
+      s.borderStyle = 'solid'
+    }
+  }
+
+  // Толщины по сторонам
+  const map = {
+    top: 'borderTopWidth',
+    right: 'borderRightWidth',
+    bottom: 'borderBottomWidth',
+    left: 'borderLeftWidth',
+  } as const
+
+  for (const [jsonKey, cssKey] of Object.entries(map)) {
+    const px = toPxBorder(settings[jsonKey])
+    if (px) s[cssKey] = px
+  }
+
+  return s
+}
+
+function radiusStyle(settings: Record<string, any> | undefined): Record<string, string> {
+  if (!settings) return {}
+  const s: Record<string, string> = {}
+  const map = {
+    'top-left': 'borderTopLeftRadius',
+    'top-right': 'borderTopRightRadius',
+    'bottom-right': 'borderBottomRightRadius',
+    'bottom-left': 'borderBottomLeftRadius',
+  } as const
+
+  for (const [jsonKey, cssKey] of Object.entries(map)) {
+    const px = toPxRadius(settings[jsonKey])
+    if (px) s[cssKey] = px
+  }
+
+  return s
+}
+
+// Универсальный сборщик «border + radius» из путей схемы
+function collectBorderStyle(
+  borderPath: string,
+  radiusPath: string
+): Record<string, string> {
+  const border: Record<string, any> = {
+    color:  getDefault(value.value, `${borderPath}.color`),
+    top:    getDefault(value.value, `${borderPath}.top`),
+    right:  getDefault(value.value, `${borderPath}.right`),
+    bottom: getDefault(value.value, `${borderPath}.bottom`),
+    left:   getDefault(value.value, `${borderPath}.left`),
+  }
+  const radius: Record<string, any> = {
+    'top-left':     getDefault(value.value, `${radiusPath}.top-left`),
+    'top-right':    getDefault(value.value, `${radiusPath}.top-right`),
+    'bottom-right': getDefault(value.value, `${radiusPath}.bottom-right`),
+    'bottom-left':  getDefault(value.value, `${radiusPath}.bottom-left`),
+  }
+  return { ...borderStyle(border), ...radiusStyle(radius) }
+}
+
+// ==================== Превью-изображения ====================
 const previewImages = [
   'https://img.magnific.com/premium-photo/trees-park-autumn_1048944-1833622.jpg?semt=ais_hybrid&w=740&q=80',
   'https://i.pinimg.com/originals/39/08/8c/39088c9907bce387867eb149fc9fed54.jpg',
@@ -69,68 +152,113 @@ const previewImages = [
   'https://avatars.mds.yandex.net/get-mpic/5322414/img_id3536859793184490756.jpeg/orig',
 ]
 
-// ==================== Текст ====================
-const previewTitle = computed(() => getDefault(value.value, 'text.title'))
-const previewText = computed(() => getDefault(value.value, 'text.text'))
-const tag = computed(() => `Prose${getDefault(value.value, 'text.header-type').toUpperCase()}`)
-const textSize = computed(() => ' ' + getDefault(value.value, 'text.text-size') + ' ')
-//const textBcgClass = computed(() => ' ' + getDefault(value.value, 'text.background-color') + ' ')
-
-const textBcgStyle = computed(() => {
-  const v = getDefault(value.value, 'text.background-color')
-  // v = 'bg-definition'
-  const name = v?.replace(/^bg-/, '')
-  return name ? { backgroundColor: `var(--bg-${name})` } : {}
-})
-
-const paddings = computed(() => ({
-  'padding-top': getDefault(value.value, 'text.padding-top'),
-  'padding-right': getDefault(value.value, 'text.padding-right'),
-  'padding-bottom': getDefault(value.value, 'text.padding-bottom'),
-  'padding-left': getDefault(value.value, 'text.padding-left'),
-}))
-
-const paddingStyles = computed(() => paddingStyle(paddings.value ?? {}))
-
 // ==================== Layout ====================
 const layout = computed(() => getDefault(value.value, 'layout'))
 const needDisplayImage = computed(() => layout.value !== 'text')
 const needDisplayText = computed(() => layout.value !== 'image')
 
-const layoutClass = computed(() => ({
-  'text': ' ',
-  'image': ' ',
-  'text-right': 'flex-row',           // текст справа, картинка слева
-  'text-left': 'flex-row-reverse',    // текст слева, картинка справа
-  'text-top': 'flex-col-reverse',     // текст сверху, картинка снизу
-  'text-bottom': 'flex-col',          // текст снизу, картинка сверху
-}[layout.value ?? 'text-left']))
+const layoutClass = computed(
+  () =>
+    ({
+      'text': ' ',
+      'image': ' ',
+      'text-right': 'flex-row',          // текст справа, картинка слева
+      'text-left': 'flex-row-reverse',   // текст слева, картинка справа
+      'text-top': 'flex-col-reverse',    // текст сверху, картинка снизу
+      'text-bottom': 'flex-col',         // текст снизу, картинка сверху
+    }[layout.value ?? 'text-left'])
+)
+
 const layoutBcgStyle = computed(() => {
   const v = getDefault(value.value, 'background-color')
   const name = v?.replace(/^bg-/, '')
   return name ? { backgroundColor: `var(--bg-${name})` } : {}
 })
 
+const layoutBorderStyle = computed(() =>
+  collectBorderStyle('border', 'border.radius')
+)
+
+const layoutMarginStyle = computed(() =>
+  paddingStyle({
+    'padding-top':    getDefault(value.value, 'margin.top'),
+    'padding-right':  getDefault(value.value, 'margin.right'),
+    'padding-bottom': getDefault(value.value, 'margin.bottom'),
+    'padding-left':   getDefault(value.value, 'margin.left'),
+  })
+)
+
+const layoutPaddingStyle = computed(() =>
+  paddingStyle({
+    'padding-top':    getDefault(value.value, 'padding.top'),
+    'padding-right':  getDefault(value.value, 'padding.right'),
+    'padding-bottom': getDefault(value.value, 'padding.bottom'),
+    'padding-left':   getDefault(value.value, 'padding.left'),
+  })
+)
+
 // ==================== Пропорции текст / картинки ====================
 const cols = 12
 const textPercent = computed(() => Number(getDefault(value.value, 'text.cols')) / cols)
 const imagesPercent = computed(() => clamp(1 - textPercent.value, 0, 1))
 
-const textBlockStyle = computed(() => ({
-  flex: `0 0 ${textPercent.value * 100}%`,
-  ...paddingStyles.value,
-}))
+// ==================== Text ====================
+const previewTitle = computed(() => getDefault(value.value, 'text.title'))
+const previewText = computed(() => getDefault(value.value, 'text.text'))
 
-// ==================== Картинки ====================
-//const imagesBcgClass = computed(() => ' ' + getDefault(value.value, 'images.background-color') + ' ')
-const imagesBcgStyle = computed(() => {
-  const v = getDefault(value.value, 'images.background-color')
-  // v = 'bg-definition'
+const tag = computed(
+  () => `Prose${getDefault(value.value, 'text.header-type').toUpperCase()}`
+)
+const textSize = computed(() => ' ' + getDefault(value.value, 'text.text-size') + ' ')
+
+const textBcgStyle = computed(() => {
+  const v = getDefault(value.value, 'text.background-color')
   const name = v?.replace(/^bg-/, '')
   return name ? { backgroundColor: `var(--bg-${name})` } : {}
 })
 
+const textPaddingStyles = computed(() =>
+  paddingStyle({
+    'padding-top':    getDefault(value.value, 'text.padding.top'),
+    'padding-right':  getDefault(value.value, 'text.padding.right'),
+    'padding-bottom': getDefault(value.value, 'text.padding.bottom'),
+    'padding-left':   getDefault(value.value, 'text.padding.left'),
+  })
+)
 
+const textBorderStyle = computed(() =>
+  collectBorderStyle('text.border', 'text.border.radius')
+)
+
+const textBlockStyle = computed(() => ({
+  flex: `0 0 ${textPercent.value * 100}%`,
+  ...textPaddingStyles.value,
+}))
+
+const textCols = computed(() =>
+  clampInt(getDefault(value.value, 'text.text-cols'), 1, 4, 1)
+)
+
+// ==================== Images ====================
+const imagesBcgStyle = computed(() => {
+  const v = getDefault(value.value, 'images.background-color')
+  const name = v?.replace(/^bg-/, '')
+  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+})
+
+const imagesBorderStyle = computed(() =>
+  collectBorderStyle('images.border', 'images.border.radius')
+)
+
+// 👇 новое: padding для images по образцу text
+const imagesPaddingStyle = computed(() =>
+  paddingStyle({
+    'padding-top':    getDefault(value.value, 'images.padding.top'),
+    'padding-right':  getDefault(value.value, 'images.padding.right'),
+    'padding-bottom': getDefault(value.value, 'images.padding.bottom'),
+    'padding-left':   getDefault(value.value, 'images.padding.left'),
+  })
+)
 
 const imagesCount = computed(() => {
   const def = Number(getDefault(value.value, 'images.count'))
@@ -174,16 +302,17 @@ const imageHeightPx = computed(() => {
 
 const imageFitClass = computed(() => {
   const v = getDefault(value.value, 'images.image-size-strategy')
-  return ({
-    'fill': 'object-fill',
-    'contain': 'object-contain',
-    'cover': 'object-cover',
-    'none': 'object-none',
-    'scale-down': 'object-scale-down',
-  } as Record<string, string>)[v] ?? 'object-contain'
+  return (
+    ({
+      'fill': 'object-fill',
+      'contain': 'object-contain',
+      'cover': 'object-cover',
+      'none': 'object-none',
+      'scale-down': 'object-scale-down',
+    } as Record<string, string>)[v] ?? 'object-contain'
+  )
 })
 
-// Контейнер картинок
 const imagesContainerClass = computed(() => {
   if (isMasonry.value) return ''
   if (imagesFlexDirection.value === 'column') return ''
@@ -193,7 +322,8 @@ const imagesContainerClass = computed(() => {
 const imagesContainerStyle = computed(() => {
   const base: Record<string, string> = {
     flex: `0 0 ${imagesPercent.value * 100}%`,
-    padding: imagesPaddingPx.value,
+    // 👇 вместо жёсткого padding: imagesPaddingPx — теперь покомпонентный padding
+    ...imagesPaddingStyle.value,
   }
 
   if (isMasonry.value) {
@@ -212,7 +342,6 @@ const imagesContainerStyle = computed(() => {
   return base
 })
 
-// Класс картинки
 const imageItemClass = computed(() => {
   if (isMasonry.value) {
     return 'w-full h-auto block'
@@ -223,7 +352,6 @@ const imageItemClass = computed(() => {
   return `w-auto ${imageFitClass.value}`
 })
 
-// Inline-стиль картинки
 const imageItemStyle = computed(() => {
   if (isMasonry.value) {
     return {}
@@ -233,11 +361,6 @@ const imageItemStyle = computed(() => {
   }
   return { height: `${imageHeightPx.value}px`, width: 'auto' }
 })
-
-// ==================== Колонки текста ====================
-const textCols = computed(() =>
-  clampInt(getDefault(value.value, 'text.text-cols'), 1, 4, 1)
-)
 </script>
 
 <template>
@@ -247,23 +370,30 @@ const textCols = computed(() =>
     </template>
 
     <template #body>
-      <div>
-        <div :style="[layoutBcgStyle]" :class="['flex', 'items-start', 'justify-center', layoutClass]">
-          <div
-            v-if="needDisplayImage"
-            :class="[imagesContainerClass]"
-            :style="[imagesContainerStyle, imagesBcgStyle]"
-          >
-            <img
-              v-for="i in imagesCount"
-              :key="'img' + i"
-              :src="previewImages[(i - 1) % previewImages.length]"
-              :class="imageItemClass"
-              :style="imageItemStyle"
-            />
+      <div :style="[layoutMarginStyle]">
+        <div
+          :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle]"
+          :class="['flex', 'items-start', 'justify-center', layoutClass]"
+        >
+          <div>
+            <div
+              v-if="needDisplayImage"
+              :class="[imagesContainerClass]"
+              :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
+            >
+              <img
+                v-for="i in imagesCount"
+                :key="'img' + i"
+                :src="previewImages[(i - 1) % previewImages.length]"
+                :class="imageItemClass"
+                :style="imageItemStyle"
+              />
+            </div>
           </div>
-
-          <div v-if="needDisplayText" :style="[textBlockStyle, textBcgStyle]">
+          <div
+            v-if="needDisplayText"
+            :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
+          >
             <component :is="tag" class="mt-0">{{ previewTitle }}</component>
             <ProseP :style="{ columnCount: textCols }" :class="textSize">
               {{ previewText }}
