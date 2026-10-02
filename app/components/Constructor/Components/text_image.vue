@@ -72,6 +72,22 @@ function paddingStyle(settings: Record<string, any>): Record<string, string> {
   return s
 }
 
+function marginStyle(settings: Record<string, any>): Record<string, string> {
+  const s: Record<string, string> = {}
+  const map = {
+    'margin-top': 'marginTop',
+    'margin-right': 'marginRight',
+    'margin-bottom': 'marginBottom',
+    'margin-left': 'marginLeft',
+  } as const
+
+  for (const [jsonKey, cssKey] of Object.entries(map)) {
+    const px = toPx(settings[jsonKey])
+    if (px) s[cssKey] = px
+  }
+  return s
+}
+
 function borderStyle(settings: Record<string, any>): Record<string, string> {
   const s: Record<string, string> = {}
 
@@ -140,6 +156,26 @@ function collectBorderStyle(
   return { ...borderStyle(border), ...radiusStyle(radius) }
 }
 
+// Универсальный сборщик padding из пути схемы
+function collectPaddingStyle(basePath: string): Record<string, string> {
+  return paddingStyle({
+    'padding-top':    getDefault(value.value, `${basePath}.top`),
+    'padding-right':  getDefault(value.value, `${basePath}.right`),
+    'padding-bottom': getDefault(value.value, `${basePath}.bottom`),
+    'padding-left':   getDefault(value.value, `${basePath}.left`),
+  })
+}
+
+// Универсальный сборщик margin из пути схемы
+function collectMarginStyle(basePath: string): Record<string, string> {
+  return marginStyle({
+    'margin-top':    getDefault(value.value, `${basePath}.top`),
+    'margin-right':  getDefault(value.value, `${basePath}.right`),
+    'margin-bottom': getDefault(value.value, `${basePath}.bottom`),
+    'margin-left':   getDefault(value.value, `${basePath}.left`),
+  })
+}
+
 // ==================== Превью-изображения ====================
 const previewImages = [
   'https://img.magnific.com/premium-photo/trees-park-autumn_1048944-1833622.jpg?semt=ais_hybrid&w=740&q=80',
@@ -179,23 +215,8 @@ const layoutBorderStyle = computed(() =>
   collectBorderStyle('border', 'border.radius')
 )
 
-const layoutMarginStyle = computed(() =>
-  paddingStyle({
-    'padding-top':    getDefault(value.value, 'margin.top'),
-    'padding-right':  getDefault(value.value, 'margin.right'),
-    'padding-bottom': getDefault(value.value, 'margin.bottom'),
-    'padding-left':   getDefault(value.value, 'margin.left'),
-  })
-)
-
-const layoutPaddingStyle = computed(() =>
-  paddingStyle({
-    'padding-top':    getDefault(value.value, 'padding.top'),
-    'padding-right':  getDefault(value.value, 'padding.right'),
-    'padding-bottom': getDefault(value.value, 'padding.bottom'),
-    'padding-left':   getDefault(value.value, 'padding.left'),
-  })
-)
+const layoutMarginStyle = computed(() => collectMarginStyle('margin'))
+const layoutPaddingStyle = computed(() => collectPaddingStyle('padding'))
 
 // ==================== Пропорции текст / картинки ====================
 const cols = 12
@@ -217,14 +238,8 @@ const textBcgStyle = computed(() => {
   return name ? { backgroundColor: `var(--bg-${name})` } : {}
 })
 
-const textPaddingStyles = computed(() =>
-  paddingStyle({
-    'padding-top':    getDefault(value.value, 'text.padding.top'),
-    'padding-right':  getDefault(value.value, 'text.padding.right'),
-    'padding-bottom': getDefault(value.value, 'text.padding.bottom'),
-    'padding-left':   getDefault(value.value, 'text.padding.left'),
-  })
-)
+const textPaddingStyle = computed(() => collectPaddingStyle('text.padding'))
+const textMarginStyle = computed(() => collectMarginStyle('text.margin'))
 
 const textBorderStyle = computed(() =>
   collectBorderStyle('text.border', 'text.border.radius')
@@ -232,7 +247,8 @@ const textBorderStyle = computed(() =>
 
 const textBlockStyle = computed(() => ({
   flex: `0 0 ${textPercent.value * 100}%`,
-  ...textPaddingStyles.value,
+  ...textPaddingStyle.value,
+  ...textMarginStyle.value,
 }))
 
 const textCols = computed(() =>
@@ -250,15 +266,8 @@ const imagesBorderStyle = computed(() =>
   collectBorderStyle('images.border', 'images.border.radius')
 )
 
-// 👇 новое: padding для images по образцу text
-const imagesPaddingStyle = computed(() =>
-  paddingStyle({
-    'padding-top':    getDefault(value.value, 'images.padding.top'),
-    'padding-right':  getDefault(value.value, 'images.padding.right'),
-    'padding-bottom': getDefault(value.value, 'images.padding.bottom'),
-    'padding-left':   getDefault(value.value, 'images.padding.left'),
-  })
-)
+const imagesPaddingStyle = computed(() => collectPaddingStyle('images.padding'))
+const imagesMarginStyle = computed(() => collectMarginStyle('images.margin'))
 
 const imagesCount = computed(() => {
   const def = Number(getDefault(value.value, 'images.count'))
@@ -274,17 +283,11 @@ const distance = computed(() =>
   clampInt(getDefault(value.value, 'images.distance'), 0, 6, 1)
 )
 
-const imagesPadding = computed(() =>
-  clampInt(getDefault(value.value, 'images.padding'), 0, 12, 0)
-)
-
 const distancePx = computed(() => {
   const v = Number(getDefault(value.value, 'images.distance'))
   if (!Number.isFinite(v) || v < 0) return 16
   return v * 4
 })
-
-const imagesPaddingPx = computed(() => `${imagesPadding.value * 4}px`)
 
 const imagesFlexDirection = computed(() => {
   const v = getDefault(value.value, 'images.flex-direction')
@@ -322,8 +325,8 @@ const imagesContainerClass = computed(() => {
 const imagesContainerStyle = computed(() => {
   const base: Record<string, string> = {
     flex: `0 0 ${imagesPercent.value * 100}%`,
-    // 👇 вместо жёсткого padding: imagesPaddingPx — теперь покомпонентный padding
     ...imagesPaddingStyle.value,
+    ...imagesMarginStyle.value,
   }
 
   if (isMasonry.value) {
