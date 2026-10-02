@@ -105,6 +105,11 @@ const layoutClass = computed(() => ({
   'text-top': 'flex-col-reverse',     // текст сверху, картинка снизу
   'text-bottom': 'flex-col',          // текст снизу, картинка сверху
 }[layout.value ?? 'text-left']))
+const layoutBcgStyle = computed(() => {
+  const v = getDefault(value.value, 'background-color')
+  const name = v?.replace(/^bg-/, '')
+  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+})
 
 // ==================== Пропорции текст / картинки ====================
 const cols = 12
@@ -243,7 +248,7 @@ const textCols = computed(() =>
 
     <template #body>
       <div>
-        <div :class="'flex items-start justify-center ' + layoutClass">
+        <div :style="[layoutBcgStyle]" :class="['flex', 'items-start', 'justify-center', layoutClass]">
           <div
             v-if="needDisplayImage"
             :class="[imagesContainerClass]"
