@@ -194,9 +194,6 @@ const blocks = ref<any[]>([])
       <div class="p-6">
         <div>
             <ConstructorBlocksConstructor />
-            <!-- Отладка: посмотреть структуру -->
-            <pre class="mt-4 text-xs">{{ blocks }}</pre>
-
         </div>
       </div>
     </main>

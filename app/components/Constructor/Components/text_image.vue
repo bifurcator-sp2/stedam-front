@@ -401,6 +401,7 @@ const imageItemStyle = computed(() => {
             <ProseP v-if="previewText" :style="{ columnCount: textCols }" :class="textSize">
               {{ previewText }}
             </ProseP>
+
           </div>
         </div>
       </div>

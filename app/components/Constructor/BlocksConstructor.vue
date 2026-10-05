@@ -24,13 +24,37 @@ interface BlockType {
 interface BlockItem {
   id: number
   code: string
-  block_type_id: number,
+  block_type_id: number
   title: string
   description: string
   icon: string
   schema: SettingNode[]
   default_settings: Record<string, unknown>
   settings: Record<string, unknown>
+}
+
+interface BlockResource {
+  id: number
+  block_type_id: number
+  code: string | null
+  name: string | null
+  title: string | null
+  description: string | null
+  settings: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+interface BlocksPage {
+  data: BlockResource[]
+  meta: {
+    current_page: number
+    per_page: number
+    total: number
+    last_page: number
+    from: number | null
+    to: number | null
+  }
 }
 
 // ==================== Ресайз панелей ====================
@@ -130,20 +154,13 @@ const router = useRouter()
 
 // ==================== Хелпер: иконка ====================
 
-function iconOf(type: BlockType): string {
+function iconOf(type: Pick<BlockType, 'default_settings'>): string {
   return (type.default_settings?.icon as string | undefined) ?? 'i-lucide-square'
 }
 
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
-const centerTitle = computed(() => {
-  if (!editingBlock.value) return 'Структура'
-  return editingBlock.value.id > 0
-    ? `Редактирование блока №${editingBlock.value.id}`
-    : 'Создание блока'
-})
-
 
 function createBlockFromType(type: BlockType): BlockItem {
   return {
@@ -167,9 +184,72 @@ function addBlock(type: BlockType) {
   })
 }
 
-// Реакция на ?addBlock=<code> в URL:
-// — срабатывает при открытии страницы (immediate)
-// — и когда подгрузятся blockTypes (async)
+// ==================== Режим списка ====================
+
+const listLoading = ref(false)
+const listError = ref<string | null>(null)
+const blocksPage = ref<BlocksPage | null>(null)
+
+const listPerPage = 20
+
+const listPage = computed(() => {
+  const raw = route.query.page
+  const v = Array.isArray(raw) ? raw[0] : raw
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : 1
+})
+
+const listTypeCode = computed<string | null>(() => {
+  const raw = route.query.type
+  const v = Array.isArray(raw) ? raw[0] : raw
+  return typeof v === 'string' && v ? v : null
+})
+
+const listTypeName = computed<string | null>(() => {
+  if (!listTypeCode.value) return null
+  const t = blockTypes.value?.find((x) => x.code === listTypeCode.value)
+  return t?.name ?? listTypeCode.value
+})
+
+const centerTitle = computed(() => {
+  if (editingBlock.value) {
+    return editingBlock.value.id > 0
+      ? `Редактирование блока №${editingBlock.value.id}`
+      : 'Создание блока'
+  }
+
+  if (listTypeCode.value) {
+    return `Блоки типа ${listTypeName.value}`
+  }
+
+  return 'Все блоки'
+})
+
+async function loadBlocks() {
+  listLoading.value = true
+  listError.value = null
+  try {
+    const res = await api.get<BlocksPage>('/blocks', {
+      params: {
+        page: listPage.value,
+        per_page: listPerPage,
+        ...(listTypeCode.value ? { code: listTypeCode.value } : {}),
+      },
+    })
+
+    // api.get уже возвращает { data: [...], meta: {...} }
+    blocksPage.value = res as BlocksPage
+  } catch (e) {
+    console.error('[loadBlocks] failed', e)
+    listError.value = 'Не удалось загрузить список блоков'
+    blocksPage.value = null
+  } finally {
+    listLoading.value = false
+  }
+}
+
+// ==================== Watch: ?addBlock ====================
+
 watch(
   () => [route.query.addBlock, blockTypes.value] as const,
   ([code, types]) => {
@@ -185,6 +265,7 @@ watch(
   { immediate: true },
 )
 
+// ==================== Watch: ?id ====================
 
 watch(
   () => [route.query.id, blockTypes.value] as const,
@@ -195,24 +276,20 @@ watch(
     const numId = Number(id)
     if (!Number.isFinite(numId)) return
 
-    // уже загружен этот же блок — не дёргаем API повторно
     if (editingBlock.value?.id === numId) return
 
     try {
       const res = await api.get<{ data: BlockResource } | BlockResource>(`/blocks/${numId}`)
       const block = (res as { data?: BlockResource }).data ?? (res as BlockResource)
 
-      // 1. Находим тип блока в уже загруженном blockTypes
       const type = types.find((t) => t.id === block.block_type_id)
       if (!type) {
         console.warn('[load block] block_type not found:', block.block_type_id)
         return
       }
 
-      // 2. Создаём BlockItem «как из палитры»
       const item = createBlockFromType(type)
 
-      // 3. Досыпаем данными самого блока
       editingBlock.value = {
         ...item,
         id:          block.id,
@@ -227,12 +304,47 @@ watch(
   { immediate: true },
 )
 
+// ==================== Watch: список блоков ====================
 
-// Заглушка: получить список блоков по коду типа
-function GetBlocksList(code: string): BlockType[] {
-  // eslint-disable-next-line no-console
-  console.log('[GetBlocksList] stub called with code =', code)
-  return []
+watch(
+  () => [route.query.type, route.query.page, editingBlock.value?.id] as const,
+  ([, , editingId]) => {
+    // если открыт конкретный блок — список не нужен
+    if (editingId !== null && editingId !== undefined) return
+    loadBlocks()
+  },
+  { immediate: true },
+)
+
+// ==================== Переходы ====================
+
+function openTypeList(code: string) {
+  editingBlock.value = null
+  router.replace({
+    query: { type: code, page: '1' },
+  })
+}
+
+function showAllBlocks() {
+  editingBlock.value = null
+  router.replace({
+    query: { page: '1' },
+  })
+}
+
+function openBlock(id: number) {
+  router.replace({
+    query: { id: String(id) },
+  })
+}
+
+function goToPage(page: number) {
+  router.replace({
+    query: {
+      ...(listTypeCode.value ? { type: listTypeCode.value } : {}),
+      page: String(page),
+    },
+  })
 }
 
 // ==================== Обновление настроек выбранного блока ====================
@@ -242,34 +354,9 @@ function updateSelectedSettings(value: Record<string, unknown>) {
   editingBlock.value.settings = value
 }
 
-// ==================== Очистка query ====================
-
-function clearAddBlockQuery() {
-  if (!('addBlock' in route.query)) return
-
-  const { addBlock: _drop, ...rest } = route.query
-  router.replace({ query: rest })
-}
-
 // ==================== Сохранение ====================
 
 const saving = ref(false)
-
-// ==================== Сохранение ====================
-
-interface BlockResource {
-  id: number
-  block_type_id: number
-  code: string
-  name: string
-  title: string | null
-  description: string | null
-  settings: Record<string, unknown>
-  created_at: string
-  updated_at: string
-}
-
-
 
 async function save() {
   const block = editingBlock.value
@@ -298,7 +385,7 @@ async function save() {
       id:          saved.id,
       title:       saved.title ?? block.title,
       description: saved.description ?? '',
-      settings:    (saved.settings as SettingNode[] | undefined) ?? block.settings,
+      settings:    saved.settings ?? block.settings,
     }
 
     router.replace({
@@ -313,7 +400,7 @@ async function save() {
 
 function reset() {
   editingBlock.value = null
-  router.replace({ query: {} })
+  router.replace({ query: { page: '1' } })
 }
 </script>
 
@@ -325,6 +412,21 @@ function reset() {
         <header class="panel-header">Типы блоков</header>
         <div class="panel-body">
           <div class="palette-list">
+            <!-- Все блоки -->
+            <div
+              class="palette-item"
+              :class="{ 'palette-item-active': !listTypeCode && !editingBlock }"
+            >
+              <button
+                type="button"
+                class="palette-name"
+                @click.stop="showAllBlocks"
+              >
+                <UIcon name="i-lucide-list" class="w-4 h-4 shrink-0" />
+                <span class="truncate">Все блоки</span>
+              </button>
+            </div>
+
             <div v-if="pending" class="empty-state">Загрузка…</div>
             <div v-else-if="error" class="empty-state">
               Не удалось загрузить типы блоков
@@ -335,6 +437,7 @@ function reset() {
                 v-for="type in blockTypes ?? []"
                 :key="type.code"
                 class="palette-item"
+                :class="{ 'palette-item-active': listTypeCode === type.code && !editingBlock }"
                 :title="type.description ?? type.name"
               >
                 <!-- Кнопка «+» — создаёт новый editingBlock из типа -->
@@ -347,11 +450,11 @@ function reset() {
                   <UIcon name="i-lucide-plus" class="w-4 h-4 shrink-0" />
                 </button>
 
-                <!-- Название — заглушка GetBlocksList -->
+                <!-- Название — переход к списку блоков этого типа -->
                 <button
                   type="button"
                   class="palette-name"
-                  @click.stop="GetBlocksList(type.code)"
+                  @click.stop="openTypeList(type.code)"
                 >
                   <UIcon :name="iconOf(type)" class="w-4 h-4 shrink-0" />
                   <span class="truncate">{{ type.name }}</span>
@@ -371,7 +474,7 @@ function reset() {
         <div class="resizer-bar" />
       </div>
 
-      <!-- === ЦЕНТР: превью блока === -->
+      <!-- === ЦЕНТР === -->
       <main class="panel panel-center">
         <header class="panel-header">
           <div class="panel-header-row">
@@ -389,17 +492,87 @@ function reset() {
           </div>
         </header>
         <div class="panel-body">
-          <div v-if="!editingBlock" class="empty-state">
-            Нет блока. Добавьте из палитры слева.
-          </div>
+          <!-- === Режим редактирования конкретного блока === -->
+          <template v-if="editingBlock">
+            <div class="bg-default w-full max-w-[640px] mx-auto">
+              <TextBlock
+                :key="editingBlock.id"
+                :mode="'body'"
+                v-model="editingBlock.settings"
+              />
+            </div>
+          </template>
 
-          <div v-else class="bg-default w-full max-w-[640px] mx-auto">
-            <TextBlock
-              :key="editingBlock.id"
-              :mode="'body'"
-              v-model="editingBlock.settings"
-            />
-          </div>
+          <!-- === Режим списка блоков === -->
+          <template v-else>
+            <div v-if="listLoading" class="empty-state">Загрузка…</div>
+
+            <div v-else-if="listError" class="empty-state">
+              {{ listError }}
+            </div>
+
+            <div
+              v-else-if="!blocksPage || blocksPage.data.length === 0"
+              class="empty-state"
+            >
+              {{ listTypeCode ? 'Блоков этого типа пока нет' : 'Блоков пока нет' }}
+            </div>
+
+            <template v-else>
+              <div class="blocks-list">
+                <button
+                  v-for="item in blocksPage.data"
+                  :key="item.id"
+                  type="button"
+                  class="block-card"
+                  @click="openBlock(item.id)"
+                >
+                  <div class="block-card-main">
+                    <div class="block-card-title">
+                      {{ item.title || item.name || `Блок №${item.id}` }}
+                    </div>
+                    <div v-if="item.description" class="block-card-desc">
+                      {{ item.description }}
+                    </div>
+                    <div class="block-card-meta">
+                      <span v-if="item.name" class="block-card-chip">{{ item.name }}</span>
+                      <span class="block-card-id">#{{ item.id }}</span>
+                    </div>
+                  </div>
+                  <UIcon name="i-lucide-chevron-right" class="block-card-arrow" />
+                </button>
+              </div>
+
+              <!-- Пагинация -->
+              <div v-if="blocksPage.meta.last_page > 1" class="pagination">
+                <UButton
+                  icon="i-lucide-chevron-left"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  :disabled="blocksPage.meta.current_page <= 1"
+                  @click="goToPage(blocksPage.meta.current_page - 1)"
+                >
+                  Назад
+                </UButton>
+
+                <span class="pagination-info">
+                  {{ blocksPage.meta.current_page }} / {{ blocksPage.meta.last_page }}
+                </span>
+
+                <UButton
+                  icon="i-lucide-chevron-right"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  :disabled="blocksPage.meta.current_page >= blocksPage.meta.last_page"
+                  @click="goToPage(blocksPage.meta.current_page + 1)"
+                >
+                  Вперёд
+                </UButton>
+              </div>
+            </template>
+          </template>
         </div>
       </main>
 
@@ -589,6 +762,12 @@ function reset() {
   background: var(--ui-bg, #ffffff);
 }
 
+.palette-item-active {
+  border-color: var(--ui-primary, #3b82f6);
+  background: var(--ui-bg, #ffffff);
+  box-shadow: 0 0 0 2px var(--ui-primary, #3b82f6) inset;
+}
+
 .palette-add {
   flex-shrink: 0;
   display: inline-flex;
@@ -637,6 +816,106 @@ function reset() {
 
 .palette-name:active {
   background: var(--ui-bg-muted, rgba(59, 130, 246, 0.14));
+}
+
+/* ==================== Список блоков (центр) ==================== */
+
+.blocks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.block-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--ui-border, #e5e7eb);
+  background: var(--ui-bg, #ffffff);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.block-card:hover {
+  border-color: var(--ui-primary, #3b82f6);
+  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.08);
+}
+
+.block-card-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.block-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ui-text, #111827);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block-card-desc {
+  font-size: 12px;
+  color: var(--ui-text-muted, #6b7280);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.block-card-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ui-bg-muted, rgba(107, 114, 128, 0.12));
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.block-card-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--ui-text-muted, #9ca3af);
+}
+
+.block-card-arrow {
+  flex-shrink: 0;
+  color: var(--ui-text-muted, #9ca3af);
+}
+
+/* ==================== Пагинация ==================== */
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 12px 24px;
+}
+
+.pagination-info {
+  font-size: 12px;
+  color: var(--ui-text-muted, #6b7280);
+  min-width: 60px;
+  text-align: center;
 }
 
 /* ==================== Пустое состояние ==================== */

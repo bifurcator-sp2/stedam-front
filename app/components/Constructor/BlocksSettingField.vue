@@ -58,6 +58,12 @@ function updateChild(index: number, updated: SettingItem) {
           size="xs"
           class="field-control"
         />
+        <USwitch
+          v-else-if="model.type === 'bool'"
+          v-model="model.default"
+          size="xs"
+          class="field-control"
+        />
       </div>
     </template>
 
