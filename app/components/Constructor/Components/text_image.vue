@@ -397,9 +397,26 @@ const imageItemStyle = computed(() => {
             v-if="needDisplayText"
             :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
           >
-            <component v-if="previewTitle" :is="tag" class="mt-0">{{ previewTitle }}</component>
-            <ProseP v-if="previewText" :style="{ columnCount: textCols }" :class="textSize">
-              {{ previewText }}
+            <component
+              v-if="previewTitle"
+              :is="tag" class="mt-0 block-title-break"
+              v-inline-edit="{
+              get: () => previewTitle,
+              set: (v: string) => (previewTitle = v),
+              renderFormulas: true,
+              }"
+            ></component>
+            <ProseP
+              v-if="previewText"
+              :style="{ columnCount: textCols }"
+              :class="[textSize, 'block-title-break']"
+              v-inline-edit="{
+              get: () => previewText,
+              set: (v: string) => (previewText = v),
+              renderFormulas: true,
+              }"
+              class="text-default inline-edit"
+            >
             </ProseP>
 
           </div>
@@ -412,5 +429,13 @@ const imageItemStyle = computed(() => {
 <style scoped>
 img:last-child {
   margin-bottom: 0;
+}
+
+.block-title-break,
+.block-title-break :deep(*) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  hyphens: auto;
+  min-width: 0;   /* важно, если внутри flex/grid — иначе не сработает */
 }
 </style>
