@@ -2,6 +2,7 @@
 import { ref, onBeforeUnmount, onMounted, computed } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
+import LoadingOverlay from '~/components/LoadingOverlay.vue'
 
 // ==================== Типы ====================
 
@@ -24,6 +25,7 @@ interface BlockItem {
   id: string
   code: string
   name: string
+  description: string
   icon: string
   schema: SettingNode[]
   default_settings: Record<string, unknown>
@@ -148,6 +150,7 @@ function addBlock(type: BlockType) {
     id: `b${Date.now()}`,
     code: type.code,
     name: type.name,
+    name: type.description,
     icon: iconOf(type),
     schema: type.schema ?? [],
     default_settings: type.default_settings ?? {},
@@ -168,6 +171,27 @@ function updateSelectedSettings(value: Record<string, unknown>) {
   const block = selectedBlock.value
   if (! block) return
   block.settings = value
+}
+
+// ==================== Сохранение ====================
+
+const saving = ref(false)
+
+async function save() {
+  const block = selectedBlock.value
+  if (! block) return
+
+  saving.value = true
+  try {
+    // TODO: заменить на реальный запрос к API
+    // await api.post('/blocks', {
+    //   code: block.code,
+    //   settings: block.settings,
+    // })
+    await new Promise((resolve) => setTimeout(resolve, 800)) // заглушка
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -261,17 +285,37 @@ function updateSelectedSettings(value: Record<string, unknown>) {
 
       <!-- === ПРАВАЯ ПАНЕЛЬ: свойства === -->
       <aside class="panel panel-right">
-        <header class="panel-header">Свойства</header>
-        <div class="panel-body">
-          <div v-if="!selectedBlock" class="empty-state">
-            Выберите блок в центре.
+        <header class="panel-header">
+          <div class="panel-header-row">
+            <span>Свойства</span>
+            <UButton
+              icon="i-lucide-save"
+              size="xs"
+              color="primary"
+              variant="soft"
+              :loading="saving"
+              :disabled="!selectedBlock || saving"
+              @click="save"
+            >
+              Сохранить
+            </UButton>
           </div>
+        </header>
+        <div class="panel-body">
+          <LoadingOverlay :loading="saving">
+            <div v-if="!selectedBlock" class="empty-state">
+              Выберите блок в центре.
+            </div>
 
-          <BlocksSettingsPanel
-            v-else
-            :settings="selectedBlock.settings"
-            @update:model-value="updateSelectedSettings"
-          />
+            <BlocksSettingsPanel
+              v-else
+              :settings="selectedBlock.settings"
+              :id="selectedBlock.id"
+              :title="selectedBlock.title"
+              :description="selectedBlock.description"
+              @update:model-value="updateSelectedSettings"
+            />
+          </LoadingOverlay>
         </div>
       </aside>
     </div>
@@ -328,6 +372,15 @@ function updateSelectedSettings(value: Record<string, unknown>) {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border-bottom: 1px solid var(--ui-border, #e5e7eb);
+}
+
+/* Строка внутри правого хедера: заголовок + кнопка */
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
 }
 
 .panel-body {

@@ -5,6 +5,10 @@ const props = defineProps<{
   settings: SettingItem[] | null | undefined
 }>()
 
+const name = defineModel<string | null>('name')
+const description = defineModel<string | null>('description')
+const id = defineModel<number | null>('id')
+
 const emit = defineEmits<{
   (e: 'update:settings', value: SettingItem[]): void
 }>()
@@ -18,7 +22,17 @@ function updateItem(index: number, updated: SettingItem) {
 </script>
 
 <template>
-  <div class="properties">
+  <div class="properties">{{id}}
+    <label class="field-label">Название блока</label>
+    <UInput
+      v-model="name"
+      size="xs"
+    />
+    <label class="field-label">Описание блока</label>
+    <UTextarea
+      v-model="description"
+      size="xs"
+    />
     <template v-if="settings?.length">
       <BlocksSettingField
         v-for="(item, index) in settings"
