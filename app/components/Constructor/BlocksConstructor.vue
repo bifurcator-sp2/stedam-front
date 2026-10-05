@@ -137,6 +137,13 @@ function iconOf(type: BlockType): string {
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
+const centerTitle = computed(() => {
+  if (!editingBlock.value) return 'Структура'
+  return editingBlock.value.id > 0
+    ? `Редактирование блока №${editingBlock.value.id}`
+    : 'Создание блока'
+})
+
 
 function createBlockFromType(type: BlockType): BlockItem {
   return {
@@ -156,7 +163,7 @@ function addBlock(type: BlockType) {
   editingBlock.value = createBlockFromType(type)
 
   router.replace({
-    query: { ...route.query, addBlock: type.code },
+    query: { addBlock: type.code },
   })
 }
 
@@ -177,6 +184,49 @@ watch(
   },
   { immediate: true },
 )
+
+
+watch(
+  () => [route.query.id, blockTypes.value] as const,
+  async ([id, types]) => {
+    if (!id || typeof id !== 'string') return
+    if (!types) return
+
+    const numId = Number(id)
+    if (!Number.isFinite(numId)) return
+
+    // уже загружен этот же блок — не дёргаем API повторно
+    if (editingBlock.value?.id === numId) return
+
+    try {
+      const res = await api.get<{ data: BlockResource } | BlockResource>(`/blocks/${numId}`)
+      const block = (res as { data?: BlockResource }).data ?? (res as BlockResource)
+
+      // 1. Находим тип блока в уже загруженном blockTypes
+      const type = types.find((t) => t.id === block.block_type_id)
+      if (!type) {
+        console.warn('[load block] block_type not found:', block.block_type_id)
+        return
+      }
+
+      // 2. Создаём BlockItem «как из палитры»
+      const item = createBlockFromType(type)
+
+      // 3. Досыпаем данными самого блока
+      editingBlock.value = {
+        ...item,
+        id:          block.id,
+        title:       block.title ?? item.title,
+        description: block.description ?? item.description,
+        settings:    block.settings ?? item.settings,
+      }
+    } catch (e) {
+      console.error('[load block by id] failed', e)
+    }
+  },
+  { immediate: true },
+)
+
 
 // Заглушка: получить список блоков по коду типа
 function GetBlocksList(code: string): BlockType[] {
@@ -227,23 +277,33 @@ async function save() {
 
   saving.value = true
   try {
-    const { data } = await api.post<{ data: BlockResource }>('/blocks', {
-      block_type_id: block.block_type_id,   // ← было block.code (строка) — надо число
-      title:         block.name,
+    const isUpdate = block.id > 0
+
+    const payload = {
+      block_type_id: block.block_type_id,
+      title:         block.title,
       description:   block.description,
       settings:      block.settings,
-    })
-
-    // Обновляем editingBlock данными с сервера (реальный id и т.п.)
-    editingBlock.value = {
-      ...block,
-      id: data.data.id,
-      description: data.data.description ?? '',
-      settings: data.data.settings ?? block.settings,
     }
 
-    // Чистим ?addBlock=... из URL после успешного сохранения
-    clearAddBlockQuery()
+    const res = isUpdate
+      ? await api.put<{ data: BlockResource } | BlockResource>(`/blocks/${block.id}`, payload)
+      : await api.post<{ data: BlockResource } | BlockResource>('/blocks', payload)
+
+    const saved: BlockResource =
+      (res as { data?: BlockResource }).data ?? (res as BlockResource)
+
+    editingBlock.value = {
+      ...block,
+      id:          saved.id,
+      title:       saved.title ?? block.title,
+      description: saved.description ?? '',
+      settings:    (saved.settings as SettingNode[] | undefined) ?? block.settings,
+    }
+
+    router.replace({
+      query: { id: String(saved.id) },
+    })
   } finally {
     saving.value = false
   }
@@ -253,7 +313,7 @@ async function save() {
 
 function reset() {
   editingBlock.value = null
-  clearAddBlockQuery()
+  router.replace({ query: {} })
 }
 </script>
 
@@ -315,7 +375,7 @@ function reset() {
       <main class="panel panel-center">
         <header class="panel-header">
           <div class="panel-header-row">
-            <span>Структура</span>
+            <span>{{ centerTitle }}</span>
             <UButton
               v-if="editingBlock"
               icon="i-lucide-rotate-ccw"
@@ -379,6 +439,7 @@ function reset() {
             <BlocksSettingsPanel
               v-else
               :settings="editingBlock.settings"
+              v-model:id="editingBlock.id"
               v-model:title="editingBlock.title"
               v-model:description="editingBlock.description"
               @update:settings="updateSelectedSettings"
