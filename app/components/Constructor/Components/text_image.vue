@@ -24,36 +24,67 @@ function clampInt(
   return Math.min(Math.max(Math.round(n), min), max)
 }
 
-function getDefault(blocks: [] | undefined, path: string): string {
-  let list = blocks
-  let found: Block | undefined
+function getDefault(blocks: any[] | undefined, path: string): string {
+  let list: any[] | undefined = blocks
+  let found: any | undefined
   for (const key of path.split('.')) {
-    found = list?.find(b => b.key === key)
+    found = list?.find((b: any) => b.key === key)
     if (!found) return ''
     list = found.children
   }
   return found?.default ?? ''
 }
 
+/**
+ * Записать новое значение в дерево схемы по пути 'a.b.c'.
+ * Возвращает true, если узел найден и обновлён.
+ */
+function setDefault(
+  blocks: any[] | undefined,
+  path: string,
+  newValue: unknown,
+): boolean {
+  if (!blocks) return false
+
+  const keys = path.split('.')
+  const last = keys.pop()
+  if (!last) return false
+
+  let current: any[] | undefined = blocks
+  let parent: any | undefined
+
+  for (const key of keys) {
+    parent = current?.find((b: any) => b.key === key)
+    if (!parent) return false
+    current = parent.children
+  }
+
+  const target = current?.find((b: any) => b.key === last)
+  if (!target) return false
+
+  target.default = newValue
+  return true
+}
+
 function toPx(v: unknown): string | undefined {
   if (v === null || v === undefined || v === '') return undefined
   const n = Number(v)
   if (Number.isNaN(n)) return undefined
-  return `${n * 4}px` // 1 = 4px, как в Tailwind
+  return `${n * 4}px`
 }
 
 function toPxBorder(v: unknown): string | undefined {
   if (v === null || v === undefined || v === '') return undefined
   const n = Number(v)
   if (Number.isNaN(n)) return undefined
-  return `${n}px` // толщина бордера 1 = 1px
+  return `${n}px`
 }
 
 function toPxRadius(v: unknown): string | undefined {
   if (v === null || v === undefined || v === '') return undefined
   const n = Number(v)
   if (Number.isNaN(n)) return undefined
-  return `${n * 4}px` // радиус 1 = 4px
+  return `${n * 4}px`
 }
 
 function paddingStyle(settings: Record<string, any>): Record<string, string> {
@@ -91,7 +122,6 @@ function marginStyle(settings: Record<string, any>): Record<string, string> {
 function borderStyle(settings: Record<string, any>): Record<string, string> {
   const s: Record<string, string> = {}
 
-  // Цвет
   const colorRaw = settings['color']
   if (typeof colorRaw === 'string' && colorRaw) {
     const name = colorRaw.replace(/^border-/, '')
@@ -101,7 +131,6 @@ function borderStyle(settings: Record<string, any>): Record<string, string> {
     }
   }
 
-  // Толщины по сторонам
   const map = {
     top: 'borderTopWidth',
     right: 'borderRightWidth',
@@ -135,7 +164,6 @@ function radiusStyle(settings: Record<string, any> | undefined): Record<string, 
   return s
 }
 
-// Универсальный сборщик «border + radius» из путей схемы
 function collectBorderStyle(
   borderPath: string,
   radiusPath: string
@@ -156,7 +184,6 @@ function collectBorderStyle(
   return { ...borderStyle(border), ...radiusStyle(radius) }
 }
 
-// Универсальный сборщик padding из пути схемы
 function collectPaddingStyle(basePath: string): Record<string, string> {
   return paddingStyle({
     'padding-top':    getDefault(value.value, `${basePath}.top`),
@@ -166,7 +193,6 @@ function collectPaddingStyle(basePath: string): Record<string, string> {
   })
 }
 
-// Универсальный сборщик margin из пути схемы
 function collectMarginStyle(basePath: string): Record<string, string> {
   return marginStyle({
     'margin-top':    getDefault(value.value, `${basePath}.top`),
@@ -198,10 +224,10 @@ const layoutClass = computed(
     ({
       'text': ' ',
       'image': ' ',
-      'text-right': 'flex-row',          // текст справа, картинка слева
-      'text-left': 'flex-row-reverse',   // текст слева, картинка справа
-      'text-top': 'flex-col-reverse',    // текст сверху, картинка снизу
-      'text-bottom': 'flex-col',         // текст снизу, картинка сверху
+      'text-right': 'flex-row',
+      'text-left': 'flex-row-reverse',
+      'text-top': 'flex-col-reverse',
+      'text-bottom': 'flex-col',
     }[layout.value ?? 'text-left'])
 )
 
@@ -254,6 +280,31 @@ const textBlockStyle = computed(() => ({
 const textCols = computed(() =>
   clampInt(getDefault(value.value, 'text.text-cols'), 1, 4, 1)
 )
+
+/**
+ * Записать значение в дерево схемы и форсировать эмит update:modelValue.
+ * Используется как `set` для v-inline-edit — чтобы правки в центре
+ * попадали в модель, а значит — в правую панель и в save().
+ */
+function commitText(path: string, v: string) {
+  const arr = value.value as any[] | undefined
+  if (!arr) return
+
+  const ok = setDefault(arr, path, v)
+  if (!ok) return
+
+  // Форсим эмит новой ссылкой, чтобы родитель (editingBlock.settings)
+  // получил update:modelValue.
+  value.value = arr.slice() as any
+}
+
+function commitTitle(v: string) {
+  commitText('text.title', v)
+}
+
+function commitBody(v: string) {
+  commitText('text.text', v)
+}
 
 // ==================== Images ====================
 const imagesBcgStyle = computed(() => {
@@ -356,9 +407,7 @@ const imageItemClass = computed(() => {
 })
 
 const imageItemStyle = computed(() => {
-  if (isMasonry.value) {
-    return {}
-  }
+  if (isMasonry.value) return {}
   if (imagesFlexDirection.value === 'column') {
     return { marginBottom: `${distancePx.value}px` }
   }
@@ -399,26 +448,26 @@ const imageItemStyle = computed(() => {
           >
             <component
               v-if="previewTitle"
-              :is="tag" class="mt-0 block-title-break"
+              :is="tag"
+              class="mt-0 block-title-break"
               v-inline-edit="{
-              get: () => previewTitle,
-              set: (v: string) => (previewTitle = v),
-              renderFormulas: true,
+                get: () => previewTitle,
+                set: commitTitle,
+                renderFormulas: true,
               }"
             ></component>
+
             <ProseP
               v-if="previewText"
               :style="{ columnCount: textCols }"
               :class="[textSize, 'block-title-break']"
               v-inline-edit="{
-              get: () => previewText,
-              set: (v: string) => (previewText = v),
-              renderFormulas: true,
+                get: () => previewText,
+                set: commitBody,
+                renderFormulas: true,
               }"
-              class="text-default inline-edit"
-            >
-            </ProseP>
 
+            ></ProseP>
           </div>
         </div>
       </div>
@@ -436,6 +485,7 @@ img:last-child {
   overflow-wrap: anywhere;
   word-break: break-word;
   hyphens: auto;
-  min-width: 0;   /* важно, если внутри flex/grid — иначе не сработает */
+  min-width: 0;
 }
+
 </style>

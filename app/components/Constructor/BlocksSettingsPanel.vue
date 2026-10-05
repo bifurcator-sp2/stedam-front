@@ -1,23 +1,15 @@
 <script setup lang="ts">
 import BlocksSettingField from '~/components/Constructor/BlocksSettingField.vue'
 
-const props = defineProps<{
-  settings: SettingItem[] | null | undefined
-}>()
-
+const id = defineModel<number | null>('id')
 const title = defineModel<string | null>('title')
 const description = defineModel<string | null>('description')
-const id = defineModel<number | null>('id')
+const settings = defineModel<SettingNode[]>('settings', { default: () => [] })
 
-const emit = defineEmits<{
-  (e: 'update:settings', value: SettingItem[]): void
-}>()
-
-function updateItem(index: number, updated: SettingItem) {
-  if (!props.settings) return
-  const next = props.settings.slice()
+function updateItem(index: number, updated: SettingNode) {
+  const next = settings.value.slice()
   next[index] = updated
-  emit('update:settings', next)
+  settings.value = next
 }
 </script>
 
@@ -26,7 +18,7 @@ function updateItem(index: number, updated: SettingItem) {
     <!-- Шапка с ID -->
     <div class="meta-row">
       <span class="meta-label">ID</span>
-      <span class="meta-value">{{ id ?? '—' }}</span>
+      <span class="meta-value">{{ id || '—' }}</span>
     </div>
 
     <!-- Основные поля -->

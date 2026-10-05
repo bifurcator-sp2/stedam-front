@@ -30,7 +30,7 @@ interface BlockItem {
   icon: string
   schema: SettingNode[]
   default_settings: Record<string, unknown>
-  settings: Record<string, unknown>
+  settings: SettingNode[]
 }
 
 interface BlockResource {
@@ -40,7 +40,7 @@ interface BlockResource {
   name: string | null
   title: string | null
   description: string | null
-  settings: Record<string, unknown>
+  settings: SettingNode[]
   created_at: string
   updated_at: string
 }
@@ -172,7 +172,7 @@ function createBlockFromType(type: BlockType): BlockItem {
     icon: iconOf(type),
     schema: type.schema ?? [],
     default_settings: type.default_settings ?? {},
-    settings: structuredClone(type.default_settings ?? {}),
+    settings: structuredClone(type.schema ?? []),
   }
 }
 
@@ -237,7 +237,6 @@ async function loadBlocks() {
       },
     })
 
-    // api.get уже возвращает { data: [...], meta: {...} }
     blocksPage.value = res as BlocksPage
   } catch (e) {
     console.error('[loadBlocks] failed', e)
@@ -309,7 +308,6 @@ watch(
 watch(
   () => [route.query.type, route.query.page, editingBlock.value?.id] as const,
   ([, , editingId]) => {
-    // если открыт конкретный блок — список не нужен
     if (editingId !== null && editingId !== undefined) return
     loadBlocks()
   },
@@ -345,13 +343,6 @@ function goToPage(page: number) {
       page: String(page),
     },
   })
-}
-
-// ==================== Обновление настроек выбранного блока ====================
-
-function updateSelectedSettings(value: Record<string, unknown>) {
-  if (!editingBlock.value) return
-  editingBlock.value.settings = value
 }
 
 // ==================== Сохранение ====================
@@ -611,11 +602,10 @@ function reset() {
 
             <BlocksSettingsPanel
               v-else
-              :settings="editingBlock.settings"
               v-model:id="editingBlock.id"
               v-model:title="editingBlock.title"
               v-model:description="editingBlock.description"
-              @update:settings="updateSelectedSettings"
+              v-model:settings="editingBlock.settings"
             />
           </LoadingOverlay>
         </div>
