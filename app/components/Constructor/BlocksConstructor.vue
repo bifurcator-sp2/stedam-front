@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
-
-
 
 // ==================== Типы ====================
 
@@ -45,37 +43,72 @@ const rightWidth = ref(500)
 type Side = 'left' | 'right' | null
 const resizing = ref<Side>(null)
 
-function startResize(side: Exclude<Side, null>, e: MouseEvent) {
-  e.preventDefault()
-  resizing.value = side
-  document.body.style.cursor = 'col-resize'
-  document.body.style.userSelect = 'none'
+// Смещение курсора относительно границы в момент захвата.
+// Компенсирует ширину ресайзера, чтобы панель не «прыгала» на 4px.
+let startOffset = 0
 
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', onUp)
+function startResize(side: Exclude<Side, null>, e: PointerEvent) {
+  e.preventDefault()
+
+  resizing.value = side
+
+  if (side === 'left') {
+    startOffset = e.clientX - leftWidth.value
+  } else {
+    startOffset = window.innerWidth - e.clientX - rightWidth.value
+  }
+
+  const root = document.documentElement
+  root.style.cursor = 'col-resize'
+  root.style.userSelect = 'none'
 }
 
-function onMove(e: MouseEvent) {
+function onPointerMove(e: PointerEvent) {
+  if (!resizing.value) return
+
+  const winW = window.innerWidth
+
   if (resizing.value === 'left') {
-    leftWidth.value = clamp(e.clientX, MIN_LEFT, MAX_LEFT)
-  } else if (resizing.value === 'right') {
-    rightWidth.value = clamp(window.innerWidth - e.clientX, MIN_RIGHT, MAX_RIGHT)
+    // не даём левой панели съесть место под правую и центр
+    const maxByWindow = winW - rightWidth.value - 4 - 4 - MIN_RIGHT - 200
+    const max = Math.max(MIN_LEFT, Math.min(MAX_LEFT, maxByWindow))
+
+    leftWidth.value = clamp(e.clientX - startOffset, MIN_LEFT, max)
+  } else {
+    const maxByWindow = winW - leftWidth.value - 4 - 4 - MIN_LEFT - 200
+    const max = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, maxByWindow))
+
+    rightWidth.value = clamp(winW - e.clientX - startOffset, MIN_RIGHT, max)
   }
 }
 
-function onUp() {
+function endResize() {
+  if (!resizing.value) return
+
   resizing.value = null
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-  document.removeEventListener('mousemove', onMove)
-  document.removeEventListener('mouseup', onUp)
+
+  const root = document.documentElement
+  root.style.cursor = ''
+  root.style.userSelect = ''
 }
+
+onMounted(() => {
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', endResize)
+  window.addEventListener('pointercancel', endResize)
+  window.addEventListener('blur', endResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', endResize)
+  window.removeEventListener('pointercancel', endResize)
+  window.removeEventListener('blur', endResize)
+})
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v))
 }
-
-onBeforeUnmount(onUp)
 
 const gridStyle = computed(() => ({
   gridTemplateColumns: `${leftWidth.value}px 4px 1fr 4px ${rightWidth.value}px`,
@@ -172,7 +205,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
       <div
         class="resizer"
         :class="{ 'resizer-active': resizing === 'left' }"
-        @mousedown="startResize('left', $event)"
+        @pointerdown="startResize('left', $event)"
       >
         <div class="resizer-bar" />
       </div>
@@ -189,9 +222,8 @@ function updateSelectedSettings(value: Record<string, unknown>) {
 
             <TextBlock
               :mode="body"
-              v-model = "selectedBlock.settings"
+              v-model="selectedBlock.settings"
             />
-
 
             <div
               v-show="false"
@@ -204,7 +236,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
               <UIcon name="i-lucide-grip-vertical" class="w-4 h-4 shrink-0 opacity-50" />
               <UIcon :name="block.icon" class="w-4 h-4 shrink-0" />
               <span class="flex-1 truncate">{{ block.name }}</span>
-              <div>{{selectedBlock.settings}}</div>
+              <div>{{ selectedBlock.settings }}</div>
               <button
                 type="button"
                 class="block-remove"
@@ -222,7 +254,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
       <div
         class="resizer"
         :class="{ 'resizer-active': resizing === 'right' }"
-        @mousedown="startResize('right', $event)"
+        @pointerdown="startResize('right', $event)"
       >
         <div class="resizer-bar" />
       </div>
@@ -308,6 +340,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
 /* ==================== Ресайзеры ==================== */
 
 .resizer {
+  position: relative;
   width: 4px;
   cursor: col-resize;
   background: transparent;
@@ -316,6 +349,20 @@ function updateSelectedSettings(value: Record<string, unknown>) {
   justify-content: center;
   transition: background 0.15s ease;
   user-select: none;
+  touch-action: none;
+}
+
+/* Широкая невидимая зона захвата: +4px влево и вправо от полосы.
+   Именно это чинит «промахи» мышью по 4px полосе. */
+.resizer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+  cursor: col-resize;
+  z-index: 1;
 }
 
 .resizer:hover,
@@ -329,6 +376,7 @@ function updateSelectedSettings(value: Record<string, unknown>) {
   border-radius: 2px;
   background: var(--ui-border, #d1d5db);
   transition: background 0.15s ease;
+  pointer-events: none;
 }
 
 .resizer:hover .resizer-bar,

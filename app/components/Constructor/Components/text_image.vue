@@ -397,8 +397,8 @@ const imageItemStyle = computed(() => {
             v-if="needDisplayText"
             :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
           >
-            <component :is="tag" class="mt-0">{{ previewTitle }}</component>
-            <ProseP :style="{ columnCount: textCols }" :class="textSize">
+            <component v-if="previewTitle" :is="tag" class="mt-0">{{ previewTitle }}</component>
+            <ProseP v-if="previewText" :style="{ columnCount: textCols }" :class="textSize">
               {{ previewText }}
             </ProseP>
           </div>
