@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onBeforeUnmount, onMounted, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
@@ -22,9 +22,10 @@ interface BlockType {
 }
 
 interface BlockItem {
-  id: string
+  id: number
   code: string
-  name: string
+  block_type_id: number,
+  title: string
   description: string
   icon: string
   schema: SettingNode[]
@@ -45,8 +46,6 @@ const rightWidth = ref(500)
 type Side = 'left' | 'right' | null
 const resizing = ref<Side>(null)
 
-// Смещение курсора относительно границы в момент захвата.
-// Компенсирует ширину ресайзера, чтобы панель не «прыгала» на 4px.
 let startOffset = 0
 
 function startResize(side: Exclude<Side, null>, e: PointerEvent) {
@@ -71,7 +70,6 @@ function onPointerMove(e: PointerEvent) {
   const winW = window.innerWidth
 
   if (resizing.value === 'left') {
-    // не даём левой панели съесть место под правую и центр
     const maxByWindow = winW - rightWidth.value - 4 - 4 - MIN_RIGHT - 200
     const max = Math.max(MIN_LEFT, Math.min(MAX_LEFT, maxByWindow))
 
@@ -125,73 +123,137 @@ const { data: blockTypes, pending, error } = await useAsyncData(
   () => api.get<BlockType[]>('/block-types'),
 )
 
+// ==================== Роутер / query ====================
+
+const route = useRoute()
+const router = useRouter()
+
 // ==================== Хелпер: иконка ====================
 
 function iconOf(type: BlockType): string {
   return (type.default_settings?.icon as string | undefined) ?? 'i-lucide-square'
 }
 
-// ==================== Список блоков ====================
+// ==================== Выбранный блок ====================
 
-const blocks = ref<BlockItem[]>([])
-const selectedBlockId = ref<string | null>(null)
+const editingBlock = ref<BlockItem | null>(null)
 
-function selectBlock(id: string) {
-  selectedBlockId.value = id
-}
-
-function removeBlock(id: string) {
-  blocks.value = blocks.value.filter((b) => b.id !== id)
-  if (selectedBlockId.value === id) selectedBlockId.value = null
-}
-
-function addBlock(type: BlockType) {
-  const item: BlockItem = {
-    id: `b${Date.now()}`,
+function createBlockFromType(type: BlockType): BlockItem {
+  return {
+    id: 0,
     code: type.code,
-    name: type.name,
-    name: type.description,
+    block_type_id: type.id,
+    title: type.name,
+    description: type.description ?? '',
     icon: iconOf(type),
     schema: type.schema ?? [],
     default_settings: type.default_settings ?? {},
     settings: structuredClone(type.default_settings ?? {}),
   }
-
-  blocks.value.push(item)
-  selectedBlockId.value = item.id
 }
 
-const selectedBlock = computed(() =>
-  blocks.value.find((b) => b.id === selectedBlockId.value) ?? null,
+function addBlock(type: BlockType) {
+  editingBlock.value = createBlockFromType(type)
+
+  router.replace({
+    query: { ...route.query, addBlock: type.code },
+  })
+}
+
+// Реакция на ?addBlock=<code> в URL:
+// — срабатывает при открытии страницы (immediate)
+// — и когда подгрузятся blockTypes (async)
+watch(
+  () => [route.query.addBlock, blockTypes.value] as const,
+  ([code, types]) => {
+    if (!code || typeof code !== 'string') return
+    if (!types) return
+    if (editingBlock.value?.code === code) return
+
+    const type = types.find((t) => t.code === code)
+    if (!type) return
+
+    editingBlock.value = createBlockFromType(type)
+  },
+  { immediate: true },
 )
+
+// Заглушка: получить список блоков по коду типа
+function GetBlocksList(code: string): BlockType[] {
+  // eslint-disable-next-line no-console
+  console.log('[GetBlocksList] stub called with code =', code)
+  return []
+}
 
 // ==================== Обновление настроек выбранного блока ====================
 
 function updateSelectedSettings(value: Record<string, unknown>) {
-  const block = selectedBlock.value
-  if (! block) return
-  block.settings = value
+  if (!editingBlock.value) return
+  editingBlock.value.settings = value
+}
+
+// ==================== Очистка query ====================
+
+function clearAddBlockQuery() {
+  if (!('addBlock' in route.query)) return
+
+  const { addBlock: _drop, ...rest } = route.query
+  router.replace({ query: rest })
 }
 
 // ==================== Сохранение ====================
 
 const saving = ref(false)
 
+// ==================== Сохранение ====================
+
+interface BlockResource {
+  id: number
+  block_type_id: number
+  code: string
+  name: string
+  title: string | null
+  description: string | null
+  settings: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+
+
 async function save() {
-  const block = selectedBlock.value
-  if (! block) return
+  const block = editingBlock.value
+  if (!block) return
 
   saving.value = true
   try {
-    // TODO: заменить на реальный запрос к API
-    // await api.post('/blocks', {
-    //   code: block.code,
-    //   settings: block.settings,
-    // })
-    await new Promise((resolve) => setTimeout(resolve, 800)) // заглушка
+    const { data } = await api.post<{ data: BlockResource }>('/blocks', {
+      block_type_id: block.block_type_id,   // ← было block.code (строка) — надо число
+      title:         block.name,
+      description:   block.description,
+      settings:      block.settings,
+    })
+
+    // Обновляем editingBlock данными с сервера (реальный id и т.п.)
+    editingBlock.value = {
+      ...block,
+      id: data.data.id,
+      description: data.data.description ?? '',
+      settings: data.data.settings ?? block.settings,
+    }
+
+    // Чистим ?addBlock=... из URL после успешного сохранения
+    clearAddBlockQuery()
   } finally {
     saving.value = false
   }
+}
+
+// ==================== Сброс ====================
+
+function reset() {
+  editingBlock.value = null
+  clearAddBlockQuery()
 }
 </script>
 
@@ -209,17 +271,32 @@ async function save() {
             </div>
 
             <template v-else>
-              <button
+              <div
                 v-for="type in blockTypes ?? []"
                 :key="type.code"
-                type="button"
                 class="palette-item"
                 :title="type.description ?? type.name"
-                @click="addBlock(type)"
               >
-                <UIcon :name="iconOf(type)" class="w-4 h-4 shrink-0" />
-                <span class="truncate">{{ type.name }}</span>
-              </button>
+                <!-- Кнопка «+» — создаёт новый editingBlock из типа -->
+                <button
+                  type="button"
+                  class="palette-add"
+                  :aria-label="`Добавить блок «${type.name}»`"
+                  @click.stop="addBlock(type)"
+                >
+                  <UIcon name="i-lucide-plus" class="w-4 h-4 shrink-0" />
+                </button>
+
+                <!-- Название — заглушка GetBlocksList -->
+                <button
+                  type="button"
+                  class="palette-name"
+                  @click.stop="GetBlocksList(type.code)"
+                >
+                  <UIcon :name="iconOf(type)" class="w-4 h-4 shrink-0" />
+                  <span class="truncate">{{ type.name }}</span>
+                </button>
+              </div>
             </template>
           </div>
         </div>
@@ -234,42 +311,34 @@ async function save() {
         <div class="resizer-bar" />
       </div>
 
-      <!-- === ЦЕНТР: список блоков === -->
+      <!-- === ЦЕНТР: превью блока === -->
       <main class="panel panel-center">
-        <header class="panel-header">Структура</header>
+        <header class="panel-header">
+          <div class="panel-header-row">
+            <span>Структура</span>
+            <UButton
+              v-if="editingBlock"
+              icon="i-lucide-rotate-ccw"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              @click="reset"
+            >
+              Сбросить
+            </UButton>
+          </div>
+        </header>
         <div class="panel-body">
-          <div v-if="blocks.length === 0" class="empty-state">
-            Нет блоков. Добавьте из палитры слева.
+          <div v-if="!editingBlock" class="empty-state">
+            Нет блока. Добавьте из палитры слева.
           </div>
 
           <div v-else class="bg-default w-full max-w-[640px] mx-auto">
-
             <TextBlock
-              :mode="body"
-              v-model="selectedBlock.settings"
+              :key="editingBlock.id"
+              :mode="'body'"
+              v-model="editingBlock.settings"
             />
-
-            <div
-              v-show="false"
-              v-for="block in blocks"
-              :key="block.id"
-              class="block-item"
-              :class="{ 'block-item-selected': block.id === selectedBlockId }"
-              @click="selectBlock(block.id)"
-            >
-              <UIcon name="i-lucide-grip-vertical" class="w-4 h-4 shrink-0 opacity-50" />
-              <UIcon :name="block.icon" class="w-4 h-4 shrink-0" />
-              <span class="flex-1 truncate">{{ block.name }}</span>
-              <div>{{ selectedBlock.settings }}</div>
-              <button
-                type="button"
-                class="block-remove"
-                @click.stop="removeBlock(block.id)"
-              >
-                <UIcon name="i-lucide-x" class="w-4 h-4" />
-              </button>
-            </div>
-
           </div>
         </div>
       </main>
@@ -294,7 +363,7 @@ async function save() {
               color="primary"
               variant="soft"
               :loading="saving"
-              :disabled="!selectedBlock || saving"
+              :disabled="!editingBlock || saving"
               @click="save"
             >
               Сохранить
@@ -303,17 +372,16 @@ async function save() {
         </header>
         <div class="panel-body">
           <LoadingOverlay :loading="saving">
-            <div v-if="!selectedBlock" class="empty-state">
+            <div v-if="!editingBlock" class="empty-state">
               Выберите блок в центре.
             </div>
 
             <BlocksSettingsPanel
               v-else
-              :settings="selectedBlock.settings"
-              :id="selectedBlock.id"
-              :title="selectedBlock.title"
-              :description="selectedBlock.description"
-              @update:model-value="updateSelectedSettings"
+              :settings="editingBlock.settings"
+              v-model:title="editingBlock.title"
+              v-model:description="editingBlock.description"
+              @update:settings="updateSelectedSettings"
             />
           </LoadingOverlay>
         </div>
@@ -357,7 +425,6 @@ async function save() {
 }
 
 .panel-center {
-
 }
 
 .panel-header {
@@ -374,7 +441,6 @@ async function save() {
   border-bottom: 1px solid var(--ui-border, #e5e7eb);
 }
 
-/* Строка внутри правого хедера: заголовок + кнопка */
 .panel-header-row {
   display: flex;
   align-items: center;
@@ -405,8 +471,6 @@ async function save() {
   touch-action: none;
 }
 
-/* Широкая невидимая зона захвата: +4px влево и вправо от полосы.
-   Именно это чинит «промахи» мышью по 4px полосе. */
 .resizer::before {
   content: '';
   position: absolute;
@@ -449,15 +513,13 @@ async function save() {
 .palette-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 4px;
   border-radius: 6px;
   border: 1px solid var(--ui-border, #e5e7eb);
   background: var(--ui-bg-elevated, #f9fafb);
-  text-align: left;
   font-size: 13px;
   color: var(--ui-text, #111827);
-  cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 
@@ -466,50 +528,54 @@ async function save() {
   background: var(--ui-bg, #ffffff);
 }
 
-/* ==================== Список блоков (центр) ==================== */
-
-.blocks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-}
-
-.block-item {
-  display: flex;
+.palette-add {
+  flex-shrink: 0;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 6px;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
   border: 1px solid var(--ui-border, #e5e7eb);
   background: var(--ui-bg, #ffffff);
-  font-size: 14px;
   color: var(--ui-text, #111827);
   cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 
-.block-item:hover {
+.palette-add:hover {
   border-color: var(--ui-primary, #3b82f6);
+  background: var(--ui-primary, #3b82f6);
+  color: #ffffff;
 }
 
-.block-item-selected {
-  border-color: var(--ui-primary, #3b82f6);
-  box-shadow: 0 0 0 2px var(--ui-primary, #3b82f6) inset;
+.palette-add:active {
+  transform: translateY(1px);
 }
 
-.block-remove {
-  flex-shrink: 0;
-  padding: 2px;
-  border-radius: 4px;
-  color: var(--ui-text-muted, #6b7280);
+.palette-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  color: inherit;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  border-radius: 5px;
+  transition: background 0.15s;
 }
 
-.block-remove:hover {
-  color: #dc2626;
-  background: #fee2e2;
+.palette-name:hover {
+  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.08));
+}
+
+.palette-name:active {
+  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.14));
 }
 
 /* ==================== Пустое состояние ==================== */
