@@ -414,6 +414,22 @@ const imageItemStyle = computed(() => {
   }
   return { height: `${imageHeightPx.value}px`, width: 'auto' }
 })
+
+import type { FilesListResponse } from '~/types/files'
+import { ref } from 'vue'
+const filesModel = ref<FilesListResponse>({
+  temp: { images: [], files: [] },
+  stored: { images: [], files: [] },
+})
+const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
+async function onTempImageClick(img: any) {
+  if (!fileContainerRef.value) return
+  const name = img?.name
+  if (!name) return
+  await fileContainerRef.value.removeTempFile(name)
+}
+
+
 </script>
 
 <template>
@@ -423,6 +439,13 @@ const imageItemStyle = computed(() => {
     </template>
 
     <template #body>
+      <FileContainer
+        ref="fileContainerRef"
+        model-name="blocks"
+        :model-id="id"
+        file-type="image"
+        v-model:files="filesModel"
+      />
       <div :style="[layoutMarginStyle]">
         <div
           :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle]"
@@ -435,18 +458,14 @@ const imageItemStyle = computed(() => {
               :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
             >
 
-              <FileContainer
-                model-name="blocks"
-                :model-id="id"
-                file-type="image"
-              />
 
-             <img
-                v-for="i in imagesCount"
-                :key="'img' + i"
-                :src="previewImages[(i - 1) % previewImages.length]"
+              <img
+                v-for="(img, idx) in filesModel.temp.images"
+                :key="img.name ?? idx"
+                :src="img.url ?? img.thumbnail_url ?? img.original_url"
                 :class="imageItemClass"
                 :style="imageItemStyle"
+                @click="onTempImageClick(img)"
               />
             </div>
           </div>

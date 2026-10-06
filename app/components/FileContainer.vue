@@ -21,6 +21,19 @@ const api = useApi()
 const MAX_IMAGE_DIMENSION = 2000
 
 // ============================================================
+// Модель: список файлов (двусторонняя связь с родителем)
+// ============================================================
+
+const files = defineModel<FilesListResponse>('files', {
+  default: () => ({
+    temp: { images: [], files: [] },
+    stored: { images: [], files: [] },
+  }),
+})
+
+const listLoading = ref(false)
+
+// ============================================================
 // Логи
 // ============================================================
 
@@ -34,15 +47,9 @@ function warn(...args: unknown[]) {
 }
 
 // ============================================================
-// Состояние
+// Внутреннее состояние
 // ============================================================
 
-const files = ref<FilesListResponse>({
-  temp: { images: [], files: [] },
-  stored: { images: [], files: [] },
-})
-
-const loading = ref(false)
 const uploading = ref(false)
 const processingCrop = ref(false)
 const denyPulse = ref(false)
@@ -168,21 +175,29 @@ async function normalizeImage(file: File): Promise<File> {
 }
 
 // ============================================================
-// Загрузка списка
+// Загрузка списка — пишет в модель
 // ============================================================
 
 async function refresh() {
-  loading.value = true
+  listLoading.value = true
   try {
-    files.value = await api.get<FilesListResponse>(
+    const res = await api.get<FilesListResponse>(
       `/files/preload/${props.modelName}/${props.modelId}`,
     )
+    files.value = res
   } finally {
-    loading.value = false
+    listLoading.value = false
   }
 }
 
 onMounted(refresh)
+
+watch(
+  () => [props.modelName, props.modelId],
+  () => {
+    refresh()
+  },
+)
 
 // ============================================================
 // Выбор файлов (input)
@@ -217,8 +232,6 @@ function onDragOver(event: DragEvent) {
 }
 
 function onDragLeave(event: DragEvent) {
-  // dragleave срабатывает и при переходе между дочерними элементами,
-  // поэтому проверяем relatedTarget
   const target = event.currentTarget as HTMLElement
   const related = event.relatedTarget as Node | null
   if (related && target.contains(related)) return
@@ -501,6 +514,7 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
       fd,
     )
 
+    // Обновляем модель — родитель увидит новый список
     await refresh()
   } finally {
     uploading.value = false
@@ -517,6 +531,9 @@ async function removeTempFile(name: string) {
   })
   await refresh()
 }
+
+// Публичные методы для родителя
+defineExpose({ refresh, removeTempFile })
 
 // ============================================================
 // Escape
@@ -548,7 +565,7 @@ onUnmounted(() => {
 })
 
 // ============================================================
-// События наружу
+// Событие наружу (для обратной совместимости)
 // ============================================================
 
 const emit = defineEmits<{
@@ -605,38 +622,6 @@ watch(() => files.value.stored, (val) => {
         <span>Загрузка…</span>
       </div>
     </div>
-
-    <!-- ==================== Временные файлы ==================== -->
-    <section v-if="files.temp.images.length || files.temp.files.length" class="temp-section">
-      <h4>Временные файлы</h4>
-
-      <div v-for="img in files.temp.images" :key="img.name" class="file-item">
-        <img :src="img.url" width="80" />
-        <span>{{ img.name }}</span>
-        <span v-if="img.ratio" class="badge">{{ img.ratio }}</span>
-        <button @click="removeTempFile(img.name)">Удалить</button>
-      </div>
-
-      <div v-for="f in files.temp.files" :key="f.name" class="file-item">
-        <span>{{ f.name }}</span>
-        <button @click="removeTempFile(f.name)">Удалить</button>
-      </div>
-    </section>
-
-    <!-- ==================== Сохранённые файлы ==================== -->
-    <section v-if="files.stored.images.length || files.stored.files.length" class="stored-section">
-      <h4>Сохранённые файлы</h4>
-
-      <div v-for="img in files.stored.images" :key="img.original" class="file-item">
-        <img :src="img.thumbnail_url ?? img.original_url" width="80" />
-        <span>{{ img.original }}</span>
-        <span v-if="img.ratio" class="badge">{{ img.ratio }}</span>
-      </div>
-
-      <div v-for="f in files.stored.files" :key="f.name" class="file-item">
-        <span>{{ f.name }}</span>
-      </div>
-    </section>
 
     <!-- ==================== Модалка кропа ==================== -->
     <ClientOnly>
@@ -722,6 +707,12 @@ watch(() => files.value.stored, (val) => {
 
 <style scoped>
 /* ==================== Dropzone ==================== */
+
+.file-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 
 .dropzone {
   display: flex;
