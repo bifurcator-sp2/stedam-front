@@ -19,7 +19,7 @@
     "@standard-schema/spec": "^1.1.0",
     "@takumi-rs/core": "^2.13.7",
     "@vueuse/nuxt": "^14.4.0",
-    "cropperjs": "^2.2.0",
+    "cropperjs": "^1.6.1",
     "dompurify": "^3.4.16",
     "isomorphic-dompurify": "^4.3.0",
     "katex": "^0.18.9",

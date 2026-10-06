@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import type { FilesListResponse, StoredImage, StoredFile, TempFile } from '~/types/files'
 import Cropper from 'cropperjs'
+import 'cropperjs/dist/cropper.css'
 
 const props = withDefaults(defineProps<{
   modelName: string
@@ -20,6 +21,19 @@ const api = useApi()
 const MAX_IMAGE_DIMENSION = 2000
 
 // ============================================================
+// Логи
+// ============================================================
+
+const DEBUG = true
+
+function log(...args: unknown[]) {
+  if (DEBUG) console.log('[FileContainer]', ...args)
+}
+function warn(...args: unknown[]) {
+  if (DEBUG) console.warn('[FileContainer]', ...args)
+}
+
+// ============================================================
 // Состояние
 // ============================================================
 
@@ -32,12 +46,14 @@ const loading = ref(false)
 const uploading = ref(false)
 const processingCrop = ref(false)
 const denyPulse = ref(false)
+const isDragging = ref(false)
 
 const cropQueue = ref<File[]>([])
 const activeCrop = ref<{ file: File; url: string } | null>(null)
 const selectedRatio = ref<string>('1x1')
 
 const cropImageRef = ref<HTMLImageElement | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
 let cropperInstance: Cropper | null = null
 
 let cropperInitializing = false
@@ -56,6 +72,12 @@ const accept = computed(() => {
   if (props.fileType === 'image') return 'image/*'
   if (props.fileType === 'file') return '.pdf,.zip'
   return undefined
+})
+
+const hintText = computed(() => {
+  if (props.fileType === 'image') return 'Изображения JPG, PNG, WebP'
+  if (props.fileType === 'file') return 'PDF или ZIP'
+  return 'Изображения или документы'
 })
 
 const selectedRatioValue = computed(() => {
@@ -163,14 +185,56 @@ async function refresh() {
 onMounted(refresh)
 
 // ============================================================
-// Выбор файлов
+// Выбор файлов (input)
 // ============================================================
 
 async function onFilesSelected(event: Event) {
   const input = event.target as HTMLInputElement
   const list = Array.from(input.files ?? [])
   input.value = ''
+  await processFiles(list)
+}
 
+// ============================================================
+// Drag & drop
+// ============================================================
+
+async function onDrop(event: DragEvent) {
+  event.preventDefault()
+  isDragging.value = false
+
+  const dt = event.dataTransfer
+  if (!dt) return
+
+  const list = Array.from(dt.files ?? [])
+  await processFiles(list)
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault()
+  if (uploading.value) return
+  isDragging.value = true
+}
+
+function onDragLeave(event: DragEvent) {
+  // dragleave срабатывает и при переходе между дочерними элементами,
+  // поэтому проверяем relatedTarget
+  const target = event.currentTarget as HTMLElement
+  const related = event.relatedTarget as Node | null
+  if (related && target.contains(related)) return
+  isDragging.value = false
+}
+
+function openFileDialog() {
+  if (uploading.value) return
+  fileInputRef.value?.click()
+}
+
+// ============================================================
+// Общая обработка файлов
+// ============================================================
+
+async function processFiles(list: File[]) {
   if (!list.length) return
 
   const plainFiles: File[] = []
@@ -209,7 +273,6 @@ async function showNextCrop() {
     activeCrop.value = null
     currentInitUrl = null
     destroyCropper()
-    clearCropperDom()
     return
   }
 
@@ -230,66 +293,15 @@ async function showNextCrop() {
 
 function destroyCropper() {
   if (cropperInstance) {
-    try { cropperInstance.destroy?.() } catch (e) { /* ignore */ }
+    try { cropperInstance.destroy() } catch (e) { /* ignore */ }
     cropperInstance = null
   }
 }
 
-function clearCropperDom() {
-  const wrap = cropImageRef.value?.parentElement
-  if (!wrap) return
-
-  wrap
-    .querySelectorAll('cropper-canvas, cropper-image, cropper-selection, cropper-handle')
-    .forEach((el) => el.remove())
-}
-
-function removeEdgeHandles() {
-  if (!cropperInstance) return
-
-  const selection = cropperInstance.getCropperSelection?.()
-  if (!selection) return
-
-  const edgeActions = ['n-resize', 'e-resize', 's-resize', 'w-resize']
-
-  selection.querySelectorAll('cropper-handle').forEach((handle) => {
-    const action = handle.getAttribute('action')
-    if (action && edgeActions.includes(action)) {
-      handle.remove()
-    }
-  })
-}
-
 function applyAspectRatio(aspect: number) {
   if (!cropperInstance) return
-
-  const selection = cropperInstance.getCropperSelection?.()
-  if (!selection) return
-
-  selection.aspectRatio = aspect
-  selection.initialAspectRatio = aspect
-
-  const canvas = cropperInstance.getCropperCanvas?.() as HTMLCanvasElement | undefined
-  if (!canvas) return
-
-  const cw = canvas.width || canvas.clientWidth || 800
-  const ch = canvas.height || canvas.clientHeight || 500
-
-  let w = cw * 0.9
-  let h = w / aspect
-  if (h > ch * 0.9) {
-    h = ch * 0.9
-    w = h * aspect
-  }
-
-  const x = (cw - w) / 2
-  const y = (ch - h) / 2
-
-  selection.$change(x, y, w, h, aspect)
-
-  selection.setAttribute('resizable', 'true')
-  selection.setAttribute('movable', 'true')
-  selection.setAttribute('precise', 'true')
+  cropperInstance.setAspectRatio(aspect)
+  log('applyAspectRatio', { aspect })
 }
 
 // ============================================================
@@ -304,14 +316,6 @@ async function waitForImageReady(img: HTMLImageElement): Promise<void> {
     img.onload = () => resolve()
     img.onerror = () => resolve()
   })
-
-  if (typeof img.decode === 'function') {
-    try {
-      await img.decode()
-    } catch (e) {
-      // ignore
-    }
-  }
 }
 
 // ============================================================
@@ -328,7 +332,7 @@ async function waitForWrapSize(wrap: HTMLElement, maxMs = 1000): Promise<boolean
 }
 
 // ============================================================
-// Инициализация кроппера
+// Инициализация кроппера (v1)
 // ============================================================
 
 async function initCropper() {
@@ -340,7 +344,6 @@ async function initCropper() {
 
   try {
     destroyCropper()
-    clearCropperDom()
 
     await nextTick()
     await nextTick()
@@ -353,54 +356,44 @@ async function initCropper() {
     if (currentInitUrl !== myUrl) return
 
     if (!img.naturalWidth || !img.naturalHeight) {
-      console.error('[initCropper] ABORT: изображение без размеров')
+      warn('ABORT: изображение без размеров')
       return
     }
-
-    await nextTick()
-    await new Promise((r) => requestAnimationFrame(() => r(null)))
 
     const wrap = img.parentElement
     if (!wrap) return
 
     const hasSize = await waitForWrapSize(wrap)
     if (!hasSize) {
-      console.error('[initCropper] ABORT: .cropper-wrap без размеров')
+      warn('ABORT: .cropper-wrap без размеров')
       return
     }
 
     if (currentInitUrl !== myUrl) return
 
-    cropperInstance = new Cropper(img)
+    cropperInstance = new Cropper(img, {
+      viewMode: 1,
+      dragMode: 'move',
+      aspectRatio: selectedRatioValue.value,
+      autoCropArea: 1,
+      responsive: true,
+      background: false,
+      modal: false,
+      guides: true,
+      center: false,
+      highlight: false,
+      cropBoxMovable: true,
+      cropBoxResizable: true,
+      toggleDragModeOnDblclick: false,
+      ready() {
+        log('cropper ready (v1)')
+      },
+    })
 
-    await nextTick()
-    await new Promise((r) => setTimeout(r, 100))
+    log('cropper initialized (v1)', {
+      aspectRatio: selectedRatioValue.value,
+    })
 
-    const canvasEl = wrap.querySelector('cropper-canvas') as HTMLCanvasElement | null
-    if (canvasEl) {
-      const w = wrap.clientWidth || 800
-      const h = wrap.clientHeight || 500
-
-      canvasEl.setAttribute('width', String(w))
-      canvasEl.setAttribute('height', String(h))
-      canvasEl.style.width = `${w}px`
-      canvasEl.style.height = `${h}px`
-      canvasEl.style.display = 'block'
-
-      canvasEl.setAttribute('background', 'false')
-    }
-
-    const image = cropperInstance.getCropperImage?.()
-    if (image) {
-      image.setAttribute('scalable', 'true')
-      const centerFn = (image as any).$center
-      if (typeof centerFn === 'function') {
-        centerFn.call(image, 'contain')
-      }
-    }
-
-    removeEdgeHandles()
-    applyAspectRatio(selectedRatioValue.value)
   } finally {
     cropperInitializing = false
   }
@@ -443,10 +436,13 @@ async function confirmCrop() {
   try {
     if (!cropperInstance) return
 
-    const selection = cropperInstance.getCropperSelection?.()
-    if (!selection) return
+    const canvas = cropperInstance.getCroppedCanvas({
+      maxWidth: 4096,
+      maxHeight: 4096,
+      fillColor: '#fff',
+    })
 
-    const canvas: HTMLCanvasElement = await selection.$toCanvas()
+    if (!canvas) return
 
     const blob = await new Promise<Blob>((resolve) => {
       canvas.toBlob((b) => resolve(b!), 'image/jpeg', 0.9)
@@ -466,7 +462,6 @@ async function confirmCrop() {
 }
 
 async function skipCrop() {
-  // forceCrop=true — блокируем, файл на сервер не уходит
   if (props.forceCrop) {
     flashDenied()
     return
@@ -567,16 +562,51 @@ watch(() => files.value.stored, (val) => {
 
 <template>
   <div class="file-container">
-    <input
-      type="file"
-      multiple
-      :accept="accept"
-      :disabled="uploading"
-      @change="onFilesSelected"
-    />
+    <!-- ==================== Dropzone ==================== -->
+    <div class="dropzone">
+      <input
+        ref="fileInputRef"
+        type="file"
+        multiple
+        :accept="accept"
+        :disabled="uploading"
+        class="dropzone__input"
+        @change="onFilesSelected"
+      />
 
-    <div v-if="uploading" class="uploading">Загрузка...</div>
+      <div
+        class="dropzone__area"
+        :class="{
+          'dropzone__area--active': isDragging,
+          'dropzone__area--disabled': uploading,
+        }"
+        role="button"
+        tabindex="0"
+        @click="openFileDialog"
+        @keydown.enter.prevent="openFileDialog"
+        @keydown.space.prevent="openFileDialog"
+        @dragover="onDragOver"
+        @dragenter.prevent="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
+      >
+        <UIcon name="i-lucide-cloud-upload" class="dropzone__icon" />
 
+        <div class="dropzone__text">
+          <span class="dropzone__title">
+            {{ isDragging ? 'Отпустите файлы здесь' : 'Перетащите файлы или нажмите' }}
+          </span>
+          <span class="dropzone__hint">{{ hintText }}</span>
+        </div>
+      </div>
+
+      <div v-if="uploading" class="dropzone__uploading">
+        <UIcon name="i-lucide-loader-2" class="dropzone__spinner" />
+        <span>Загрузка…</span>
+      </div>
+    </div>
+
+    <!-- ==================== Временные файлы ==================== -->
     <section v-if="files.temp.images.length || files.temp.files.length" class="temp-section">
       <h4>Временные файлы</h4>
 
@@ -593,6 +623,7 @@ watch(() => files.value.stored, (val) => {
       </div>
     </section>
 
+    <!-- ==================== Сохранённые файлы ==================== -->
     <section v-if="files.stored.images.length || files.stored.files.length" class="stored-section">
       <h4>Сохранённые файлы</h4>
 
@@ -607,6 +638,7 @@ watch(() => files.value.stored, (val) => {
       </div>
     </section>
 
+    <!-- ==================== Модалка кропа ==================== -->
     <ClientOnly>
       <Teleport to="body">
         <Transition name="crop-modal-fade">
@@ -689,6 +721,110 @@ watch(() => files.value.stored, (val) => {
 </template>
 
 <style scoped>
+/* ==================== Dropzone ==================== */
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dropzone__input {
+  display: none;
+}
+
+.dropzone__area {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1.5px dashed var(--ui-border, #d1d5db);
+  border-radius: 10px;
+  background: var(--ui-bg-elevated, #f9fafb);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
+  user-select: none;
+}
+
+.dropzone__area:hover {
+  border-color: var(--ui-primary, #3b82f6);
+  background: var(--ui-bg, #ffffff);
+}
+
+.dropzone__area:focus-visible {
+  outline: 2px solid var(--ui-primary, #3b82f6);
+  outline-offset: 2px;
+}
+
+.dropzone__area--active {
+  border-color: var(--ui-primary, #3b82f6);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ui-primary, #3b82f6) 10%, transparent),
+    color-mix(in srgb, var(--ui-primary, #3b82f6) 4%, transparent)
+  );
+  transform: scale(1.01);
+}
+
+.dropzone__area--active .dropzone__icon {
+  color: var(--ui-primary, #3b82f6);
+  transform: translateY(-2px);
+}
+
+.dropzone__area--disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.dropzone__icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  color: var(--ui-text-muted, #9ca3af);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.dropzone__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dropzone__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ui-text, #111827);
+}
+
+.dropzone__hint {
+  font-size: 12px;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.dropzone__uploading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.dropzone__spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ==================== Модалка кропа ==================== */
+
 .crop-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -804,16 +940,6 @@ watch(() => files.value.stored, (val) => {
   display: block;
   max-width: 100%;
   max-height: 100%;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.cropper-wrap :deep(cropper-canvas) {
-  display: block;
-}
-
-.cropper-wrap :deep(cropper-image) {
-  display: block;
 }
 
 .crop-modal__footer {

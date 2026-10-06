@@ -440,11 +440,7 @@ const imageItemStyle = computed(() => {
                 :model-id="id"
                 file-type="image"
               />
-<!--              <FileContainer
-                model-name="blocks"
-                :model-id="blockId"
-                file-type="file"
-              />-->
+
              <img
                 v-for="i in imagesCount"
                 :key="'img' + i"
