@@ -6,6 +6,7 @@ const value = defineModel<[]>({ default: () => [] })
 
 const props = defineProps<{
   mode?: 'form' | 'body'
+  id?: number
 }>()
 
 // ==================== Общие утилиты ====================
@@ -433,7 +434,18 @@ const imageItemStyle = computed(() => {
               :class="[imagesContainerClass]"
               :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
             >
-              <img
+
+              <FileContainer
+                model-name="blocks"
+                :model-id="id"
+                file-type="image"
+              />
+<!--              <FileContainer
+                model-name="blocks"
+                :model-id="blockId"
+                file-type="file"
+              />-->
+             <img
                 v-for="i in imagesCount"
                 :key="'img' + i"
                 :src="previewImages[(i - 1) % previewImages.length]"

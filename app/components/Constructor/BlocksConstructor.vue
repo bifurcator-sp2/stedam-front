@@ -490,6 +490,7 @@ function reset() {
                 :key="editingBlock.id"
                 :mode="'body'"
                 v-model="editingBlock.settings"
+                :id="editingBlock.id || 0"
               />
             </div>
           </template>

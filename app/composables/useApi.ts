@@ -33,6 +33,20 @@ export const useApi = () => {
       signal,
     } = options
 
+    // Если тело — FormData, не ставим Content-Type:
+    // браузер сам добавит multipart/form-data с boundary
+    const isFormData =
+      typeof FormData !== 'undefined' && body instanceof FormData
+
+    const finalHeaders: Record<string, string> = {
+      ...DEFAULT_HEADERS,
+      ...headers,
+    }
+
+    if (isFormData) {
+      delete finalHeaders['Content-Type']
+    }
+
     return await $fetch<T>(url, {
       baseURL,
       method,
@@ -40,10 +54,7 @@ export const useApi = () => {
       params,
       signal,
       credentials,
-      headers: {
-        ...DEFAULT_HEADERS,
-        ...headers,
-      },
+      headers: finalHeaders,
     })
   }
 
@@ -63,38 +74,9 @@ export const useApi = () => {
     return request<T, B>('PATCH', url, { ...options, body })
   }
 
-  function del<T = any>(url: string, options: Omit<RequestOptions, 'body'> = {}) {
-    return request<T>('DELETE', url, options)
+  function del<T = any, B = any>(url: string, options: RequestOptions<B> = {}) {
+    return request<T, B>('DELETE', url, options)
   }
 
   return { request, get, post, put, patch, delete: del }
 }
-
-/*
-const api = useApi()
-
-// GET без параметров
-const userData = await api.get<UserData>('/user-data')
-
-// GET с query-параметрами
-const countries = await api.get<Country[]>('/countries', {
-  params: { active: true, search: 'рос' },
-})
-
-// POST с телом
-await api.post('/set-user-roles', { roles: ['student'] })
-
-// PUT с телом
-await api.put('/user-data', { first_name: 'Иван' })
-
-// DELETE
-await api.delete('/user-data')
-
-// Переопределить credentials (например, публичный запрос без cookie)
-await api.get('/public/roles', { credentials: 'omit' })
-
-// Добавить кастомный заголовок
-await api.post('/upload', formData, {
-  headers: { 'Content-Type': 'multipart/form-data' },
-})
-* */

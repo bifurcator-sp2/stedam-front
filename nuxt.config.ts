@@ -9,8 +9,9 @@ export default defineNuxtConfig({
     'nuxt-og-image',
     'nuxt-auth-sanctum',
     '@nuxtjs/i18n',
-    '@nuxt/icon'
+    '@nuxt/icon',
   ],
+
   icon: {
     mode: 'svg',
     serverBundle: {
