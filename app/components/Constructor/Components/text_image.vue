@@ -4,10 +4,13 @@ import { computed } from 'vue'
 // ==================== Модель ====================
 const value = defineModel<[]>({ default: () => [] })
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
   id?: number
-}>()
+  allowDragAndDrop?: boolean
+}>(), {
+  allowDragAndDrop: true,
+})
 
 // ==================== Общие утилиты ====================
 function clamp(value: number, min: number, max: number): number {
@@ -203,10 +206,17 @@ function collectMarginStyle(basePath: string): Record<string, string> {
   })
 }
 
-const imageBorderStyle = computed(() =>
-  collectBorderStyle('images.image-border', 'images.image-border.radius')
-)
-
+// ==================== Превью-изображения ====================
+const previewImages = [
+  'https://img.magnific.com/premium-photo/trees-park-autumn_1048944-1833622.jpg?semt=ais_hybrid&w=740&q=80',
+  'https://i.pinimg.com/originals/39/08/8c/39088c9907bce387867eb149fc9fed54.jpg',
+  'https://turclub-pik.ru/crop/1160/464/uploads/blog_img/covers/ce0803b71598de24381350509c5d02f5.jpeg.webp',
+  'https://avatars.mds.yandex.net/i?id=e9812860a39898a8a0494d0ae5399494_l-5232437-images-thumbs&n=13',
+  'https://www.tripletcam.com/videos/categories/assets/4/background.png?1685627419',
+  'https://cdn.xn--h1ajim.xn--p1ai/images/thumb/1/1f/20_Jahre_kann_ein_Star_alt_werden._03.jpg/640px-20_Jahre_kann_ein_Star_alt_werden._03.jpg',
+  'https://avatars.mds.yandex.net/i?id=f1175b08cbc475e1f8d218a06dacd9bc585f1851-4577649-images-thumbs&n=13',
+  'https://avatars.mds.yandex.net/get-mpic/5322414/img_id3536859793184490756.jpeg/orig',
+]
 
 // ==================== Layout ====================
 const layout = computed(() => getDefault(value.value, 'layout'))
@@ -309,6 +319,10 @@ const imagesBcgStyle = computed(() => {
 
 const imagesBorderStyle = computed(() =>
   collectBorderStyle('images.border', 'images.border.radius')
+)
+
+const imageBorderStyle = computed(() =>
+  collectBorderStyle('images.image-border', 'images.image-border.radius')
 )
 
 const imagesPaddingStyle = computed(() => collectPaddingStyle('images.padding'))
@@ -425,6 +439,20 @@ const emit = defineEmits<{
 
 onMounted(() => emit('register-files', fileContainerRef.value))
 onBeforeUnmount(() => emit('register-files', null))
+
+// ==================== Reorder ====================
+function onReorder(from: number, to: number) {
+  const imgs = filesModel.value.images
+  if (from === to) return
+  if (from < 0 || from >= imgs.length) return
+  if (to < 0 || to >= imgs.length) return
+
+  const next = imgs.slice()
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+
+  filesModel.value = { ...filesModel.value, images: next }
+}
 </script>
 
 <template>
@@ -458,8 +486,10 @@ onBeforeUnmount(() => emit('register-files', null))
                 :key="img.url ?? idx"
                 :item="img"
                 :siblings="filesModel.images"
+                :allow-drag-and-drop="allowDragAndDrop"
                 @remove="fileContainerRef?.removeFile($event)"
                 @restore="fileContainerRef?.restoreFile($event)"
+                @reorder="onReorder"
               >
                 <img
                   :src="img.thumbnail || img.url"

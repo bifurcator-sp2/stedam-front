@@ -8,14 +8,18 @@ const props = withDefaults(defineProps<{
   siblings?: ImageItem[]
   /** Показывать ли бейдж «Черновик» для source === 'temp'. */
   showDraft?: boolean
+  /** Разрешить перетаскивание за иконку. */
+  allowDragAndDrop?: boolean
 }>(), {
   siblings: () => [],
   showDraft: true,
+  allowDragAndDrop: true,
 })
 
 const emit = defineEmits<{
   (e: 'remove', item: ImageItem): void
   (e: 'restore', item: ImageItem): void
+  (e: 'reorder', from: number, to: number): void
 }>()
 
 // ============================================================
@@ -31,6 +35,60 @@ const isToDelete = computed(() => props.item.toDelete === true)
 const isDraft = computed(
   () => !isToDelete.value && props.showDraft && props.item.source === 'temp',
 )
+
+// ============================================================
+// Drag & drop
+// ============================================================
+
+const isDragOver = ref(false)
+
+const myIndex = computed(() => {
+  const list = props.siblings ?? []
+  return list.findIndex((i) => i.url === props.item.url)
+})
+
+function onDragStart(e: DragEvent) {
+  if (!props.allowDragAndDrop) return
+  if (myIndex.value < 0) return
+
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(myIndex.value))
+  }
+}
+
+function onDragOver(e: DragEvent) {
+  if (!props.allowDragAndDrop) return
+  if (myIndex.value < 0) return
+
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  isDragOver.value = true
+}
+
+function onDragLeave() {
+  isDragOver.value = false
+}
+
+function onDrop(e: DragEvent) {
+  if (!props.allowDragAndDrop) return
+
+  e.preventDefault()
+  isDragOver.value = false
+
+  const raw = e.dataTransfer?.getData('text/plain') ?? ''
+  const from = Number(raw)
+
+  if (!Number.isFinite(from)) return
+  if (from === myIndex.value) return
+  if (myIndex.value < 0) return
+
+  emit('reorder', from, myIndex.value)
+}
+
+function onDragEnd() {
+  isDragOver.value = false
+}
 
 // ============================================================
 // Лайтбокс
@@ -54,7 +112,6 @@ const hasNext = computed(() => lightboxIndex.value < gallery.value.length - 1)
 const canNavigate = computed(() => gallery.value.length > 1)
 
 function openLightbox() {
-  // Если помечена на удаление — лайтбокс не открываем
   if (isToDelete.value) return
 
   const idx = gallery.value.findIndex((i) => i.url === props.item.url)
@@ -131,7 +188,18 @@ function onRestoreClick(e: MouseEvent) {
 </script>
 
 <template>
-  <div class="image-wrapper" :class="{ 'image-wrapper--to-delete': isToDelete }">
+  <div
+    class="image-wrapper"
+    :class="{
+      'image-wrapper--to-delete': isToDelete,
+      'image-wrapper--drag-over': isDragOver && allowDragAndDrop,
+    }"
+    @dragover="onDragOver"
+    @dragenter.prevent="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+    @dragend="onDragEnd"
+  >
     <!-- Слот с картинкой -->
     <div class="image-wrapper__content" @click="openLightbox">
       <slot />
@@ -145,6 +213,18 @@ function onRestoreClick(e: MouseEvent) {
     >
       <UIcon name="i-lucide-pencil-line" class="image-wrapper__draft-icon" />
       <span class="image-wrapper__draft-text">Черновик</span>
+    </div>
+
+    <!-- Drag handle -->
+    <div
+      v-if="allowDragAndDrop && !isToDelete"
+      class="image-wrapper__drag"
+      draggable="true"
+      title="Перетащить"
+      @dragstart="onDragStart"
+      @click.stop
+    >
+      <UIcon name="i-lucide-grip-vertical" />
     </div>
 
     <!-- Крестик удаления -->
@@ -240,9 +320,16 @@ function onRestoreClick(e: MouseEvent) {
   position: relative;
   display: inline-block;
   line-height: 0;
-  align-self: flex-start;   /* ← не растягиваться по высоте flex-строки */
-  flex: 0 0 auto;           /* ← не расти и не сжиматься */
-  vertical-align: top;      /* ← на всякий случай, если контейнер не flex */
+  align-self: flex-start;
+  flex: 0 0 auto;
+  vertical-align: top;
+  transition: outline-color 0.15s ease;
+}
+
+.image-wrapper--drag-over {
+  outline: 2px dashed var(--ui-primary, #3b82f6);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .image-wrapper__content {
@@ -285,6 +372,49 @@ function onRestoreClick(e: MouseEvent) {
 
 .image-wrapper__draft-text {
   letter-spacing: 0.02em;
+}
+
+/* Drag handle */
+
+.image-wrapper__drag {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: rgba(17, 24, 39, 0.65);
+  color: #fff;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.image-wrapper__drag:active {
+  cursor: grabbing;
+}
+
+.image-wrapper:hover .image-wrapper__drag,
+.image-wrapper:focus-within .image-wrapper__drag {
+  opacity: 1;
+}
+
+.image-wrapper__drag:hover {
+  background: rgba(17, 24, 39, 0.85);
+}
+
+.image-wrapper__drag :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+/* Сдвигаем бейдж «Черновик» вправо, если есть drag handle */
+.image-wrapper__drag ~ .image-wrapper__draft {
+  left: 34px;
 }
 
 .image-wrapper__remove {
