@@ -3,7 +3,7 @@ import { ref, onBeforeUnmount, onMounted, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
-
+import FileContainer from '~/components/FileContainer.vue'
 // ==================== Типы ====================
 
 interface BlockType {
@@ -161,6 +161,7 @@ function iconOf(type: Pick<BlockType, 'default_settings'>): string {
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
+const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 
 function createBlockFromType(type: BlockType): BlockItem {
   return {
@@ -357,11 +358,19 @@ async function save() {
   try {
     const isUpdate = block.id > 0
 
-    const payload = {
+    // Актуальные файлы/картинки с FileContainer
+    const filesModel = fileContainerRef.value?.getFiles?.() ?? null
+
+    const payload: Record<string, any> = {
       block_type_id: block.block_type_id,
       title:         block.title,
       description:   block.description,
       settings:      block.settings,
+    }
+
+    if (filesModel) {
+      payload.files  = filesModel.files
+      payload.images = filesModel.images
     }
 
     const res = isUpdate
@@ -393,6 +402,11 @@ function reset() {
   editingBlock.value = null
   router.replace({ query: { page: '1' } })
 }
+
+watch(
+  () => editingBlock.value?.id,
+  () => { fileContainerRef.value = null },
+)
 </script>
 
 <template>
@@ -491,6 +505,7 @@ function reset() {
                 :mode="'body'"
                 v-model="editingBlock.settings"
                 :id="editingBlock.id || 0"
+                @register-files="fileContainerRef = $event"
               />
             </div>
           </template>

@@ -1,6 +1,15 @@
 <!-- components/FileContainer.vue -->
 <script setup lang="ts">
-import type {FilesListResponse, StoredImage, StoredFile, TempFile} from '~/types/files'
+
+import type {
+  FilesListResponse,
+  ImageItem,
+  FileItem,
+  StoredImage,
+  StoredFile,
+  TempFile,
+} from '~/types/files'
+
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 
@@ -566,11 +575,16 @@ function removeFromModel(url: string) {
   }
 }
 
+function getFiles(): FilesListResponse {
+  return files.value
+}
+
 // Публичные методы для родителя
 defineExpose({
   refresh,
   removeTempFile,
   removeFile,
+  getFiles,
 })
 
 // ============================================================

@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 // ==================== Модель ====================
 const value = defineModel<[]>({ default: () => [] })
 
@@ -422,8 +421,15 @@ const filesModel = ref<FilesListResponse>({
   stored: { images: [], files: [] },
 })
 
+
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 
+const emit = defineEmits<{
+  (e: 'register-files', inst: InstanceType<typeof FileContainer> | null): void
+}>()
+
+onMounted(() => emit('register-files', fileContainerRef.value))
+onBeforeUnmount(() => emit('register-files', null))
 
 </script>
 
