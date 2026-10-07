@@ -458,16 +458,20 @@ onBeforeUnmount(() => emit('register-files', null))
               :class="[imagesContainerClass]"
               :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
             >
-
-
-              <img
+              <ImageWrapper
                 v-for="(img, idx) in filesModel.images"
-                :key="img.name ?? idx"
-                :src="img.url ?? img.thumbnail"
-                :class="imageItemClass"
-                :style="imageItemStyle"
-                @click="fileContainerRef?.removeFile(img)"
-              />
+                :key="img.url ?? idx"
+                :item="img"
+                :siblings="filesModel.images"
+                @remove="fileContainerRef?.removeFile($event)"
+              >
+                <img
+                  :src="img.thumbnail || img.url"
+                  :class="imageItemClass"
+                  :style="imageItemStyle"
+                />
+              </ImageWrapper>
+
             </div>
           </div>
           <div
