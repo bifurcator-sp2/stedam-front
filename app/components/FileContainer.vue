@@ -1,15 +1,12 @@
 <!-- components/FileContainer.vue -->
 <script setup lang="ts">
-
 import type {
   FilesListResponse,
-  ImageItem,
-  FileItem,
   StoredImage,
   StoredFile,
-  TempFile,
+  ImageItem,
+  FileItem,
 } from '~/types/files'
-
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 
@@ -20,12 +17,16 @@ const props = withDefaults(defineProps<{
   fileType?: 'image' | 'file' | 'all'
   /** Запрещает пропускать/отменять этап кропа. По умолчанию true. */
   forceCrop?: boolean
+  /** Лимит изображений. -1 = без лимита, 0 = запрещено, N = максимум. */
+  maxImages?: number
 }>(), {
   fileType: 'all',
   forceCrop: true,
+  maxImages: -1,
 })
 
 const api = useApi()
+const toast = useToast()
 
 const MAX_IMAGE_DIMENSION = 2000
 
@@ -35,8 +36,8 @@ const MAX_IMAGE_DIMENSION = 2000
 
 const files = defineModel<FilesListResponse>('files', {
   default: () => ({
-    temp: {images: [], files: []},
-    stored: {images: [], files: []},
+    temp: { images: [], files: [] },
+    stored: { images: [], files: [] },
   }),
 })
 
@@ -105,6 +106,24 @@ const selectedRatioValue = computed(() => {
 const isCropModalOpen = computed(() => !!activeCrop.value)
 
 // ============================================================
+// Лимит изображений
+// ============================================================
+
+const aliveImageCount = computed(() =>
+  (files.value.images ?? []).filter((i) => !i.toDelete).length
+)
+
+const canUploadImages = computed(() => {
+  if (props.maxImages === -1) return true
+  return aliveImageCount.value < props.maxImages
+})
+
+const hideDropzone = computed(() => {
+  if (props.fileType !== 'image') return false
+  return props.maxImages === 0 || !canUploadImages.value
+})
+
+// ============================================================
 // Визуальный отклик при запрете пропуска
 // ============================================================
 
@@ -169,7 +188,7 @@ async function normalizeImage(file: File): Promise<File> {
       const newFile = new File(
         [blob],
         file.name.replace(/\.\w+$/, '.jpg'),
-        {type: 'image/jpeg', lastModified: Date.now()},
+        { type: 'image/jpeg', lastModified: Date.now() },
       )
 
       resolve(newFile)
@@ -188,13 +207,34 @@ async function normalizeImage(file: File): Promise<File> {
 // Загрузка списка — пишет в модель
 // ============================================================
 
+function emptyFiles(): FilesListResponse {
+  return {
+    images: [],
+    files: [],
+    temp: { images: [], files: [] },
+    stored: { images: [], files: [] },
+  }
+}
+
 async function refresh() {
   listLoading.value = true
   try {
-    const res = await api.get<FilesListResponse>(
+    const res = await api.get<Partial<FilesListResponse> | null>(
       `/files/preload/${props.modelName}/${props.modelId}`,
     )
-    files.value = res
+
+    files.value = {
+      images: res?.images ?? [],
+      files:  res?.files  ?? [],
+      temp: {
+        images: res?.temp?.images ?? [],
+        files:  res?.temp?.files  ?? [],
+      },
+      stored: {
+        images: res?.stored?.images ?? [],
+        files:  res?.stored?.files  ?? [],
+      },
+    }
   } finally {
     listLoading.value = false
   }
@@ -254,18 +294,47 @@ function openFileDialog() {
 }
 
 // ============================================================
-// Общая обработка файлов
+// Общая обработка файлов с учётом лимита изображений
 // ============================================================
 
 async function processFiles(list: File[]) {
   if (!list.length) return
 
+  const images = list.filter((f) => f.type.startsWith('image/'))
+  const plain  = list.filter((f) => !f.type.startsWith('image/'))
+
+  // --- Лимит по изображениям ---
+  let acceptedImages = images
+  let rejected = 0
+
+  if (props.fileType !== 'file' && props.maxImages !== -1) {
+    const alive = aliveImageCount.value
+    const free = Math.max(0, props.maxImages - alive)
+
+    if (free === 0) {
+      acceptedImages = []
+      rejected = images.length
+    } else if (acceptedImages.length > free) {
+      rejected = acceptedImages.length - free
+      acceptedImages = acceptedImages.slice(0, free)
+    }
+  }
+
+  // Тост один раз на попытку
+  if (rejected > 0) {
+    toast.add({
+      title: 'Достигнут лимит изображений',
+      description: `Максимум: ${props.maxImages}`,
+      color: 'warning',
+      icon: 'i-lucide-triangle-alert',
+    })
+  }
+
+  // --- Кроп для принятых изображений ---
   const plainFiles: File[] = []
 
-  for (const file of list) {
-    const isImage = file.type.startsWith('image/')
-    const wantCrop = isImage && props.fileType !== 'file'
-
+  for (const file of acceptedImages) {
+    const wantCrop = props.fileType !== 'file'
     if (wantCrop) {
       const normalized = await normalizeImage(file)
       cropQueue.value.push(normalized)
@@ -274,12 +343,43 @@ async function processFiles(list: File[]) {
     }
   }
 
+  // --- Не-изображения (если fileType позволяет) ---
+  if (props.fileType !== 'image' && plain.length) {
+    plainFiles.push(...plain)
+  }
+
   if (plainFiles.length) {
     await uploadFiles(plainFiles)
   }
 
   await showNextCrop()
 }
+
+// ============================================================
+// Авто-пометка при уменьшении лимита
+// ============================================================
+
+watch(
+  () => props.maxImages,
+  async (next) => {
+    if (next === -1) return
+
+    let guard = 0
+    while (guard++ < 50) {
+      const live = files.value.images.filter((i) => !i.toDelete)
+      if (live.length <= next) break
+
+      const last = live[live.length - 1]
+      if (!last) break
+
+      if (last.source === 'temp') {
+        await removeTempFile(last.url)
+      } else {
+        last.toDelete = true
+      }
+    }
+  },
+)
 
 // ============================================================
 // Очередь кропа
@@ -327,7 +427,7 @@ function destroyCropper() {
 function applyAspectRatio(aspect: number) {
   if (!cropperInstance) return
   cropperInstance.setAspectRatio(aspect)
-  log('applyAspectRatio', {aspect})
+  log('applyAspectRatio', { aspect })
 }
 
 // ============================================================
@@ -477,7 +577,7 @@ async function confirmCrop() {
     const croppedFile = new File(
       [blob],
       fileForCrop.name.replace(/\.\w+$/, '.jpg'),
-      {type: 'image/jpeg'},
+      { type: 'image/jpeg' },
     )
 
     await uploadFiles([croppedFile], selectedRatio.value)
@@ -527,7 +627,6 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
       fd,
     )
 
-    // Обновляем модель — родитель увидит новый список
     await refresh()
   } finally {
     uploading.value = false
@@ -535,20 +634,16 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
 }
 
 // ============================================================
-// Удаление файлов (temp )
-// ============================================================
-// ============================================================
 // Удаление файлов
 // ============================================================
 
 async function removeFile(item: ImageItem | FileItem) {
   if (item.source === 'temp') {
-    // temp — сразу удаляем с бэка и элемент исчезает из списка
     await removeTempFile(item.url)
     return
   }
 
-  // stored — помечаем на удаление. Физически удалится при save().
+  // stored — помечаем на удаление, физически удалится при save()
   item.toDelete = true
 }
 
@@ -583,7 +678,6 @@ function removeFromModel(url: string) {
   }
 }
 
-// Публичные методы для родителя
 function getFiles(): FilesListResponse {
   return files.value
 }
@@ -636,13 +730,13 @@ const emit = defineEmits<{
 
 watch(() => files.value.stored, (val) => {
   emit('stored-change', val)
-}, {deep: true})
+}, { deep: true })
 </script>
 
 <template>
   <div class="file-container">
     <!-- ==================== Dropzone ==================== -->
-    <div class="dropzone">
+    <div v-if="!hideDropzone" class="dropzone">
       <input
         ref="fileInputRef"
         type="file"
@@ -669,7 +763,7 @@ watch(() => files.value.stored, (val) => {
         @dragleave="onDragLeave"
         @drop="onDrop"
       >
-        <UIcon name="i-lucide-cloud-upload" class="dropzone__icon"/>
+        <UIcon name="i-lucide-cloud-upload" class="dropzone__icon" />
 
         <div class="dropzone__text">
           <span class="dropzone__title">
@@ -680,8 +774,19 @@ watch(() => files.value.stored, (val) => {
       </div>
 
       <div v-if="uploading" class="dropzone__uploading">
-        <UIcon name="i-lucide-loader-2" class="dropzone__spinner"/>
+        <UIcon name="i-lucide-loader-2" class="dropzone__spinner" />
         <span>Загрузка…</span>
+      </div>
+    </div>
+
+    <!-- ==================== Лимит достигнут ==================== -->
+    <div v-else class="limit-notice">
+      <UIcon name="i-lucide-triangle-alert" class="limit-notice__icon" />
+      <div class="limit-notice__text">
+        <span class="limit-notice__title">Достигнут лимит изображений</span>
+        <span class="limit-notice__hint">
+          Максимум: {{ maxImages === 0 ? 'загрузка запрещена' : maxImages }}
+        </span>
       </div>
     </div>
 
@@ -877,6 +982,44 @@ watch(() => files.value.stored, (val) => {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ==================== Лимит достигнут ==================== */
+
+.limit-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1.5px dashed var(--ui-border, #d1d5db);
+  border-radius: 10px;
+  background: var(--ui-bg-elevated, #f9fafb);
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.limit-notice__icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: #d97706;
+}
+
+.limit-notice__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.limit-notice__title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ui-text, #111827);
+}
+
+.limit-notice__hint {
+  font-size: 12px;
+  color: var(--ui-text-muted, #6b7280);
 }
 
 /* ==================== Модалка кропа ==================== */

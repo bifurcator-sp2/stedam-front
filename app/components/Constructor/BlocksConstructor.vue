@@ -179,6 +179,45 @@ function createBlockFromType(type: BlockType): BlockItem {
   }
 }
 
+/**
+ * Мержит актуальную схему (schema) с сохранёнными значениями (saved).
+ * Порядок и структура берутся из schema, а `default` — из saved, если ключ найден.
+ * Новые поля появляются автоматически, удалённые — исчезают.
+ */
+function mergeSchemaWithSaved(
+  schema: SettingNode[] | undefined,
+  saved: SettingNode[] | undefined,
+): SettingNode[] {
+  if (!Array.isArray(schema)) return saved ?? []
+
+  const savedByKey = new Map<string, SettingNode>()
+  for (const item of saved ?? []) {
+    if (item?.key) savedByKey.set(item.key, item)
+  }
+
+  return schema.map((schemaItem) => {
+    const savedItem = savedByKey.get(schemaItem.key)
+
+    if (!savedItem) {
+      return structuredClone(schemaItem)
+    }
+
+    const merged: SettingNode = {
+      ...structuredClone(schemaItem),
+      default: savedItem.default ?? schemaItem.default,
+    }
+
+    if (schemaItem.children?.length) {
+      merged.children = mergeSchemaWithSaved(
+        schemaItem.children,
+        savedItem.children ?? [],
+      )
+    }
+
+    return merged
+  })
+}
+
 function addBlock(type: BlockType) {
   editingBlock.value = createBlockFromType(type)
 
@@ -297,7 +336,7 @@ watch(
         id:          block.id,
         title:       block.title ?? item.title,
         description: block.description ?? item.description,
-        settings:    block.settings ?? item.settings,
+        settings:    mergeSchemaWithSaved(type.default_settings, block.settings),
       }
     } catch (e) {
       console.error('[load block by id] failed', e)

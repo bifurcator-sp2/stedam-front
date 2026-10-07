@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed } from 'vue'
+
 // ==================== Модель ====================
 const value = defineModel<[]>({ default: () => [] })
 
@@ -321,9 +322,10 @@ const imagesPaddingStyle = computed(() => collectPaddingStyle('images.padding'))
 const imagesMarginStyle = computed(() => collectMarginStyle('images.margin'))
 
 const imagesCount = computed(() => {
-  const def = Number(getDefault(value.value, 'images.count'))
-  if (!Number.isFinite(def) || def < 0) return 10
-  return def
+  const raw = getDefault(value.value, 'images.count')
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return -1
+  return Math.trunc(n)
 })
 
 const columns = computed(() =>
@@ -415,12 +417,12 @@ const imageItemStyle = computed(() => {
 })
 
 import type { FilesListResponse } from '~/types/files'
-import { ref } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+
 const filesModel = ref<FilesListResponse>({
   temp: { images: [], files: [] },
   stored: { images: [], files: [] },
 })
-
 
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 
@@ -430,7 +432,6 @@ const emit = defineEmits<{
 
 onMounted(() => emit('register-files', fileContainerRef.value))
 onBeforeUnmount(() => emit('register-files', null))
-
 </script>
 
 <template>
@@ -445,6 +446,7 @@ onBeforeUnmount(() => emit('register-files', null))
         model-name="blocks"
         :model-id="id"
         file-type="image"
+        :max-images="imagesCount"
         v-model:files="filesModel"
       />
       <div :style="[layoutMarginStyle]">
@@ -472,7 +474,6 @@ onBeforeUnmount(() => emit('register-files', null))
                   :style="imageItemStyle"
                 />
               </ImageWrapper>
-
             </div>
           </div>
           <div
