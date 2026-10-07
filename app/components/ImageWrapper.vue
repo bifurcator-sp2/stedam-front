@@ -15,13 +15,22 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'remove', item: ImageItem): void
+  (e: 'restore', item: ImageItem): void
 }>()
+
+// ============================================================
+// Помечен на удаление
+// ============================================================
+
+const isToDelete = computed(() => props.item.toDelete === true)
 
 // ============================================================
 // Черновик
 // ============================================================
 
-const isDraft = computed(() => props.showDraft && props.item.source === 'temp')
+const isDraft = computed(
+  () => !isToDelete.value && props.showDraft && props.item.source === 'temp',
+)
 
 // ============================================================
 // Лайтбокс
@@ -30,8 +39,6 @@ const isDraft = computed(() => props.showDraft && props.item.source === 'temp')
 const lightboxOpen = ref(false)
 const lightboxIndex = ref(0)
 
-// Список для навигации: если siblings передан — используем его,
-// иначе работаем с одним элементом.
 const gallery = computed<ImageItem[]>(() => {
   if (props.siblings?.length) return props.siblings
   return [props.item]
@@ -47,6 +54,9 @@ const hasNext = computed(() => lightboxIndex.value < gallery.value.length - 1)
 const canNavigate = computed(() => gallery.value.length > 1)
 
 function openLightbox() {
+  // Если помечена на удаление — лайтбокс не открываем
+  if (isToDelete.value) return
+
   const idx = gallery.value.findIndex((i) => i.url === props.item.url)
   lightboxIndex.value = idx >= 0 ? idx : 0
   lightboxOpen.value = true
@@ -65,7 +75,7 @@ function next() {
 }
 
 // ============================================================
-// Esc + блокировка скролла, пока открыт лайтбокс
+// Esc + блокировка скролла
 // ============================================================
 
 function onKeydown(e: KeyboardEvent) {
@@ -106,23 +116,28 @@ onBeforeUnmount(() => {
 })
 
 // ============================================================
-// Удаление
+// Удаление / восстановление
 // ============================================================
 
 function onRemoveClick(e: MouseEvent) {
   e.stopPropagation()
   emit('remove', props.item)
 }
+
+function onRestoreClick(e: MouseEvent) {
+  e.stopPropagation()
+  emit('restore', props.item)
+}
 </script>
 
 <template>
-  <div class="image-wrapper">
-    <!-- Слот с картинкой — не трогаем, размер диктует он -->
+  <div class="image-wrapper" :class="{ 'image-wrapper--to-delete': isToDelete }">
+    <!-- Слот с картинкой -->
     <div class="image-wrapper__content" @click="openLightbox">
       <slot />
     </div>
 
-    <!-- Бейдж «Черновик» слева вверху -->
+    <!-- Бейдж «Черновик» -->
     <div
       v-if="isDraft"
       class="image-wrapper__draft"
@@ -132,8 +147,9 @@ function onRemoveClick(e: MouseEvent) {
       <span class="image-wrapper__draft-text">Черновик</span>
     </div>
 
-    <!-- Крестик справа вверху -->
+    <!-- Крестик удаления -->
     <button
+      v-if="!isToDelete"
       type="button"
       class="image-wrapper__remove"
       aria-label="Удалить"
@@ -141,6 +157,19 @@ function onRemoveClick(e: MouseEvent) {
     >
       <UIcon name="i-lucide-x" />
     </button>
+
+    <!-- Оверлей «на удаление» -->
+    <div v-if="isToDelete" class="image-wrapper__overlay">
+      <button
+        type="button"
+        class="image-wrapper__restore"
+        aria-label="Восстановить"
+        @click="onRestoreClick"
+      >
+        <UIcon name="i-lucide-rotate-ccw" />
+        <span>Восстановить</span>
+      </button>
+    </div>
   </div>
 
   <!-- Лайтбокс -->
@@ -153,12 +182,10 @@ function onRemoveClick(e: MouseEvent) {
           @click.self="closeLightbox"
         >
           <div class="iw-lightbox__inner" @click.self="closeLightbox">
-            <!-- Счётчик -->
             <div v-if="canNavigate" class="iw-lightbox__counter">
               {{ lightboxIndex + 1 }} / {{ gallery.length }}
             </div>
 
-            <!-- Закрыть -->
             <button
               type="button"
               class="iw-lightbox__close"
@@ -168,7 +195,6 @@ function onRemoveClick(e: MouseEvent) {
               <UIcon name="i-lucide-x" />
             </button>
 
-            <!-- Стрелка влево -->
             <button
               v-if="hasPrev"
               type="button"
@@ -179,7 +205,6 @@ function onRemoveClick(e: MouseEvent) {
               <UIcon name="i-lucide-chevron-left" />
             </button>
 
-            <!-- Картинка + подпись -->
             <div class="iw-lightbox__media" @click.stop>
               <img
                 :src="current.url"
@@ -192,7 +217,6 @@ function onRemoveClick(e: MouseEvent) {
               </div>
             </div>
 
-            <!-- Стрелка вправо -->
             <button
               v-if="hasNext"
               type="button"
@@ -215,12 +239,21 @@ function onRemoveClick(e: MouseEvent) {
 .image-wrapper {
   position: relative;
   display: inline-block;
-  line-height: 0; /* чтобы img не добавлял лишний baseline-отступ */
+  line-height: 0;
+  align-self: flex-start;   /* ← не растягиваться по высоте flex-строки */
+  flex: 0 0 auto;           /* ← не расти и не сжиматься */
+  vertical-align: top;      /* ← на всякий случай, если контейнер не flex */
 }
 
 .image-wrapper__content {
   display: block;
   cursor: zoom-in;
+  line-height: 0;
+  font-size: 0;
+}
+
+.image-wrapper--to-delete .image-wrapper__content {
+  cursor: default;
 }
 
 /* Крестик и бейдж — поверх картинки */
@@ -243,7 +276,6 @@ function onRemoveClick(e: MouseEvent) {
   pointer-events: none;
   user-select: none;
   opacity: 0.9;
-  transition: opacity 0.15s ease;
 }
 
 .image-wrapper__draft-icon {
@@ -286,6 +318,47 @@ function onRemoveClick(e: MouseEvent) {
 }
 
 .image-wrapper__remove :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+/* Оверлей «на удаление» */
+
+.image-wrapper__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(107, 114, 128, 0.6);
+  backdrop-filter: grayscale(1);
+}
+
+.image-wrapper__restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+}
+
+.image-wrapper__restore:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.6);
+  transform: scale(1.03);
+}
+
+.image-wrapper__restore :deep(svg) {
   width: 14px;
   height: 14px;
 }

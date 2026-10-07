@@ -349,6 +349,8 @@ function goToPage(page: number) {
 // ==================== Сохранение ====================
 
 const saving = ref(false)
+// Ключ для пересоздания TextBlock после save()
+const blockKey = ref(0)
 
 async function save() {
   const block = editingBlock.value
@@ -361,6 +363,8 @@ async function save() {
     // Актуальные файлы/картинки с FileContainer
     const filesModel = fileContainerRef.value?.getFiles?.() ?? null
 
+
+
     const payload: Record<string, any> = {
       block_type_id: block.block_type_id,
       title:         block.title,
@@ -369,8 +373,8 @@ async function save() {
     }
 
     if (filesModel) {
-      payload.files  = filesModel.files
-      payload.images = filesModel.images
+      payload.files  = filesModel.files.filter((f: FileItem) => !f.toDelete)
+      payload.images = filesModel.images.filter((i: ImageItem) => !i.toDelete)
     }
 
     const res = isUpdate
@@ -391,6 +395,9 @@ async function save() {
     router.replace({
       query: { id: String(saved.id) },
     })
+    // Форсим пересоздание TextBlock: FileContainer заново смонтируется,
+    // сделает refresh() и подтянет актуальные файлы с бэка.
+    blockKey.value++
   } finally {
     saving.value = false
   }
@@ -500,13 +507,15 @@ watch(
           <!-- === Режим редактирования конкретного блока === -->
           <template v-if="editingBlock">
             <div class="bg-default w-full max-w-[640px] mx-auto">
-              <TextBlock
-                :key="editingBlock.id"
-                :mode="'body'"
-                v-model="editingBlock.settings"
-                :id="editingBlock.id || 0"
-                @register-files="fileContainerRef = $event"
-              />
+              <LoadingOverlay :loading="saving">
+                <TextBlock
+                  :key="`${editingBlock.id}-${blockKey}`"
+                  :mode="'body'"
+                  v-model="editingBlock.settings"
+                  :id="editingBlock.id || 0"
+                  @register-files="fileContainerRef = $event"
+                />
+              </LoadingOverlay>
             </div>
           </template>
 

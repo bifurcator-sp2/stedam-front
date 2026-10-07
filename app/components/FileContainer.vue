@@ -537,20 +537,28 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
 // ============================================================
 // Удаление файлов (temp )
 // ============================================================
+// ============================================================
+// Удаление файлов
+// ============================================================
+
 async function removeFile(item: ImageItem | FileItem) {
   if (item.source === 'temp') {
+    // temp — сразу удаляем с бэка и элемент исчезает из списка
     await removeTempFile(item.url)
     return
   }
 
-  // stored — просто убираем упоминание. Физически файл удалится
-  // при следующем save() блока (moveTempToStore → pruneOrphans).
-  removeFromModel(item.url)
+  // stored — помечаем на удаление. Физически удалится при save().
+  item.toDelete = true
+}
+
+function restoreFile(item: ImageItem | FileItem) {
+  item.toDelete = false
 }
 
 async function removeTempFile(url: string) {
   await api.delete(`/files/preload/${props.modelName}/${props.modelId}`, {
-    body: {url},
+    body: { url },
   })
   await refresh()
 }
@@ -563,18 +571,19 @@ function removeFromModel(url: string) {
 
   files.value = {
     images: filterOut(current.images),
-    files: filterOut(current.files),
+    files:  filterOut(current.files),
     temp: {
       images: filterOut(current.temp?.images),
-      files: filterOut(current.temp?.files),
+      files:  filterOut(current.temp?.files),
     },
     stored: {
       images: filterOut(current.stored?.images),
-      files: filterOut(current.stored?.files),
+      files:  filterOut(current.stored?.files),
     },
   }
 }
 
+// Публичные методы для родителя
 function getFiles(): FilesListResponse {
   return files.value
 }
@@ -584,6 +593,7 @@ defineExpose({
   refresh,
   removeTempFile,
   removeFile,
+  restoreFile,
   getFiles,
 })
 

@@ -464,6 +464,7 @@ onBeforeUnmount(() => emit('register-files', null))
                 :item="img"
                 :siblings="filesModel.images"
                 @remove="fileContainerRef?.removeFile($event)"
+                @restore="fileContainerRef?.restoreFile($event)"
               >
                 <img
                   :src="img.thumbnail || img.url"

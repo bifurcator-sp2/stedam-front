@@ -5,12 +5,14 @@ export interface ImageItem {
   thumbnail: string | null
   source: 'temp' | 'stored'
   title: string | null
+  toDelete?: boolean
 }
 
 export interface FileItem {
   url: string
   source: 'temp' | 'stored'
   title: string | null
+  toDelete?: boolean
 }
 
 export interface FilesListResponse {
