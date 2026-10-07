@@ -421,13 +421,8 @@ const filesModel = ref<FilesListResponse>({
   temp: { images: [], files: [] },
   stored: { images: [], files: [] },
 })
+
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
-async function onTempImageClick(img: any) {
-  if (!fileContainerRef.value) return
-  const name = img?.name
-  if (!name) return
-  await fileContainerRef.value.removeTempFile(name)
-}
 
 
 </script>
@@ -460,12 +455,12 @@ async function onTempImageClick(img: any) {
 
 
               <img
-                v-for="(img, idx) in filesModel.temp.images"
+                v-for="(img, idx) in filesModel.images"
                 :key="img.name ?? idx"
-                :src="img.url ?? img.thumbnail_url ?? img.original_url"
+                :src="img.url ?? img.thumbnail"
                 :class="imageItemClass"
                 :style="imageItemStyle"
-                @click="onTempImageClick(img)"
+                @click="fileContainerRef?.removeFile(img)"
               />
             </div>
           </div>

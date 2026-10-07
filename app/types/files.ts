@@ -1,35 +1,27 @@
 // types/files.ts
 
-export interface TempFile {
-  name: string
+export interface ImageItem {
   url: string
-  ratio?: string | null
-}
-
-export interface StoredImage {
-  original: string
-  original_url: string | null
   thumbnail: string | null
-  thumbnail_url: string | null
-  ratio: string | null
-  order: number
-  source: 'stored'
+  source: 'temp' | 'stored'
+  title: string | null
 }
 
-export interface StoredFile {
-  name: string
-  url: string | null
-  order: number
-  source: 'stored'
+export interface FileItem {
+  url: string
+  source: 'temp' | 'stored'
+  title: string | null
 }
 
 export interface FilesListResponse {
+  images: ImageItem[]
+  files: FileItem[]
   temp: {
-    images: TempFile[]
-    files: TempFile[]
+    images: ImageItem[]
+    files: FileItem[]
   }
   stored: {
-    images: StoredImage[]
-    files: StoredFile[]
+    images: ImageItem[]
+    files: FileItem[]
   }
 }

@@ -1,6 +1,6 @@
 <!-- components/FileContainer.vue -->
 <script setup lang="ts">
-import type { FilesListResponse, StoredImage, StoredFile, TempFile } from '~/types/files'
+import type {FilesListResponse, StoredImage, StoredFile, TempFile} from '~/types/files'
 import Cropper from 'cropperjs'
 import 'cropperjs/dist/cropper.css'
 
@@ -26,8 +26,8 @@ const MAX_IMAGE_DIMENSION = 2000
 
 const files = defineModel<FilesListResponse>('files', {
   default: () => ({
-    temp: { images: [], files: [] },
-    stored: { images: [], files: [] },
+    temp: {images: [], files: []},
+    stored: {images: [], files: []},
   }),
 })
 
@@ -42,6 +42,7 @@ const DEBUG = true
 function log(...args: unknown[]) {
   if (DEBUG) console.log('[FileContainer]', ...args)
 }
+
 function warn(...args: unknown[]) {
   if (DEBUG) console.warn('[FileContainer]', ...args)
 }
@@ -159,7 +160,7 @@ async function normalizeImage(file: File): Promise<File> {
       const newFile = new File(
         [blob],
         file.name.replace(/\.\w+$/, '.jpg'),
-        { type: 'image/jpeg', lastModified: Date.now() },
+        {type: 'image/jpeg', lastModified: Date.now()},
       )
 
       resolve(newFile)
@@ -306,7 +307,10 @@ async function showNextCrop() {
 
 function destroyCropper() {
   if (cropperInstance) {
-    try { cropperInstance.destroy() } catch (e) { /* ignore */ }
+    try {
+      cropperInstance.destroy()
+    } catch (e) { /* ignore */
+    }
     cropperInstance = null
   }
 }
@@ -314,7 +318,7 @@ function destroyCropper() {
 function applyAspectRatio(aspect: number) {
   if (!cropperInstance) return
   cropperInstance.setAspectRatio(aspect)
-  log('applyAspectRatio', { aspect })
+  log('applyAspectRatio', {aspect})
 }
 
 // ============================================================
@@ -464,7 +468,7 @@ async function confirmCrop() {
     const croppedFile = new File(
       [blob],
       fileForCrop.name.replace(/\.\w+$/, '.jpg'),
-      { type: 'image/jpeg' },
+      {type: 'image/jpeg'},
     )
 
     await uploadFiles([croppedFile], selectedRatio.value)
@@ -522,18 +526,52 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
 }
 
 // ============================================================
-// Удаление временных файлов
+// Удаление файлов (temp )
 // ============================================================
+async function removeFile(item: ImageItem | FileItem) {
+  if (item.source === 'temp') {
+    await removeTempFile(item.url)
+    return
+  }
 
-async function removeTempFile(name: string) {
+  // stored — просто убираем упоминание. Физически файл удалится
+  // при следующем save() блока (moveTempToStore → pruneOrphans).
+  removeFromModel(item.url)
+}
+
+async function removeTempFile(url: string) {
   await api.delete(`/files/preload/${props.modelName}/${props.modelId}`, {
-    body: { name },
+    body: {url},
   })
   await refresh()
 }
 
+function removeFromModel(url: string) {
+  const current = files.value
+
+  const filterOut = <T extends { url: string }>(list: T[] | undefined): T[] =>
+    (list ?? []).filter((item) => item.url !== url)
+
+  files.value = {
+    images: filterOut(current.images),
+    files: filterOut(current.files),
+    temp: {
+      images: filterOut(current.temp?.images),
+      files: filterOut(current.temp?.files),
+    },
+    stored: {
+      images: filterOut(current.stored?.images),
+      files: filterOut(current.stored?.files),
+    },
+  }
+}
+
 // Публичные методы для родителя
-defineExpose({ refresh, removeTempFile })
+defineExpose({
+  refresh,
+  removeTempFile,
+  removeFile,
+})
 
 // ============================================================
 // Escape
@@ -574,7 +612,7 @@ const emit = defineEmits<{
 
 watch(() => files.value.stored, (val) => {
   emit('stored-change', val)
-}, { deep: true })
+}, {deep: true})
 </script>
 
 <template>
@@ -607,7 +645,7 @@ watch(() => files.value.stored, (val) => {
         @dragleave="onDragLeave"
         @drop="onDrop"
       >
-        <UIcon name="i-lucide-cloud-upload" class="dropzone__icon" />
+        <UIcon name="i-lucide-cloud-upload" class="dropzone__icon"/>
 
         <div class="dropzone__text">
           <span class="dropzone__title">
@@ -618,7 +656,7 @@ watch(() => files.value.stored, (val) => {
       </div>
 
       <div v-if="uploading" class="dropzone__uploading">
-        <UIcon name="i-lucide-loader-2" class="dropzone__spinner" />
+        <UIcon name="i-lucide-loader-2" class="dropzone__spinner"/>
         <span>Загрузка…</span>
       </div>
     </div>
@@ -734,10 +772,9 @@ watch(() => files.value.stored, (val) => {
   border-radius: 10px;
   background: var(--ui-bg-elevated, #f9fafb);
   cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease,
-    transform 0.15s ease;
+  transition: border-color 0.15s ease,
+  background 0.15s ease,
+  transform 0.15s ease;
   user-select: none;
 }
 
@@ -810,8 +847,12 @@ watch(() => files.value.stored, (val) => {
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ==================== Модалка кропа ==================== */
@@ -847,9 +888,15 @@ watch(() => files.value.stored, (val) => {
 }
 
 @keyframes crop-shake {
-  0%, 100% { transform: translateX(0); }
-  25%      { transform: translateX(-4px); }
-  75%      { transform: translateX(4px); }
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
 }
 
 .crop-modal__header {
