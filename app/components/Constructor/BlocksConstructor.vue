@@ -4,6 +4,7 @@ import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vu
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import FileContainer from '~/components/FileContainer.vue'
+
 // ==================== Типы ====================
 
 interface BlockType {
@@ -12,11 +13,7 @@ interface BlockType {
   type: 'info' | 'task'
   name: string
   description: string | null
-  default_settings: {
-    icon?: string
-    [key: string]: unknown
-  }
-  schema: SettingNode[]
+  default_settings: SettingNode[]
   created_at?: string
   updated_at?: string
 }
@@ -29,7 +26,7 @@ interface BlockItem {
   description: string
   icon: string
   schema: SettingNode[]
-  default_settings: Record<string, unknown>
+  default_settings: SettingNode[]
   settings: SettingNode[]
 }
 
@@ -155,15 +152,20 @@ const router = useRouter()
 // ==================== Хелпер: иконка ====================
 
 function iconOf(type: Pick<BlockType, 'default_settings'>): string {
-  return (type.default_settings?.icon as string | undefined) ?? 'i-lucide-square'
+  const fields = Array.isArray(type.default_settings) ? type.default_settings : []
+  const iconField = fields.find((f: any) => f.key === 'icon')
+  return (iconField?.default as string | undefined) ?? 'i-lucide-square'
 }
 
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
+const blockKey = ref(0)
 
 function createBlockFromType(type: BlockType): BlockItem {
+  const schema = Array.isArray(type.default_settings) ? type.default_settings : []
+
   return {
     id: 0,
     code: type.code,
@@ -171,9 +173,9 @@ function createBlockFromType(type: BlockType): BlockItem {
     title: type.name,
     description: type.description ?? '',
     icon: iconOf(type),
-    schema: type.schema ?? [],
-    default_settings: type.default_settings ?? {},
-    settings: structuredClone(type.schema ?? []),
+    schema,
+    default_settings: type.default_settings,
+    settings: structuredClone(schema),
   }
 }
 
@@ -349,8 +351,6 @@ function goToPage(page: number) {
 // ==================== Сохранение ====================
 
 const saving = ref(false)
-// Ключ для пересоздания TextBlock после save()
-const blockKey = ref(0)
 
 async function save() {
   const block = editingBlock.value
@@ -360,10 +360,7 @@ async function save() {
   try {
     const isUpdate = block.id > 0
 
-    // Актуальные файлы/картинки с FileContainer
     const filesModel = fileContainerRef.value?.getFiles?.() ?? null
-
-
 
     const payload: Record<string, any> = {
       block_type_id: block.block_type_id,
@@ -373,8 +370,8 @@ async function save() {
     }
 
     if (filesModel) {
-      payload.files  = filesModel.files.filter((f: FileItem) => !f.toDelete)
-      payload.images = filesModel.images.filter((i: ImageItem) => !i.toDelete)
+      payload.files  = filesModel.files.filter((f: any) => !f.toDelete)
+      payload.images = filesModel.images.filter((i: any) => !i.toDelete)
     }
 
     const res = isUpdate
@@ -395,8 +392,7 @@ async function save() {
     router.replace({
       query: { id: String(saved.id) },
     })
-    // Форсим пересоздание TextBlock: FileContainer заново смонтируется,
-    // сделает refresh() и подтянет актуальные файлы с бэка.
+
     blockKey.value++
   } finally {
     saving.value = false
@@ -409,11 +405,6 @@ function reset() {
   editingBlock.value = null
   router.replace({ query: { page: '1' } })
 }
-
-watch(
-  () => editingBlock.value?.id,
-  () => { fileContainerRef.value = null },
-)
 </script>
 
 <template>
