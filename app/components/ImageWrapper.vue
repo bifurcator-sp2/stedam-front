@@ -10,10 +10,13 @@ const props = withDefaults(defineProps<{
   showDraft?: boolean
   /** Разрешить перетаскивание за иконку. */
   allowDragAndDrop?: boolean
+  /** Если true — помеченные toDelete показываются с оверлеем и кнопкой «Восстановить». */
+  showToDelete?: boolean
 }>(), {
   siblings: () => [],
   showDraft: true,
   allowDragAndDrop: true,
+  showToDelete: false,
 })
 
 const emit = defineEmits<{
@@ -26,7 +29,9 @@ const emit = defineEmits<{
 // Помечен на удаление
 // ============================================================
 
-const isToDelete = computed(() => props.item.toDelete === true)
+const isToDelete = computed(
+  () => props.showToDelete === true && props.item.toDelete === true,
+)
 
 // ============================================================
 // Черновик
@@ -49,6 +54,7 @@ const myIndex = computed(() => {
 
 function onDragStart(e: DragEvent) {
   if (!props.allowDragAndDrop) return
+  if (isToDelete.value) return
   if (myIndex.value < 0) return
 
   if (e.dataTransfer) {
@@ -59,6 +65,7 @@ function onDragStart(e: DragEvent) {
 
 function onDragOver(e: DragEvent) {
   if (!props.allowDragAndDrop) return
+  if (isToDelete.value) return
   if (myIndex.value < 0) return
 
   e.preventDefault()

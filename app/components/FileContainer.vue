@@ -19,10 +19,13 @@ const props = withDefaults(defineProps<{
   forceCrop?: boolean
   /** Лимит изображений. -1 = без лимита, 0 = запрещено, N = максимум. */
   maxImages?: number
+  /** Если true — stored-картинки помечаются toDelete, а не удаляются сразу. */
+  showToDeleteImages?: boolean
 }>(), {
   fileType: 'all',
   forceCrop: true,
   maxImages: -1,
+  showToDeleteImages: false,
 })
 
 const api = useApi()
@@ -36,6 +39,8 @@ const MAX_IMAGE_DIMENSION = 2000
 
 const files = defineModel<FilesListResponse>('files', {
   default: () => ({
+    images: [],
+    files: [],
     temp: { images: [], files: [] },
     stored: { images: [], files: [] },
   }),
@@ -366,7 +371,7 @@ watch(
 
     let guard = 0
     while (guard++ < 50) {
-      const live = files.value.images.filter((i) => !i.toDelete)
+      const live = (files.value.images ?? []).filter((i) => !i.toDelete)
       if (live.length <= next) break
 
       const last = live[live.length - 1]
@@ -643,8 +648,14 @@ async function removeFile(item: ImageItem | FileItem) {
     return
   }
 
-  // stored — помечаем на удаление, физически удалится при save()
-  item.toDelete = true
+  // stored
+  if (props.showToDeleteImages) {
+    item.toDelete = true
+    return
+  }
+
+  // сразу убираем из списка (при save() бэк удалит из реестра и с диска)
+  removeFromModel(item.url)
 }
 
 function restoreFile(item: ImageItem | FileItem) {

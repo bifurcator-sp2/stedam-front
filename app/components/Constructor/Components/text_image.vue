@@ -8,8 +8,11 @@ const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
   id?: number
   allowDragAndDrop?: boolean
+  /** Если true — stored-картинки помечаются toDelete, а не удаляются сразу. */
+  showToDeleteImages?: boolean
 }>(), {
   allowDragAndDrop: true,
+  showToDeleteImages: false,
 })
 
 // ==================== Общие утилиты ====================
@@ -427,6 +430,8 @@ import type { FilesListResponse } from '~/types/files'
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 const filesModel = ref<FilesListResponse>({
+  images: [],
+  files: [],
   temp: { images: [], files: [] },
   stored: { images: [], files: [] },
 })
@@ -468,6 +473,7 @@ function onReorder(from: number, to: number) {
         :model-id="id"
         file-type="image"
         :max-images="imagesCount"
+        :show-to-delete-images="showToDeleteImages"
         v-model:files="filesModel"
       />
       <div :style="[layoutMarginStyle]">
@@ -487,6 +493,7 @@ function onReorder(from: number, to: number) {
                 :item="img"
                 :siblings="filesModel.images"
                 :allow-drag-and-drop="allowDragAndDrop"
+                :show-to-delete="showToDeleteImages"
                 @remove="fileContainerRef?.removeFile($event)"
                 @restore="fileContainerRef?.restoreFile($event)"
                 @reorder="onReorder"
