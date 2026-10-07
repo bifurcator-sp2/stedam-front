@@ -203,17 +203,10 @@ function collectMarginStyle(basePath: string): Record<string, string> {
   })
 }
 
-// ==================== Превью-изображения ====================
-const previewImages = [
-  'https://img.magnific.com/premium-photo/trees-park-autumn_1048944-1833622.jpg?semt=ais_hybrid&w=740&q=80',
-  'https://i.pinimg.com/originals/39/08/8c/39088c9907bce387867eb149fc9fed54.jpg',
-  'https://turclub-pik.ru/crop/1160/464/uploads/blog_img/covers/ce0803b71598de24381350509c5d02f5.jpeg.webp',
-  'https://avatars.mds.yandex.net/i?id=e9812860a39898a8a0494d0ae5399494_l-5232437-images-thumbs&n=13',
-  'https://www.tripletcam.com/videos/categories/assets/4/background.png?1685627419',
-  'https://cdn.xn--h1ajim.xn--p1ai/images/thumb/1/1f/20_Jahre_kann_ein_Star_alt_werden._03.jpg/640px-20_Jahre_kann_ein_Star_alt_werden._03.jpg',
-  'https://avatars.mds.yandex.net/i?id=f1175b08cbc475e1f8d218a06dacd9bc585f1851-4577649-images-thumbs&n=13',
-  'https://avatars.mds.yandex.net/get-mpic/5322414/img_id3536859793184490756.jpeg/orig',
-]
+const imageBorderStyle = computed(() =>
+  collectBorderStyle('images.image-border', 'images.image-border.radius')
+)
+
 
 // ==================== Layout ====================
 const layout = computed(() => getDefault(value.value, 'layout'))
@@ -471,7 +464,7 @@ onBeforeUnmount(() => emit('register-files', null))
                 <img
                   :src="img.thumbnail || img.url"
                   :class="imageItemClass"
-                  :style="imageItemStyle"
+                  :style="[imageItemStyle, imageBorderStyle]"
                 />
               </ImageWrapper>
             </div>
