@@ -1,14 +1,21 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { Vue3IconPicker } from 'vue3-icon-picker'
+import 'vue3-icon-picker/dist/style.css'
+
 interface SettingItem {
   key: string
   label: string
-  type: 'string' | 'select' | 'int' | 'color'
+  type: 'string' | 'select' | 'int' | 'color' | 'bool' | 'icon'
   default?: any
   allowed?: any[]
   children?: SettingItem[]
 }
 
 const model = defineModel<SettingItem>({ required: true })
+
+// Режим блока icon: 'manual' | 'picker'
+const iconMode = ref<'manual' | 'picker'>('manual')
 
 function updateChild(index: number, updated: SettingItem) {
   if (!model.value.children) return
@@ -26,6 +33,96 @@ function updateChild(index: number, updated: SettingItem) {
       <span class="field-group-title">{{ model.label }}</span>
       <span class="field-group-key">{{ model.key }}</span>
     </div>
+
+    <!-- Тип "icon" — иконка слева, настройки справа -->
+    <!-- Тип "icon" — иконка слева, настройки справа -->
+    <template v-else-if="model.type === 'icon'">
+      <div class="field-icon">
+        <div class="field-icon-preview">
+          <UIcon
+            v-if="model.default"
+            :name="model.default"
+            class="field-icon-preview__svg"
+          />
+          <span v-else class="field-icon-preview__empty">нет иконки</span>
+        </div>
+
+        <div class="field-icon-body">
+          <!-- Режим: ручной ввод -->
+          <template v-if="iconMode === 'manual'">
+            <div class="field-icon-input-row">
+              <UInput
+                v-model="model.default"
+                size="xs"
+                placeholder="i-lucide-hop"
+                class="field-control"
+              />
+              <UButton
+                icon="i-lucide-grid-2x2"
+                size="xs"
+                color="neutral"
+                variant="soft"
+                title="Выбрать из библиотеки"
+                @click="iconMode = 'picker'"
+              />
+            </div>
+
+            <div class="field-icon-hint">
+              <div class="field-icon-hint__row">
+                <span class="field-icon-hint__label">Синтаксис:</span>
+                <code class="field-icon-hint__code">i-набор:имя</code>
+              </div>
+
+              <div class="field-icon-hint__row">
+                <span class="field-icon-hint__label">Например:</span>
+                <code class="field-icon-hint__code">i-lucide-hop</code>
+              </div>
+
+              <div class="field-icon-hint__links">
+                <a
+                  href="https://icones.js.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="field-icon-hint__link"
+                >
+                  <UIcon name="i-lucide-external-link" class="field-icon-hint__link-icon" />
+                  icones.js.org
+                </a>
+                <a
+                  href="https://lucide.dev/icons/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="field-icon-hint__link"
+                >
+                  <UIcon name="i-lucide-external-link" class="field-icon-hint__link-icon" />
+                  lucide.dev/icons
+                </a>
+              </div>
+            </div>
+          </template>
+
+          <!-- Режим: пикер -->
+          <template v-else>
+            <div class="field-icon-input-row">
+              <Vue3IconPicker
+                v-model="model.default"
+                placeholder="Поиск иконки..."
+                icon-library="lucide"
+                class="field-control"
+              />
+              <UButton
+                icon="i-lucide-keyboard"
+                size="xs"
+                color="neutral"
+                variant="soft"
+                title="Ввести вручную"
+                @click="iconMode = 'manual'"
+              />
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
 
     <!-- Листовое поле: label + control в одну строку -->
     <template v-else>
@@ -181,5 +278,140 @@ function updateChild(index: number, updated: SettingItem) {
   padding-top: 2px;
   padding-bottom: 2px;
   font-size: 12.5px;
+}
+
+/* ====== Тип "icon" ====== */
+
+.field-icon {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.field-icon-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 6px;
+  border: 1px dashed var(--ui-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--ui-bg, #ffffff);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.field-icon-preview__svg {
+  width: 100%;
+  height: 100%;
+  color: var(--ui-text, #111827);
+}
+
+.field-icon-preview__empty {
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  color: var(--ui-text-muted, #9ca3af);
+}
+
+/* Форсим svg тянуться от родителя */
+.field-icon-preview__svg :deep(svg) {
+  width: 100%;
+  height: 100%;
+}
+
+.field-icon-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field-icon-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field-icon-input-row .field-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ====== Подсказка ====== */
+
+.field-icon-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--ui-bg-elevated, #f9fafb);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.field-icon-hint__row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field-icon-hint__label {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.field-icon-hint__code {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--ui-bg, #ffffff);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  color: var(--ui-text, #111827);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.field-icon-hint__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.field-icon-hint__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--ui-bg, #ffffff);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  color: var(--ui-primary, #3b82f6);
+  font-size: 11px;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.field-icon-hint__link:hover {
+  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.08));
+  border-color: var(--ui-primary, #3b82f6);
+}
+
+.field-icon-hint__link-icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
 }
 </style>

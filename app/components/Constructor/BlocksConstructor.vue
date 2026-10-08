@@ -157,6 +157,12 @@ function iconOf(type: Pick<BlockType, 'default_settings'>): string {
   return (iconField?.default as string | undefined) ?? 'i-lucide-square'
 }
 
+function iconOfSettings(settings: SettingNode[] | undefined): string {
+  const fields = Array.isArray(settings) ? settings : []
+  const iconField = fields.find((f: any) => f.key === 'icon')
+  return (iconField?.default as string | undefined) ?? 'i-lucide-square'
+}
+
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
@@ -177,45 +183,6 @@ function createBlockFromType(type: BlockType): BlockItem {
     default_settings: type.default_settings,
     settings: structuredClone(schema),
   }
-}
-
-/**
- * Мержит актуальную схему (schema) с сохранёнными значениями (saved).
- * Порядок и структура берутся из schema, а `default` — из saved, если ключ найден.
- * Новые поля появляются автоматически, удалённые — исчезают.
- */
-function mergeSchemaWithSaved(
-  schema: SettingNode[] | undefined,
-  saved: SettingNode[] | undefined,
-): SettingNode[] {
-  if (!Array.isArray(schema)) return saved ?? []
-
-  const savedByKey = new Map<string, SettingNode>()
-  for (const item of saved ?? []) {
-    if (item?.key) savedByKey.set(item.key, item)
-  }
-
-  return schema.map((schemaItem) => {
-    const savedItem = savedByKey.get(schemaItem.key)
-
-    if (!savedItem) {
-      return structuredClone(schemaItem)
-    }
-
-    const merged: SettingNode = {
-      ...structuredClone(schemaItem),
-      default: savedItem.default ?? schemaItem.default,
-    }
-
-    if (schemaItem.children?.length) {
-      merged.children = mergeSchemaWithSaved(
-        schemaItem.children,
-        savedItem.children ?? [],
-      )
-    }
-
-    return merged
-  })
 }
 
 function addBlock(type: BlockType) {
@@ -345,6 +312,40 @@ watch(
   { immediate: true },
 )
 
+function mergeSchemaWithSaved(
+  schema: SettingNode[] | undefined,
+  saved: SettingNode[] | undefined,
+): SettingNode[] {
+  if (!Array.isArray(schema)) return saved ?? []
+
+  const savedByKey = new Map<string, SettingNode>()
+  for (const item of saved ?? []) {
+    if (item?.key) savedByKey.set(item.key, item)
+  }
+
+  return schema.map((schemaItem) => {
+    const savedItem = savedByKey.get(schemaItem.key)
+
+    if (!savedItem) {
+      return structuredClone(schemaItem)
+    }
+
+    const merged: SettingNode = {
+      ...structuredClone(schemaItem),
+      default: savedItem.default ?? schemaItem.default,
+    }
+
+    if (schemaItem.children?.length) {
+      merged.children = mergeSchemaWithSaved(
+        schemaItem.children,
+        savedItem.children ?? [],
+      )
+    }
+
+    return merged
+  })
+}
+
 // ==================== Watch: список блоков ====================
 
 watch(
@@ -409,8 +410,8 @@ async function save() {
     }
 
     if (filesModel) {
-      payload.files  = filesModel.files.filter((f: any) => !f.toDelete)
-      payload.images = filesModel.images.filter((i: any) => !i.toDelete)
+      payload.files  = (filesModel.files  ?? []).filter((f: any) => !f.toDelete)
+      payload.images = (filesModel.images ?? []).filter((i: any) => !i.toDelete)
     }
 
     const res = isUpdate
@@ -573,6 +574,11 @@ function reset() {
                   class="block-card"
                   @click="openBlock(item.id)"
                 >
+                  <UIcon
+                    :name="iconOfSettings(item.settings)"
+                    class="block-card-icon size-16!"
+                  />
+
                   <div class="block-card-main">
                     <div class="block-card-title">
                       {{ item.title || item.name || `Блок №${item.id}` }}
@@ -890,6 +896,13 @@ function reset() {
 .block-card:hover {
   border-color: var(--ui-primary, #3b82f6);
   box-shadow: 0 1px 2px rgba(59, 130, 246, 0.08);
+}
+
+.block-card-icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  color: var(--ui-text-muted, #6b7280);
 }
 
 .block-card-main {

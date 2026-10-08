@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@iconify-json/simple-icons": "^1.2.95",
+    "@iconify/vue": "^5.0.3",
     "@nuxt/content": "^3.16.0",
     "@nuxt/image": "^2.1.0",
     "@nuxt/ui": "^4.11.1",
@@ -21,6 +22,7 @@
     "@vueuse/nuxt": "^14.4.0",
     "cropperjs": "^1.6.1",
     "dompurify": "^3.4.16",
+    "iconify-icon-picker": "^1.0.5",
     "isomorphic-dompurify": "^4.3.0",
     "katex": "^0.18.9",
     "nuxt": "^4.5.2",
@@ -29,10 +31,11 @@
     "tailwindcss": "^4.3.3",
     "ufo": "^1.6.4",
     "vue-draggable-plus": "^0.6.1",
+    "vue3-icon-picker": "^1.0.1",
     "zod": "^4.6.4"
   },
   "devDependencies": {
-    "@iconify-json/lucide": "^1.2.136",
+    "@iconify-json/lucide": "^1.2.141",
     "@nuxt/eslint": "^1.17.0",
     "@types/dompurify": "^3.2.0",
     "eslint": "^10.10.0",
