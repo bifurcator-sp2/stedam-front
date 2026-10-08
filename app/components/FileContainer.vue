@@ -361,31 +361,29 @@ async function processFiles(list: File[]) {
 }
 
 // ============================================================
-// Авто-пометка при уменьшении лимита
+// Инвариант: files.value.images.length <= maxImages
+// Следим и за длиной массива, и за лимитом. Режем всё, что за пределом.
 // ============================================================
 
 watch(
-  () => props.maxImages,
-  async (next) => {
-    if (next === -1) return
+  [() => files.value.images.length, () => props.maxImages],
+  async ([, limit]) => {
+    if (limit === -1) return
 
-    let guard = 0
-    while (guard++ < 50) {
-      const live = (files.value.images ?? []).filter((i) => !i.toDelete)
-      if (live.length <= next) break
+    const imgs = files.value.images ?? []
+    if (imgs.length <= limit) return
 
-      const last = live[live.length - 1]
-      if (!last) break
+    const item = imgs[limit]
+    if (!item) return
 
-      if (last.source === 'temp') {
-        await removeTempFile(last.url)
-      } else {
-        last.toDelete = true
-      }
+    if (item.source === 'temp') {
+      await removeTempFile(item.url)
+    } else {
+      removeFromModel(item.url)
     }
   },
+  { immediate: true },
 )
-
 // ============================================================
 // Очередь кропа
 // ============================================================
