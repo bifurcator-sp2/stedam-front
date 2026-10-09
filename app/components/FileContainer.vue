@@ -21,11 +21,14 @@ const props = withDefaults(defineProps<{
   maxImages?: number
   /** Если true — stored-картинки помечаются toDelete, а не удаляются сразу. */
   showToDeleteImages?: boolean
+  /** Назначение набора (avatar, cover, background-image). Опционально. */
+  purpose?: string | null
 }>(), {
   fileType: 'all',
   forceCrop: true,
   maxImages: -1,
   showToDeleteImages: false,
+  purpose: null,
 })
 
 const api = useApi()
@@ -129,6 +132,14 @@ const hideDropzone = computed(() => {
 })
 
 // ============================================================
+// purpose-параметры для запросов
+// ============================================================
+
+function purposeParams(): Record<string, string> {
+  return props.purpose ? { purpose: props.purpose } : {}
+}
+
+// ============================================================
 // Визуальный отклик при запрете пропуска
 // ============================================================
 
@@ -226,6 +237,7 @@ async function refresh() {
   try {
     const res = await api.get<Partial<FilesListResponse> | null>(
       `/files/preload/${props.modelName}/${props.modelId}`,
+      { params: purposeParams() },
     )
 
     files.value = {
@@ -248,7 +260,7 @@ async function refresh() {
 onMounted(refresh)
 
 watch(
-  () => [props.modelName, props.modelId],
+  () => [props.modelName, props.modelId, props.purpose],
   () => {
     refresh()
   },
@@ -362,7 +374,6 @@ async function processFiles(list: File[]) {
 
 // ============================================================
 // Инвариант: files.value.images.length <= maxImages
-// Следим и за длиной массива, и за лимитом. Режем всё, что за пределом.
 // ============================================================
 
 watch(
@@ -384,6 +395,7 @@ watch(
   },
   { immediate: true },
 )
+
 // ============================================================
 // Очередь кропа
 // ============================================================
@@ -628,6 +640,7 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
     await api.post(
       `/files/preload/${props.modelName}/${props.modelId}`,
       fd,
+      { params: purposeParams() },
     )
 
     await refresh()
@@ -663,6 +676,7 @@ function restoreFile(item: ImageItem | FileItem) {
 async function removeTempFile(url: string) {
   await api.delete(`/files/preload/${props.modelName}/${props.modelId}`, {
     body: { url },
+    params: purposeParams(),
   })
   await refresh()
 }

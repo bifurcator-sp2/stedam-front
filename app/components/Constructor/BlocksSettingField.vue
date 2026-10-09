@@ -1,21 +1,114 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Vue3IconPicker } from 'vue3-icon-picker'
 import 'vue3-icon-picker/dist/style.css'
+import type { FilesListResponse, ImageItem } from '~/types/files'
 
 interface SettingItem {
   key: string
   label: string
-  type: 'string' | 'select' | 'int' | 'color' | 'bool' | 'icon'
+  type: 'string' | 'select' | 'int' | 'color' | 'bool' | 'icon' | 'image'
   default?: any
   allowed?: any[]
+  purpose?: string
   children?: SettingItem[]
 }
+
+const props = defineProps<{
+  /** id блока — нужен для FileContainer */
+  blockId?: number | null
+  /** имя модели для FileContainer */
+  modelName?: string | null
+}>()
 
 const model = defineModel<SettingItem>({ required: true })
 
 // Режим блока icon: 'manual' | 'picker'
 const iconMode = ref<'manual' | 'picker'>('manual')
+
+// ============================================================
+// Тип "image"
+// ============================================================
+
+function emptyFiles(): FilesListResponse {
+  return {
+    images: [],
+    files: [],
+    temp: { images: [], files: [] },
+    stored: { images: [], files: [] },
+  }
+}
+
+const imageFiles = ref<FilesListResponse>(emptyFiles())
+
+const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
+
+/**
+ * purpose для FileContainer:
+ *  - из model.purpose (если задан),
+ *  - иначе — первый allowed.
+ */
+const imagePurpose = computed<string | null>(() => {
+  if (typeof model.value.purpose === 'string' && model.value.purpose) {
+    return model.value.purpose
+  }
+  const first = model.value.allowed?.[0]
+  return typeof first === 'string' && first ? first : null
+})
+
+const maxImages = computed<string | number | null>(() => {
+  if (typeof model.value.purpose === 'string' && model.value.purpose) {
+    return -1;
+  }
+  const first = model.value.allowed?.[1]
+  return first ? first : null
+})
+
+/**
+ * modelName для FileContainer.
+ */
+const resolvedModelName = computed<string>(() => {
+  return props.modelName || 'blocks'
+})
+
+/**
+ * imageFiles.images → model.default
+ */
+watch(
+  () => imageFiles.value.images,
+  (images) => {
+    model.value = { ...model.value, default: images }
+  },
+  { deep: true },
+)
+
+/**
+ * model.default → imageFiles.images (только при первом монтировании)
+ */
+watch(
+  () => model.value.default,
+  (val) => {
+    if (Array.isArray(val) && val.length && !imageFiles.value.images.length) {
+      imageFiles.value = {
+        ...imageFiles.value,
+        images: val,
+      }
+    }
+  },
+  { immediate: true },
+)
+
+function onRemove(item: ImageItem) {
+  fileContainerRef.value?.removeFile(item)
+}
+
+function onRestore(item: ImageItem) {
+  fileContainerRef.value?.restoreFile(item)
+}
+
+// ============================================================
+// Группы
+// ============================================================
 
 function updateChild(index: number, updated: SettingItem) {
   if (!model.value.children) return
@@ -34,7 +127,6 @@ function updateChild(index: number, updated: SettingItem) {
       <span class="field-group-key">{{ model.key }}</span>
     </div>
 
-    <!-- Тип "icon" — иконка слева, настройки справа -->
     <!-- Тип "icon" — иконка слева, настройки справа -->
     <template v-else-if="model.type === 'icon'">
       <div class="field-icon">
@@ -124,6 +216,52 @@ function updateChild(index: number, updated: SettingItem) {
       </div>
     </template>
 
+    <!-- Тип "image" — FileContainer для картинок -->
+    <template v-else-if="model.type === 'image'">
+      <div class="field-image">
+        <div class="field-image-header">
+          <span class="field-image-label">{{ model.label }}</span>
+          <span v-if="imagePurpose" class="field-image-purpose">{{ imagePurpose }}</span>
+        </div>
+
+        <!-- Dropzone -->
+        <FileContainer
+          ref="fileContainerRef"
+          v-if="imagePurpose"
+          :model-name="resolvedModelName"
+          :model-id="blockId ?? 0"
+          :purpose="imagePurpose"
+          :max-images="maxImages"
+          file-type="image"
+          v-model:files="imageFiles"
+        />
+
+        <div v-else class="field-image-empty">
+          <UIcon name="i-lucide-info" />
+          <span>Не задан purpose для изображения</span>
+        </div>
+
+        <!-- Сетка превью -->
+        <div v-if="imageFiles.images.length" class="field-image-grid">
+          <ImageWrapper
+            v-for="(img, idx) in imageFiles.images"
+            :key="img.url ?? idx"
+            :item="img"
+            :siblings="imageFiles.images"
+            :allow-drag-and-drop="false"
+            :show-to-delete="true"
+            @remove="onRemove($event)"
+            @restore="onRestore($event)"
+          >
+            <img
+              :src="img.url"
+              class="w-16 h-16 object-cover rounded bg-gray-100"
+            />
+          </ImageWrapper>
+        </div>
+      </div>
+    </template>
+
     <!-- Листовое поле: label + control в одну строку -->
     <template v-else>
       <div class="field-row">
@@ -170,6 +308,8 @@ function updateChild(index: number, updated: SettingItem) {
         v-for="(child, index) in model.children"
         :key="child.key"
         :model-value="child"
+        :block-id="blockId"
+        :model-name="modelName"
         @update:model-value="updateChild(index, $event)"
       />
     </div>
@@ -413,5 +553,64 @@ function updateChild(index: number, updated: SettingItem) {
   width: 12px;
   height: 12px;
   flex-shrink: 0;
+}
+
+/* ====== Тип "image" ====== */
+
+.field-image {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-image-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 2px;
+}
+
+.field-image-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ui-text-muted, #6b7280);
+  letter-spacing: 0.01em;
+}
+
+.field-image-purpose {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ui-bg, #ffffff);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  color: var(--ui-text-muted, #9ca3af);
+}
+
+.field-image-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--ui-bg-elevated, #f9fafb);
+  border: 1px dashed var(--ui-border, #e5e7eb);
+  font-size: 11.5px;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.field-image-empty :deep(svg) {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* Сетка превью */
+.field-image-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
 }
 </style>

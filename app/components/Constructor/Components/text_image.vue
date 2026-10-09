@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { MasonryWall } from '@yeger/vue-masonry-wall'
 
 // ==================== Модель ====================
 const value = defineModel<[]>({ default: () => [] })
@@ -209,17 +210,7 @@ function collectMarginStyle(basePath: string): Record<string, string> {
   })
 }
 
-// ==================== Превью-изображения ====================
-const previewImages = [
-  'https://img.magnific.com/premium-photo/trees-park-autumn_1048944-1833622.jpg?semt=ais_hybrid&w=740&q=80',
-  'https://i.pinimg.com/originals/39/08/8c/39088c9907bce387867eb149fc9fed54.jpg',
-  'https://turclub-pik.ru/crop/1160/464/uploads/blog_img/covers/ce0803b71598de24381350509c5d02f5.jpeg.webp',
-  'https://avatars.mds.yandex.net/i?id=e9812860a39898a8a0494d0ae5399494_l-5232437-images-thumbs&n=13',
-  'https://www.tripletcam.com/videos/categories/assets/4/background.png?1685627419',
-  'https://cdn.xn--h1ajim.xn--p1ai/images/thumb/1/1f/20_Jahre_kann_ein_Star_alt_werden._03.jpg/640px-20_Jahre_kann_ein_Star_alt_werden._03.jpg',
-  'https://avatars.mds.yandex.net/i?id=f1175b08cbc475e1f8d218a06dacd9bc585f1851-4577649-images-thumbs&n=13',
-  'https://avatars.mds.yandex.net/get-mpic/5322414/img_id3536859793184490756.jpeg/orig',
-]
+
 
 // ==================== Layout ====================
 const layout = computed(() => getDefault(value.value, 'layout'))
@@ -239,9 +230,44 @@ const layoutClass = computed(
 )
 
 const layoutBcgStyle = computed(() => {
+  const style: Record<string, string> = {}
+
+  // Цвет фона
   const v = getDefault(value.value, 'background-color')
   const name = v?.replace(/^bg-/, '')
-  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+  if (name) {
+    style.backgroundColor = `var(--bg-${name})`
+  }
+
+  // Фоновое изображение
+  const bgImageNode = (value.value as any[] | undefined)
+    ?.find((b: any) => b.key === 'background-image')
+
+  const bgImage = Array.isArray(bgImageNode?.default)
+    ? bgImageNode.default[0]
+    : null
+
+  const bgUrl = bgImage?.url ?? null
+
+  if (bgUrl) {
+    style.backgroundImage = `url(${bgUrl})`
+
+    // Размер и позиция
+    const bgSize = getDefault(value.value, 'background-size')
+    const bgPosition = getDefault(value.value, 'background-position')
+
+    if (bgSize) {
+      style.backgroundSize = bgSize
+    }
+    if (bgPosition) {
+      style.backgroundPosition = bgPosition
+    }
+
+    // Чтобы фон не тайлился
+    style.backgroundRepeat = 'no-repeat'
+  }
+
+  return style
 })
 
 const layoutBorderStyle = computed(() =>
@@ -392,16 +418,12 @@ const imagesContainerStyle = computed(() => {
     ...imagesMarginStyle.value,
   }
 
-  if (isMasonry.value) {
-    base.display = 'grid'
-    base.gridTemplateColumns = `repeat(${Math.max(1, columns.value)}, minmax(0, 1fr))`
-    base.gridAutoRows = 'auto'
-    base.alignItems = 'start'
-    base.gap = `${distancePx.value}px`
-  } else if (imagesFlexDirection.value === 'column') {
+  if (imagesFlexDirection.value === 'column') {
     base.columnCount = String(Math.max(1, columns.value))
     base.columnGap = `${distancePx.value}px`
-  } else {
+  } else if (imagesFlexDirection.value === 'row') {
+    base.display = 'flex'
+    base.flexWrap = 'wrap'
     base.gap = `${distancePx.value}px`
   }
 
@@ -425,6 +447,15 @@ const imageItemStyle = computed(() => {
   }
   return { height: `${imageHeightPx.value}px`, width: 'auto' }
 })
+
+const imageImgStyle = computed(() => {
+  return { display: 'block' }
+})
+
+/**
+ * Ширина колонки для MasonryWall.
+ */
+const masonryColumnWidth = computed(() => 200)
 
 import type { FilesListResponse } from '~/types/files'
 import { ref, onMounted, onBeforeUnmount } from 'vue'
@@ -458,6 +489,18 @@ function onReorder(from: number, to: number) {
 
   filesModel.value = { ...filesModel.value, images: next }
 }
+
+const masonryKey = computed(() => {
+  // Всё, что влияет на layout masonry
+  return JSON.stringify({
+    columns: columns.value,
+    distance: distancePx.value,
+    width: masonryColumnWidth.value,
+    count: filesModel.value.images.length,
+    urls: filesModel.value.images.map(i => i.url).join('|'),
+  })
+})
+
 </script>
 
 <template>
@@ -481,9 +524,41 @@ function onReorder(from: number, to: number) {
           :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle]"
           :class="['flex', 'items-start', 'justify-center', layoutClass]"
         >
-          <div>
+          <div :style="{ flex: `0 0 ${imagesPercent * 100}%` }">
+            <!-- Masonry (JS) -->
+            <MasonryWall
+              v-if="needDisplayImage && isMasonry"
+              :items="filesModel.images"
+              :column-width="masonryColumnWidth"
+              :gap="distancePx"
+              :min-columns="columns"
+              :max-columns="columns"
+              :ssr-columns="columns"
+              :key="masonryKey"
+            >
+              <template #default="{ item }">
+                <ImageWrapper
+                  :item="item"
+                  :siblings="filesModel.images"
+                  :allow-drag-and-drop="allowDragAndDrop"
+                  :show-to-delete="showToDeleteImages"
+                  @remove="fileContainerRef?.removeFile($event)"
+                  @restore="fileContainerRef?.restoreFile($event)"
+                  @reorder="onReorder"
+                  :class="imageItemClass"
+                  :style="[imageItemStyle, imageBorderStyle]"
+                >
+                  <img
+                    :src="item.url"
+                    :style="imageImgStyle"
+                  />
+                </ImageWrapper>
+              </template>
+            </MasonryWall>
+
+            <!-- Column / Row (CSS) -->
             <div
-              v-if="needDisplayImage"
+              v-else-if="needDisplayImage"
               :class="[imagesContainerClass]"
               :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
             >
@@ -497,11 +572,12 @@ function onReorder(from: number, to: number) {
                 @remove="fileContainerRef?.removeFile($event)"
                 @restore="fileContainerRef?.restoreFile($event)"
                 @reorder="onReorder"
+                :class="imageItemClass"
+                :style="[imageItemStyle, imageBorderStyle]"
               >
                 <img
-                  :src="img.thumbnail || img.url"
-                  :class="imageItemClass"
-                  :style="[imageItemStyle, imageBorderStyle]"
+                  :src="img.url"
+                  :style="imageImgStyle"
                 />
               </ImageWrapper>
             </div>
@@ -530,7 +606,6 @@ function onReorder(from: number, to: number) {
                 set: commitBody,
                 renderFormulas: true,
               }"
-
             ></ProseP>
           </div>
         </div>
@@ -551,5 +626,4 @@ img:last-child {
   hyphens: auto;
   min-width: 0;
 }
-
 </style>

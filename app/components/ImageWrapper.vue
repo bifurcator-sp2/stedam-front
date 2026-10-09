@@ -195,12 +195,14 @@ function onRestoreClick(e: MouseEvent) {
 </script>
 
 <template>
+
   <div
     class="image-wrapper"
     :class="{
       'image-wrapper--to-delete': isToDelete,
       'image-wrapper--drag-over': isDragOver && allowDragAndDrop,
     }"
+    v-bind="$attrs"
     @dragover="onDragOver"
     @dragenter.prevent="onDragOver"
     @dragleave="onDragLeave"

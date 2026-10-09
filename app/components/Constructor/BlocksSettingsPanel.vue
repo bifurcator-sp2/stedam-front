@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import BlocksSettingField from '~/components/Constructor/BlocksSettingField.vue'
 
 const id = defineModel<number | null>('id')
 const title = defineModel<string | null>('title')
 const description = defineModel<string | null>('description')
 const settings = defineModel<SettingNode[]>('settings', { default: () => [] })
+
+/** id блока — прокидываем в FileContainer */
+const blockId = computed(() => id.value ?? null)
+
+/** имя модели — прокидываем. */
+const modelName = 'blocks'
 
 function updateItem(index: number, updated: SettingNode) {
   const next = settings.value.slice()
@@ -65,6 +72,8 @@ function updateItem(index: number, updated: SettingNode) {
           v-for="(item, index) in settings"
           :key="item.key"
           :model-value="item"
+          :block-id="blockId"
+          :model-name="modelName"
           @update:model-value="updateItem(index, $event)"
         />
       </div>

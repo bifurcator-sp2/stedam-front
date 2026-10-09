@@ -10,7 +10,20 @@ export default defineNuxtConfig({
     'nuxt-auth-sanctum',
     '@nuxtjs/i18n',
     '@nuxt/icon',
+    // ✅ legacy-сборка для старых Safari / iPad
+    '@teages/nuxt-legacy',
   ],
+
+  // ✅ Настройки legacy-сборки
+  legacy: {
+    vite: {
+      targets: ['chrome 49', 'safari 11'],
+      renderLegacyChunks: true,
+    },
+    customPolyfills: {
+      scanDirs: ['polyfills'],
+    },
+  },
 
   icon: {
     mode: 'svg',
@@ -18,6 +31,7 @@ export default defineNuxtConfig({
       collections: ['lucide'],
     },
   },
+
   runtimeConfig: {
     public: {
       apiBase: '/api',
@@ -40,8 +54,6 @@ export default defineNuxtConfig({
     }
   },
 
-
-
   compatibilityDate: '2026-06-30',
 
   app: {
@@ -53,14 +65,22 @@ export default defineNuxtConfig({
     },
   },
 
+  render: {
+    crossorigin: 'use-credentials'
+  },
+
   vite: {
+    // ❗ terser обязателен для plugin-legacy 8.x при Chrome < 80
+    build: {
+      minify: 'terser',
+      target: ['es2015', 'safari11'],
+    },
     define: {
       __VUE_PROD_DEVTOOLS__: 'true'
     }
   },
 
   ssr: false,
-
 
   nitro: {
     debug: true,
@@ -90,12 +110,12 @@ export default defineNuxtConfig({
 
   sanctum: {
     baseUrl: '/',
-    mode: 'cookie', // Используем аутентификацию на основе куки
+    mode: 'cookie',
     endpoints: {
-      csrf: '/sanctum/csrf-cookie',       // остаётся как есть
+      csrf: '/sanctum/csrf-cookie',
       login: '/api/login',
       logout: '/api/logout',
-      user: '/api/user',                  // user — это API-маршрут
+      user: '/api/user',
       register: '/api/register',
       forgotPassword: '/api/forgot-password',
       resetPassword: '/api/reset-password',
@@ -103,24 +123,20 @@ export default defineNuxtConfig({
     globalMiddleware: {
       enabled: true,
       prepend: false,
-      // Если false — неавторизованные пользователи не увидят даже 404, их кинет на логин
       allow404WithoutAuth: true,
     },
 
-    // Настройки редиректов
     redirect: {
-      onLogin: '/',            // Куда идти после успешного входа
-      onLogout: '/login',      // Куда идти после выхода
-      onAuthOnly: '/login',    // Куда перенаправлять неавторизованных (это и есть ваша задача)
-      onGuestOnly: '/',        // Куда перенаправлять УЖЕ авторизованных с гостевых страниц (например, с /login)
-      keepRequestedRoute: true, // Запомнить исходный URL, чтобы вернуться туда после входа
+      onLogin: '/',
+      onLogout: '/login',
+      onAuthOnly: '/login',
+      onGuestOnly: '/',
+      keepRequestedRoute: true,
     },
     client: {
       initialRequest: true,
     },
-
   },
-
 
   i18n: {
     locales: [
@@ -128,14 +144,12 @@ export default defineNuxtConfig({
       { code: 'ru', name: 'Русский', file: 'ru.json' }
     ],
     defaultLocale: 'ru',
-    strategy: 'no_prefix', // Или 'prefix' — зависит от того, хотите ли вы /ru/... в URL
-    lazy: true, // Загружать файлы переводов по мере необходимости
+    strategy: 'no_prefix',
+    lazy: true,
     detectBrowserLanguage: {
       useCookie: true,
       cookieKey: 'i18n_redirected',
       redirectOn: 'root',
     }
   },
-
-
 })
