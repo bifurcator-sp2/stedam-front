@@ -54,6 +54,14 @@ interface BlocksPage {
   }
 }
 
+interface ViewportPreset {
+  key: string
+  label: string
+  width: number
+  icon: string
+  group?: string
+}
+
 // ==================== Ресайз панелей ====================
 
 const MIN_LEFT = 180
@@ -168,6 +176,108 @@ function iconOfSettings(settings: SettingNode[] | undefined): string {
 const editingBlock = ref<BlockItem | null>(null)
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 const blockKey = ref(0)
+
+// ==================== Ширина вьюпорта (эмуляция устройств) ====================
+
+const viewportPresets: ViewportPreset[] = [
+  { key: 'tv-1080',    label: '1080p Full HD',  width: 1920, icon: 'i-lucide-monitor',    group: 'TV' },
+  { key: 'tv-4k',      label: '4K Ultra HD',    width: 3840, icon: 'i-lucide-monitor',    group: 'TV' },
+
+  { key: 'iphone-se',  label: 'iPhone SE',      width: 375,  icon: 'i-lucide-smartphone', group: 'Mobile' },
+  { key: 'iphone-14',  label: 'iPhone 14',      width: 390,  icon: 'i-lucide-smartphone', group: 'Mobile' },
+  { key: 'iphone-14p', label: 'iPhone 14 Pro',  width: 393,  icon: 'i-lucide-smartphone', group: 'Mobile' },
+  { key: 'pixel-7',    label: 'Pixel 7',        width: 412,  icon: 'i-lucide-smartphone', group: 'Mobile' },
+  { key: 'galaxy-s25', label: 'Galaxy S25',     width: 360,  icon: 'i-lucide-smartphone', group: 'Mobile' },
+
+  { key: 'ipad-mini',  label: 'iPad Mini',      width: 744,  icon: 'i-lucide-tablet',     group: 'Tablet' },
+  { key: 'ipad-pro',   label: 'iPad Pro 11"',   width: 834,  icon: 'i-lucide-tablet',     group: 'Tablet' },
+  { key: 'galaxy-tab', label: 'Galaxy Tab S9',  width: 800,  icon: 'i-lucide-tablet',     group: 'Tablet' },
+
+  { key: 'laptop-hd',  label: 'Laptop HD',      width: 1280, icon: 'i-lucide-laptop',     group: 'Laptop' },
+  { key: 'laptop-fhd', label: 'Laptop Full HD', width: 1440, icon: 'i-lucide-laptop',     group: 'Laptop' },
+  { key: 'laptop-4k',  label: 'Laptop 4K',      width: 1920, icon: 'i-lucide-laptop',     group: 'Laptop' },
+]
+
+const VIEWPORT_STORAGE_KEY = 'constructor:viewport-width'
+const DEFAULT_VIEWPORT_WIDTH = 834 // iPad Pro 11"
+
+function readStoredWidth(): number | null {
+  if (!import.meta.client) return DEFAULT_VIEWPORT_WIDTH
+
+  const raw = localStorage.getItem(VIEWPORT_STORAGE_KEY)
+  if (raw === null) return DEFAULT_VIEWPORT_WIDTH
+
+  if (raw === 'auto') return null
+
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : DEFAULT_VIEWPORT_WIDTH
+}
+
+const viewportWidth = ref<number | null>(readStoredWidth())
+const customWidth = ref<string>(
+  viewportWidth.value !== null ? String(viewportWidth.value) : '',
+)
+const viewportMenuOpen = ref(false)
+
+watch(viewportWidth, (val) => {
+  if (!import.meta.client) return
+  localStorage.setItem(
+    VIEWPORT_STORAGE_KEY,
+    val === null ? 'auto' : String(val),
+  )
+})
+
+const activePreset = computed(() =>
+  viewportPresets.find((p) => p.width === viewportWidth.value) ?? null
+)
+
+const viewportLabel = computed(() =>
+  viewportWidth.value === null ? 'Авто' : `${viewportWidth.value}`
+)
+
+const groupedPresets = computed(() => {
+  const result: Record<string, ViewportPreset[]> = {}
+  for (const p of viewportPresets) {
+    const key = p.group ?? 'Другое'
+    if (!result[key]) result[key] = []
+    result[key].push(p)
+  }
+  return result
+})
+
+function selectPreset(preset: ViewportPreset) {
+  viewportWidth.value = preset.width
+  customWidth.value = String(preset.width)
+  viewportMenuOpen.value = false
+}
+
+function selectAuto() {
+  viewportWidth.value = null
+  customWidth.value = ''
+  viewportMenuOpen.value = false
+}
+
+function applyCustomWidth() {
+  const n = Number(customWidth.value)
+  if (!Number.isFinite(n) || n <= 0) {
+    viewportWidth.value = null
+    return
+  }
+  viewportWidth.value = Math.round(n)
+  viewportMenuOpen.value = false
+}
+
+const viewportStyle = computed(() => {
+  if (viewportWidth.value === null) {
+    return { width: '100%', maxWidth: '100%' }
+  }
+  return {
+    width: `${viewportWidth.value}px`,
+    maxWidth: `${viewportWidth.value}px`,
+  }
+})
+
+// ==================== Создание блока ====================
 
 function createBlockFromType(type: BlockType): BlockItem {
   const schema = Array.isArray(type.default_settings) ? type.default_settings : []
@@ -522,31 +632,141 @@ function reset() {
         <header class="panel-header">
           <div class="panel-header-row">
             <span>{{ centerTitle }}</span>
-            <UButton
-              v-if="editingBlock"
-              icon="i-lucide-rotate-ccw"
-              size="xs"
-              color="neutral"
-              variant="ghost"
-              @click="reset"
-            >
-              Сбросить
-            </UButton>
+
+            <div class="viewport-controls">
+              <!-- Кнопка выбора ширины -->
+              <div class="viewport-picker" v-if="editingBlock">
+                <button
+                  type="button"
+                  class="viewport-picker__button"
+                  :title="activePreset?.label ?? 'Авто'"
+                  @click="viewportMenuOpen = !viewportMenuOpen"
+                >
+                  <UIcon
+                    :name="activePreset?.icon ?? 'i-lucide-maximize'"
+                    class="viewport-picker__icon"
+                  />
+                  <span class="viewport-picker__value">{{ viewportLabel }}</span>
+                  <UIcon name="i-lucide-chevron-down" class="viewport-picker__chevron" />
+                </button>
+
+                <!-- Выпадающее меню -->
+                <Transition name="viewport-menu-fade">
+                  <div
+                    v-if="viewportMenuOpen"
+                    class="viewport-menu"
+                    @click.stop
+                  >
+                    <!-- Авто -->
+                    <button
+                      type="button"
+                      class="viewport-menu__item"
+                      :class="{ 'viewport-menu__item--active': viewportWidth === null }"
+                      @click="selectAuto"
+                    >
+                      <UIcon name="i-lucide-maximize" class="viewport-menu__icon" />
+                      <span class="viewport-menu__label">Без ограничения</span>
+                      <span class="viewport-menu__width">авто</span>
+                    </button>
+
+                    <div class="viewport-menu__divider" />
+
+                    <!-- Пресеты по группам -->
+                    <template
+                      v-for="(group, groupName) in groupedPresets"
+                      :key="groupName"
+                    >
+                      <div class="viewport-menu__group">{{ groupName }}</div>
+
+                      <button
+                        v-for="preset in group"
+                        :key="preset.key"
+                        type="button"
+                        class="viewport-menu__item"
+                        :class="{ 'viewport-menu__item--active': activePreset?.key === preset.key }"
+                        @click="selectPreset(preset)"
+                      >
+                        <UIcon :name="preset.icon" class="viewport-menu__icon" />
+                        <span class="viewport-menu__label">{{ preset.label }}</span>
+                        <span class="viewport-menu__width">{{ preset.width }}</span>
+                      </button>
+                    </template>
+
+                    <div class="viewport-menu__divider" />
+
+                    <!-- Произвольная ширина -->
+                    <div class="viewport-menu__custom">
+                      <UIcon name="i-lucide-pencil-ruler" class="viewport-menu__icon" />
+                      <span class="viewport-menu__label">Своя ширина</span>
+                      <div class="viewport-menu__input-wrap">
+                        <input
+                          v-model="customWidth"
+                          type="number"
+                          min="320"
+                          max="3840"
+                          placeholder="px"
+                          class="viewport-menu__input"
+                          @keydown.enter="applyCustomWidth"
+                        />
+                        <span class="viewport-menu__input-suffix">px</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="viewport-menu__apply"
+                        title="Применить"
+                        @click="applyCustomWidth"
+                      >
+                        <UIcon name="i-lucide-check" />
+                      </button>
+                    </div>
+                  </div>
+                </Transition>
+
+                <!-- Клик вне меню -->
+                <div
+                  v-if="viewportMenuOpen"
+                  class="viewport-backdrop"
+                  @click="viewportMenuOpen = false"
+                />
+              </div>
+
+              <UButton
+                v-if="editingBlock"
+                icon="i-lucide-rotate-ccw"
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                @click="reset"
+              >
+                Сбросить
+              </UButton>
+            </div>
           </div>
         </header>
         <div class="panel-body">
           <!-- === Режим редактирования конкретного блока === -->
           <template v-if="editingBlock">
-            <div class="bg-default w-full max-w-[640px] mx-auto">
-              <LoadingOverlay :loading="saving">
-                <TextBlock
-                  :key="`${editingBlock.id}-${blockKey}`"
-                  :mode="'body'"
-                  v-model="editingBlock.settings"
-                  :id="editingBlock.id || 0"
-                  @register-files="fileContainerRef = $event"
-                />
-              </LoadingOverlay>
+            <div class="viewport-frame" :class="{ 'viewport-frame--bounded': viewportWidth !== null }">
+              <div
+                class="viewport-frame__screen bg-default mx-auto"
+                :style="viewportStyle"
+                :class="{ 'viewport-frame__screen--bounded': viewportWidth !== null }"
+              >
+                <LoadingOverlay :loading="saving">
+                  <TextBlock
+                    :key="`${editingBlock.id}-${blockKey}`"
+                    :mode="'body'"
+                    v-model="editingBlock.settings"
+                    :id="editingBlock.id || 0"
+                    @register-files="fileContainerRef = $event"
+                  />
+                </LoadingOverlay>
+              </div>
+
+              <div v-if="viewportWidth" class="viewport-frame__label">
+                <UIcon name="i-lucide-monitor" class="viewport-frame__label-icon" />
+                <span>{{ viewportWidth }} px</span>
+              </div>
             </div>
           </template>
 
@@ -983,5 +1203,297 @@ function reset() {
   text-align: center;
   font-size: 13px;
   color: var(--ui-text-muted, #9ca3af);
+}
+
+/* ==================== Управление шириной вьюпорта ==================== */
+
+.viewport-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.viewport-picker {
+  position: relative;
+}
+
+.viewport-picker__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--ui-border, #e5e7eb);
+  background: var(--ui-bg, #ffffff);
+  color: var(--ui-text, #111827);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.viewport-picker__button:hover {
+  border-color: var(--ui-primary, #3b82f6);
+  background: var(--ui-bg-elevated, #f9fafb);
+}
+
+.viewport-picker__icon {
+  width: 13px;
+  height: 13px;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.viewport-picker__value {
+  min-width: 28px;
+  text-align: right;
+}
+
+.viewport-picker__chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--ui-text-muted, #9ca3af);
+}
+
+/* Меню */
+
+.viewport-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.viewport-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 100;
+  min-width: 260px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--ui-border, #e5e7eb);
+  background: var(--ui-bg, #ffffff);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.viewport-menu__group {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ui-text-muted, #9ca3af);
+}
+
+.viewport-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  color: var(--ui-text, #111827);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.viewport-menu__item:hover {
+  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.08));
+}
+
+.viewport-menu__item--active {
+  background: var(--ui-primary, #3b82f6);
+  color: #ffffff;
+}
+
+.viewport-menu__item--active .viewport-menu__icon,
+.viewport-menu__item--active .viewport-menu__width {
+  color: #ffffff;
+}
+
+.viewport-menu__icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.viewport-menu__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport-menu__width {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ui-text-muted, #6b7280);
+}
+
+.viewport-menu__divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--ui-border, #e5e7eb);
+}
+
+/* Произвольная ширина */
+
+.viewport-menu__custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.viewport-menu__input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 auto;
+}
+
+.viewport-menu__input {
+  width: 100%;
+  height: 24px;
+  padding: 0 22px 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--ui-border, #e5e7eb);
+  background: var(--ui-bg, #ffffff);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ui-text, #111827);
+  text-align: right;
+}
+
+.viewport-menu__input:focus {
+  outline: none;
+  border-color: var(--ui-primary, #3b82f6);
+}
+
+.viewport-menu__input::-webkit-outer-spin-button,
+.viewport-menu__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.viewport-menu__input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+.viewport-menu__input-suffix {
+  position: absolute;
+  right: 6px;
+  font-size: 10px;
+  color: var(--ui-text-muted, #9ca3af);
+  pointer-events: none;
+}
+
+.viewport-menu__apply {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: var(--ui-primary, #3b82f6);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.viewport-menu__apply:hover {
+  background: #2563eb;
+}
+
+.viewport-menu__apply :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+/* ==================== Рамка эмуляции ==================== */
+
+.viewport-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 0;
+  position: relative;
+}
+
+.viewport-frame--bounded {
+  /* Место под рамку, чтобы она не «прилипала» к краям */
+  padding: 24px 16px;
+}
+
+.viewport-frame__screen {
+  transition: width 0.2s ease, max-width 0.2s ease;
+  position: relative;
+}
+
+/* Границы условного «экрана устройства» */
+.viewport-frame__screen--bounded {
+  /* Рамка снаружи, чтобы не влиять на layout */
+  outline: 1px dashed var(--ui-border, #a5acb5);
+  outline-offset: 12px;
+  border-radius: 2px;
+}
+
+/* Метки по углам рамки */
+.viewport-frame__screen--bounded::before,
+.viewport-frame__screen--bounded::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--ui-primary, #3b82f6);
+  border-style: solid;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.viewport-frame__screen--bounded::before {
+  top: -12px;
+  left: -12px;
+  border-width: 1px 0 0 1px;
+}
+
+.viewport-frame__screen--bounded::after {
+  bottom: -12px;
+  right: -12px;
+  border-width: 0 1px 1px 0;
+}
+
+.viewport-frame__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--ui-bg-elevated, #f9fafb);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--ui-text-muted, #6b7280);
+  pointer-events: none;
+  user-select: none;
+}
+
+.viewport-frame__label-icon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
 }
 </style>

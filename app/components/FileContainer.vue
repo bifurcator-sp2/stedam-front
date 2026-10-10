@@ -52,6 +52,14 @@ const files = defineModel<FilesListResponse>('files', {
 const listLoading = ref(false)
 
 // ============================================================
+// Локально удалённые stored-URL
+// ============================================================
+
+// URL'ы stored-изображений, помеченные на удаление в текущей сессии.
+// Нужны, чтобы refresh() не возвращал их обратно.
+const deletedStoredUrls = ref<Set<string>>(new Set())
+
+// ============================================================
 // Логи
 // ============================================================
 
@@ -137,6 +145,15 @@ const hideDropzone = computed(() => {
 
 function purposeParams(): Record<string, string> {
   return props.purpose ? { purpose: props.purpose } : {}
+}
+
+// ============================================================
+// Фильтр удалённых URL
+// ============================================================
+
+function isDeleted(url: string | null | undefined): boolean {
+  if (!url) return false
+  return deletedStoredUrls.value.has(url)
 }
 
 // ============================================================
@@ -240,16 +257,25 @@ async function refresh() {
       { params: purposeParams() },
     )
 
+    const filterDeleted = <T extends { url: string }>(list: T[] | undefined): T[] =>
+      (list ?? []).filter((i) => !isDeleted(i.url))
+
     files.value = {
-      images: res?.images ?? [],
-      files:  res?.files  ?? [],
+      images: filterDeleted(res?.images),
+      files:  (res?.files ?? []).filter(
+        (f) => !isDeleted(f.url)
+      ),
       temp: {
-        images: res?.temp?.images ?? [],
-        files:  res?.temp?.files  ?? [],
+        images: filterDeleted(res?.temp?.images),
+        files:  (res?.temp?.files ?? []).filter(
+          (f) => !isDeleted(f.url)
+        ),
       },
       stored: {
-        images: res?.stored?.images ?? [],
-        files:  res?.stored?.files  ?? [],
+        images: filterDeleted(res?.stored?.images),
+        files:  (res?.stored?.files ?? []).filter(
+          (f) => !isDeleted(f.url)
+        ),
       },
     }
   } finally {
@@ -262,6 +288,8 @@ onMounted(refresh)
 watch(
   () => [props.modelName, props.modelId, props.purpose],
   () => {
+    // Сбрасываем удалённые при смене модели/purpose
+    deletedStoredUrls.value = new Set()
     refresh()
   },
 )
@@ -659,17 +687,21 @@ async function removeFile(item: ImageItem | FileItem) {
     return
   }
 
-  // stored
-  if (props.showToDeleteImages) {
-    item.toDelete = true
-    return
-  }
+  // stored — запоминаем URL как удалённый в текущей сессии
+  deletedStoredUrls.value.add(item.url)
+  deletedStoredUrls.value = new Set(deletedStoredUrls.value)
 
-  // сразу убираем из списка (при save() бэк удалит из реестра и с диска)
+  // и сразу убираем из модели
   removeFromModel(item.url)
 }
 
 function restoreFile(item: ImageItem | FileItem) {
+  // Убираем из удалённых
+  if (deletedStoredUrls.value.has(item.url)) {
+    deletedStoredUrls.value.delete(item.url)
+    deletedStoredUrls.value = new Set(deletedStoredUrls.value)
+  }
+
   item.toDelete = false
 }
 
