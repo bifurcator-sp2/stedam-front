@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { Vue3IconPicker } from 'vue3-icon-picker'
 import 'vue3-icon-picker/dist/style.css'
 import type { FilesListResponse, ImageItem } from '~/types/files'
+import { useSanitize } from '~/composables/useSanitize'
 
 interface SettingItem {
   key: string
@@ -23,8 +24,56 @@ const props = defineProps<{
 
 const model = defineModel<SettingItem>({ required: true })
 
+const { sanitizeHtml } = useSanitize()
+
 // Режим блока icon: 'manual' | 'picker'
 const iconMode = ref<'manual' | 'picker'>('manual')
+
+// ============================================================
+// Тип "string" — авторесайз + санитайз
+// ============================================================
+
+
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+/** Двусторонний computed: чтение — из модели, запись — с санитайзом. */
+const stringModel = computed<string>({
+  get() {
+    const v = model.value.default
+    return typeof v === 'string' ? v : ''
+  },
+  set(raw: string) {
+    const clean = sanitizeHtml(raw)
+    if (clean !== model.value.default) {
+      model.value = { ...model.value, default: clean }
+    }
+  },
+})
+
+/** Подгоняем высоту textarea под контент. */
+function resizeTextarea() {
+  const el = textareaRef.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
+function autoResize(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
+onMounted(async () => {
+  await nextTick()
+  resizeTextarea()
+})
+
+// Пересчитываем высоту при внешнем изменении модели
+watch(stringModel, async () => {
+  await nextTick()
+  resizeTextarea()
+})
 
 // ============================================================
 // Тип "image"
@@ -58,7 +107,7 @@ const imagePurpose = computed<string | null>(() => {
 
 const maxImages = computed<string | number | null>(() => {
   if (typeof model.value.purpose === 'string' && model.value.purpose) {
-    return -1;
+    return -1
   }
   const first = model.value.allowed?.[1]
   return first ? first : null
@@ -262,19 +311,29 @@ function updateChild(index: number, updated: SettingItem) {
       </div>
     </template>
 
-    <!-- Листовое поле: label + control в одну строку -->
+    <!-- Листовые типы -->
     <template v-else>
-      <div class="field-row">
+      <!-- string — отдельная раскладка: лейбл сверху, авторесайз-textarea + превью -->
+      <template v-if="model.type === 'string'">
+        <label class="field-label" :title="model.key">{{ model.label }}</label>
+        <div class="field-string">
+          <textarea
+            ref="textareaRef"
+            v-model="stringModel"
+            class="field-string__textarea"
+            rows="1"
+            spellcheck="false"
+            @input="autoResize"
+          />
+        </div>
+      </template>
+
+      <!-- остальные листовые типы — в grid-строке -->
+      <div v-else class="field-row">
         <label class="field-label" :title="model.key">{{ model.label }}</label>
 
-        <UInput
-          v-if="model.type === 'string'"
-          v-model="model.default"
-          size="xs"
-          class="field-control"
-        />
         <USelect
-          v-else-if="model.type === 'select'"
+          v-if="model.type === 'select'"
           v-model="model.default"
           :items="model.allowed"
           size="xs"
@@ -418,6 +477,66 @@ function updateChild(index: number, updated: SettingItem) {
   padding-top: 2px;
   padding-bottom: 2px;
   font-size: 12.5px;
+}
+
+/* ====== Тип "string" ====== */
+
+.field-string {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-string__textarea {
+  width: 100%;
+  min-height: 26px;
+  max-height: 240px;
+  padding: 4px 8px;
+  border: 1px solid var(--ui-border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--ui-bg, #ffffff);
+  color: var(--ui-text, #111827);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: none;          /* растёт сам */
+  overflow-y: auto;      /* скролл только после max-height */
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field-string__textarea:focus {
+  border-color: var(--ui-primary, #3b82f6);
+  box-shadow: 0 0 0 2px var(--ui-primary-muted, rgba(59, 130, 246, 0.15));
+}
+
+.field-string__preview {
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--ui-bg-elevated, #f9fafb);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ui-text, #111827);
+  overflow-wrap: anywhere;
+}
+
+.field-string__preview :deep(a) {
+  color: var(--ui-primary, #3b82f6);
+  text-decoration: underline;
+}
+
+.field-string__preview :deep(p),
+.field-string__preview :deep(ul),
+.field-string__preview :deep(ol) {
+  margin: 0 0 4px;
+}
+
+.field-string__preview :deep(p:last-child),
+.field-string__preview :deep(ul:last-child),
+.field-string__preview :deep(ol:last-child) {
+  margin-bottom: 0;
 }
 
 /* ====== Тип "icon" ====== */

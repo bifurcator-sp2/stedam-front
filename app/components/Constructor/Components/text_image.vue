@@ -239,8 +239,6 @@ function collectMarginStyle(basePath: string): Record<string, string> {
   })
 }
 
-
-
 // ==================== Layout ====================
 const layout = computed(() => getDefault(value.value, 'layout'))
 const needDisplayImage = computed(() => layout.value !== 'text')
@@ -601,11 +599,58 @@ onMounted(() => emit('register-files', fileContainerRef.value))
 onBeforeUnmount(() => emit('register-files', null))
 
 // ==================== Reorder ====================
-function onReorder(from: number, to: number) {
+
+/**
+ * Индекс перетаскиваемого изображения — общий для всего списка.
+ * null — сейчас ничего не тащим.
+ */
+const draggingIndex = ref<number | null>(null)
+
+function onImageDragStart(index: number) {
+  draggingIndex.value = index
+}
+
+function onImageDragEnd() {
+  draggingIndex.value = null
+}
+
+/**
+ * Вставка перед элементом с индексом `beforeIndex`.
+ * from — индекс перетаскиваемого элемента в массиве.
+ */
+function onDropBefore(from: number, beforeIndex: number) {
   const imgs = filesModel.value.images
-  if (from === to) return
   if (from < 0 || from >= imgs.length) return
+
+  let to = beforeIndex
+  if (from < beforeIndex) {
+    to = beforeIndex - 1
+  }
+
+  if (to === from) return
   if (to < 0 || to >= imgs.length) return
+
+  const next = imgs.slice()
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+
+  filesModel.value = { ...filesModel.value, images: next }
+}
+
+/**
+ * Вставка после элемента с индексом `afterIndex`.
+ */
+function onDropAfter(from: number, afterIndex: number) {
+  const imgs = filesModel.value.images
+  if (from < 0 || from >= imgs.length) return
+
+  let to = afterIndex + 1
+  if (from < to) {
+    to = to - 1
+  }
+
+  if (to === from) return
+  if (to < 0 || to > imgs.length) return
 
   const next = imgs.slice()
   const [moved] = next.splice(from, 1)
@@ -675,9 +720,13 @@ const masonryKey = computed(() => {
                   :siblings="filesModel.images"
                   :allow-drag-and-drop="allowDragAndDrop"
                   :show-to-delete="showToDeleteImages"
+                  :dragging-index="draggingIndex"
+                  @drag-start="onImageDragStart"
+                  @drag-end="onImageDragEnd"
                   @remove="fileContainerRef?.removeFile($event)"
                   @restore="fileContainerRef?.restoreFile($event)"
-                  @reorder="onReorder"
+                  @drop-before="onDropBefore"
+                  @drop-after="onDropAfter"
                   :class="imageItemClass"
                   :style="[imageItemStyle]"
                 >
@@ -702,9 +751,13 @@ const masonryKey = computed(() => {
                 :siblings="filesModel.images"
                 :allow-drag-and-drop="allowDragAndDrop"
                 :show-to-delete="showToDeleteImages"
+                :dragging-index="draggingIndex"
+                @drag-start="onImageDragStart"
+                @drag-end="onImageDragEnd"
                 @remove="fileContainerRef?.removeFile($event)"
                 @restore="fileContainerRef?.restoreFile($event)"
-                @reorder="onReorder"
+                @drop-before="onDropBefore"
+                @drop-after="onDropAfter"
                 :class="imageItemClass"
                 :style="[imageItemStyle]"
               >

@@ -12,17 +12,27 @@ const props = withDefaults(defineProps<{
   allowDragAndDrop?: boolean
   /** Если true — помеченные toDelete показываются с оверлеем и кнопкой «Восстановить». */
   showToDelete?: boolean
+  /** Индекс перетаскиваемого элемента — общий для всего списка. */
+  draggingIndex?: number | null
 }>(), {
   siblings: () => [],
   showDraft: true,
   allowDragAndDrop: true,
   showToDelete: false,
+  draggingIndex: null,
 })
 
 const emit = defineEmits<{
   (e: 'remove', item: ImageItem): void
   (e: 'restore', item: ImageItem): void
-  (e: 'reorder', from: number, to: number): void
+  /** Начало перетаскивания: сообщаем индекс. */
+  (e: 'drag-start', index: number): void
+  /** Конец перетаскивания (drop или отмена). */
+  (e: 'drag-end'): void
+  /** Вставить перетаскиваемый элемент ПЕРЕД этим. */
+  (e: 'drop-before', from: number, to: number): void
+  /** Вставить перетаскиваемый элемент ПОСЛЕ этого. */
+  (e: 'drop-after', from: number, to: number): void
 }>()
 
 // ============================================================
@@ -45,17 +55,43 @@ const isDraft = computed(
 // Drag & drop
 // ============================================================
 
-const isDragOver = ref(false)
+/**
+ * Какая половина элемента под курсором.
+ * 'before' — верхняя/левая, 'after' — нижняя/правая.
+ * null — курсор не над элементом.
+ */
+const dropSide = ref<'before' | 'after' | null>(null)
 
 const myIndex = computed(() => {
   const list = props.siblings ?? []
   return list.findIndex((i) => i.url === props.item.url)
 })
 
+/**
+ * true, если сейчас над этим элементом тащат «другой» элемент
+ * (from !== myIndex). Только тогда показываем индикатор вставки.
+ */
+const isDropTarget = computed(() => {
+  if (dropSide.value === null) return false
+  if (props.draggingIndex === null) return false
+  if (props.draggingIndex === myIndex.value) return false
+  return true
+})
+
+/**
+ * Источник перетаскивания — этот же элемент.
+ * Используется для полупрозрачности.
+ */
+const isDragSource = computed(
+  () => props.draggingIndex !== null && props.draggingIndex === myIndex.value,
+)
+
 function onDragStart(e: DragEvent) {
   if (!props.allowDragAndDrop) return
   if (isToDelete.value) return
   if (myIndex.value < 0) return
+
+  emit('drag-start', myIndex.value)
 
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
@@ -70,31 +106,68 @@ function onDragOver(e: DragEvent) {
 
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  isDragOver.value = true
+
+  const el = e.currentTarget as HTMLElement | null
+  if (!el) {
+    dropSide.value = 'after'
+    return
+  }
+
+  const rect = el.getBoundingClientRect()
+
+  // Если элемент шире, чем выше — считаем раскладку горизонтальной
+  // и решаем по clientX. Иначе — по clientY.
+  const horizontal = rect.width > rect.height
+
+  const isBefore = horizontal
+    ? e.clientX < rect.left + rect.width / 2
+    : e.clientY < rect.top + rect.height / 2
+
+  dropSide.value = isBefore ? 'before' : 'after'
 }
 
 function onDragLeave() {
-  isDragOver.value = false
+  dropSide.value = null
 }
 
 function onDrop(e: DragEvent) {
   if (!props.allowDragAndDrop) return
 
   e.preventDefault()
-  isDragOver.value = false
+
+  const side = dropSide.value
+  dropSide.value = null
+
+  if (!side) {
+    emit('drag-end')
+    return
+  }
+  if (myIndex.value < 0) {
+    emit('drag-end')
+    return
+  }
 
   const raw = e.dataTransfer?.getData('text/plain') ?? ''
   const from = Number(raw)
+  if (!Number.isFinite(from)) {
+    emit('drag-end')
+    return
+  }
 
-  if (!Number.isFinite(from)) return
+  emit('drag-end')
+
   if (from === myIndex.value) return
-  if (myIndex.value < 0) return
 
-  emit('reorder', from, myIndex.value)
+  if (side === 'before') {
+    emit('drop-before', from, myIndex.value)
+  } else {
+    emit('drop-after', from, myIndex.value)
+  }
 }
 
 function onDragEnd() {
-  isDragOver.value = false
+  dropSide.value = null
+  emit('drag-end')
 }
 
 // ============================================================
@@ -200,7 +273,9 @@ function onRestoreClick(e: MouseEvent) {
     class="image-wrapper"
     :class="{
       'image-wrapper--to-delete': isToDelete,
-      'image-wrapper--drag-over': isDragOver && allowDragAndDrop,
+      'image-wrapper--drop-before': isDropTarget && dropSide === 'before',
+      'image-wrapper--drop-after': isDropTarget && dropSide === 'after',
+      'image-wrapper--drag-source': isDragSource,
     }"
     v-bind="$attrs"
     @dragover="onDragOver"
@@ -332,14 +407,57 @@ function onRestoreClick(e: MouseEvent) {
   align-self: flex-start;
   flex: 0 0 auto;
   vertical-align: top;
-  transition: outline-color 0.15s ease;
+  transition: padding 0.12s ease, opacity 0.12s ease;
 }
 
-.image-wrapper--drag-over {
-  outline: 2px dashed var(--ui-primary, #3b82f6);
-  outline-offset: 2px;
-  border-radius: 6px;
+/* Источник перетаскивания — полупрозрачный. */
+.image-wrapper--drag-source {
+  opacity: 0.4;
 }
+
+/* ==================== Индикация вставки ==================== */
+
+/*
+ * При dnd-наведении добавляем зазор со стороны вставки.
+ * Зазор резервирует место в layout — соседние элементы раздвигаются,
+ * и становится видно, куда именно встанет картинка.
+ */
+
+.image-wrapper--drop-before {
+  padding-top: 10px;
+}
+
+.image-wrapper--drop-after {
+  padding-bottom: 10px;
+}
+
+/* Полоса в зазоре. */
+.image-wrapper--drop-before::before,
+.image-wrapper--drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 4;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  background:
+    radial-gradient(circle 4px at 4px 50%, var(--ui-primary, #3b82f6) 100%, transparent 101%),
+    radial-gradient(circle 4px at calc(100% - 4px) 50%, var(--ui-primary, #3b82f6) 100%, transparent 101%),
+    var(--ui-primary, #3b82f6);
+}
+
+.image-wrapper--drop-before::before {
+  top: 3px;
+}
+
+.image-wrapper--drop-after::after {
+  bottom: 3px;
+}
+
+/* ==================== Контент ==================== */
 
 .image-wrapper__content {
   display: block;
