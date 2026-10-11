@@ -9,7 +9,6 @@ const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
   id?: number
   allowDragAndDrop?: boolean
-  /** Если true — stored-картинки помечаются toDelete, а не удаляются сразу. */
   showToDeleteImages?: boolean
 }>(), {
   allowDragAndDrop: true,
@@ -43,10 +42,6 @@ function getDefault(blocks: any[] | undefined, path: string): string {
   return found?.default ?? ''
 }
 
-/**
- * Записать новое значение в дерево схемы по пути 'a.b.c'.
- * Возвращает true, если узел найден и обновлён.
- */
 function setDefault(
   blocks: any[] | undefined,
   path: string,
@@ -127,16 +122,49 @@ function marginStyle(settings: Record<string, any>): Record<string, string> {
   return s
 }
 
-function borderStyle(settings: Record<string, any>): Record<string, string> {
+/**
+ * Разрешить фон-настройку (например 'bg-default') в CSS-переменную
+ * вида '--bg-default'. Если значение пустое — null.
+ */
+function resolveBgVar(settingPath: string): string | null {
+  const v = getDefault(value.value, settingPath)
+  const name = typeof v === 'string' ? v.replace(/^bg-/, '') : ''
+  return name ? `--bg-${name}` : null
+}
+
+/**
+ * Разрешить цвет рамки:
+ *  - 'border-inherit' → var(--bg-…) того же контейнера (или transparent)
+ *  - 'border-…'        → var(--border-…)
+ *  - пусто / не строка → undefined (не задаём border-color)
+ */
+function resolveBorderColor(
+  colorRaw: string,
+  bgVar: string | null,
+): string | undefined {
+  if (typeof colorRaw !== 'string' || !colorRaw) return undefined
+
+  const name = colorRaw.replace(/^border-/, '')
+
+  if (name === 'inherit') {
+    return bgVar ? `var(${bgVar})` : 'transparent'
+  }
+
+  if (!name) return undefined
+
+  return `var(--border-${name})`
+}
+
+function borderStyle(
+  settings: Record<string, any>,
+  bgVar: string | null = null,
+): Record<string, string> {
   const s: Record<string, string> = {}
 
-  const colorRaw = settings['color']
-  if (typeof colorRaw === 'string' && colorRaw) {
-    const name = colorRaw.replace(/^border-/, '')
-    if (name) {
-      s.borderColor = `var(--border-${name})`
-      s.borderStyle = 'solid'
-    }
+  const color = resolveBorderColor(settings['color'], bgVar)
+  if (color) {
+    s.borderColor = color
+    s.borderStyle = 'solid'
   }
 
   const map = {
@@ -174,7 +202,8 @@ function radiusStyle(settings: Record<string, any> | undefined): Record<string, 
 
 function collectBorderStyle(
   borderPath: string,
-  radiusPath: string
+  radiusPath: string,
+  bgVar: string | null = null,
 ): Record<string, string> {
   const border: Record<string, any> = {
     color:  getDefault(value.value, `${borderPath}.color`),
@@ -189,7 +218,7 @@ function collectBorderStyle(
     'bottom-right': getDefault(value.value, `${radiusPath}.bottom-right`),
     'bottom-left':  getDefault(value.value, `${radiusPath}.bottom-left`),
   }
-  return { ...borderStyle(border), ...radiusStyle(radius) }
+  return { ...borderStyle(border, bgVar), ...radiusStyle(radius) }
 }
 
 function collectPaddingStyle(basePath: string): Record<string, string> {
@@ -232,14 +261,12 @@ const layoutClass = computed(
 const layoutBcgStyle = computed(() => {
   const style: Record<string, string> = {}
 
-  // Цвет фона
   const v = getDefault(value.value, 'background-color')
   const name = v?.replace(/^bg-/, '')
   if (name) {
     style.backgroundColor = `var(--bg-${name})`
   }
 
-  // Фоновое изображение
   const bgImageNode = (value.value as any[] | undefined)
     ?.find((b: any) => b.key === 'background-image')
 
@@ -252,7 +279,6 @@ const layoutBcgStyle = computed(() => {
   if (bgUrl) {
     style.backgroundImage = `url(${bgUrl})`
 
-    // Размер и позиция
     const bgSize = getDefault(value.value, 'background-size')
     const bgPosition = getDefault(value.value, 'background-position')
 
@@ -263,7 +289,6 @@ const layoutBcgStyle = computed(() => {
       style.backgroundPosition = bgPosition
     }
 
-    // Чтобы фон не тайлился
     style.backgroundRepeat = 'no-repeat'
   }
 
@@ -271,7 +296,11 @@ const layoutBcgStyle = computed(() => {
 })
 
 const layoutBorderStyle = computed(() =>
-  collectBorderStyle('border', 'border.radius')
+  collectBorderStyle(
+    'border',
+    'border.radius',
+    resolveBgVar('background-color'),
+  )
 )
 
 const layoutMarginStyle = computed(() => collectMarginStyle('margin'))
@@ -283,16 +312,6 @@ const textPercent = computed(() => Number(getDefault(value.value, 'text.cols')) 
 const imagesPercent = computed(() => clamp(1 - textPercent.value, 0, 1))
 
 // ==================== Text ====================
-//
-// В новом формате в 'text' три независимых блока:
-//   title, summary, text
-// У каждого — своя группа настроек:
-//   text.title-settings.*, text.summary-settings.*, text.text-settings.*
-// Каждая группа содержит:
-//   editor, text-block-align, text-size, container, text-cols
-//
-// Рендерим их однообразно, как раньше делали previewTitle/previewText.
-
 type TextFieldKey = 'title' | 'summary' | 'text'
 
 const textFieldKeys: TextFieldKey[] = ['title', 'summary', 'text']
@@ -311,7 +330,11 @@ const textPaddingStyle = computed(() => collectPaddingStyle('text.padding'))
 const textMarginStyle = computed(() => collectMarginStyle('text.margin'))
 
 const textBorderStyle = computed(() =>
-  collectBorderStyle('text.border', 'text.border.radius')
+  collectBorderStyle(
+    'text.border',
+    'text.border.radius',
+    resolveBgVar('text.background-color'),
+  )
 )
 
 const textBlockStyle = computed(() => ({
@@ -320,12 +343,6 @@ const textBlockStyle = computed(() => ({
   ...textMarginStyle.value,
 }))
 
-/**
- * Горизонтальное позиционирование текстового блока, когда
- * изображения не отображаются (layout === 'text').
- * Значение берётся из 'text.text-block-position'
- * ('flex-start' | 'center' | 'flex-end').
- */
 const textOnlyAlignStyle = computed(() => {
   if (needDisplayImage.value) return {}
   const pos = getDefault(value.value, 'text.text-block-position')
@@ -335,12 +352,6 @@ const textOnlyAlignStyle = computed(() => {
   return { justifyContent: 'center' }
 })
 
-/**
- * Горизонтальное позиционирование блока изображений, когда
- * текстовый блок не отображается (layout === 'image').
- * Значение берётся из 'images.images-block-position'
- * ('flex-start' | 'center' | 'flex-end').
- */
 const imagesOnlyAlignStyle = computed(() => {
   if (needDisplayText.value) return {}
   const pos = getDefault(value.value, 'images.images-block-position')
@@ -350,10 +361,6 @@ const imagesOnlyAlignStyle = computed(() => {
   return { justifyContent: 'center' }
 })
 
-/**
- * Для одного текстового поля (title/summary/text) собрать всё,
- * что нужно для рендера: контейнер, размер, кол-во колонок и т.п.
- */
 function textFieldMeta(field: TextFieldKey) {
   const settingsPath = `text.${field}-settings`
 
@@ -383,10 +390,6 @@ const titleMeta   = computed(() => textFieldMeta('title'))
 const summaryMeta = computed(() => textFieldMeta('summary'))
 const textMeta    = computed(() => textFieldMeta('text'))
 
-/**
- * Список полей, которые реально нужно рендерить.
- * Поле попадает в список, если у него непустое значение.
- */
 const visibleTextFields = computed(() => {
   const map: Record<TextFieldKey, string> = {
     title:   previewTitle.value,
@@ -405,11 +408,6 @@ const visibleTextFields = computed(() => {
     }))
 })
 
-/**
- * Записать значение в дерево схемы и форсировать эмит update:modelValue.
- * Используется как `set` для v-inline-edit — чтобы правки в центре
- * попадали в модель, а значит — в правую панель и в save().
- */
 function commitText(path: string, v: string) {
   const arr = value.value as any[] | undefined
   if (!arr) return
@@ -417,21 +415,7 @@ function commitText(path: string, v: string) {
   const ok = setDefault(arr, path, v)
   if (!ok) return
 
-  // Форсим эмит новой ссылкой, чтобы родитель (editingBlock.settings)
-  // получил update:modelValue.
   value.value = arr.slice() as any
-}
-
-function commitTitle(v: string) {
-  commitText('text.title', v)
-}
-
-function commitSummary(v: string) {
-  commitText('text.summary', v)
-}
-
-function commitBody(v: string) {
-  commitText('text.text', v)
 }
 
 function commitField(field: TextFieldKey, v: string) {
@@ -446,12 +430,44 @@ const imagesBcgStyle = computed(() => {
 })
 
 const imagesBorderStyle = computed(() =>
-  collectBorderStyle('images.border', 'images.border.radius')
+  collectBorderStyle(
+    'images.border',
+    'images.border.radius',
+    resolveBgVar('images.background-color'),
+  )
 )
 
 const imageBorderStyle = computed(() =>
-  collectBorderStyle('images.image-border', 'images.image-border.radius')
+  collectBorderStyle(
+    'images.image-border',
+    'images.image-border.radius',
+    resolveBgVar('images.background-color'),
+  )
 )
+
+const imageOutlineStyle = computed(() => {
+  const widthRaw = getDefault(value.value, 'images.image-outline')
+  const colorRaw = getDefault(value.value, 'images.image-outline-color')
+
+  const width = Number(widthRaw)
+  if (!Number.isFinite(width) || width <= 0) return {}
+
+  const style: Record<string, string> = {
+    outlineStyle: 'solid',
+    outlineWidth: `${width}px`,
+    outlineOffset: '0px',
+  }
+
+  const color = resolveBorderColor(
+    colorRaw,
+    resolveBgVar('images.background-color'),
+  )
+  if (color) {
+    style.outlineColor = color
+  }
+
+  return style
+})
 
 const imagesPaddingStyle = computed(() => collectPaddingStyle('images.padding'))
 const imagesMarginStyle = computed(() => collectMarginStyle('images.margin'))
@@ -542,18 +558,27 @@ const imageItemClass = computed(() => {
 const imageItemStyle = computed(() => {
   if (isMasonry.value) return {}
   if (imagesFlexDirection.value === 'column') {
-    return { marginBottom: `${distancePx.value}px` }
+    return {
+      boxSizing: 'border-box',
+      marginBottom: `${distancePx.value}px`,
+    }
   }
-  return { height: `${imageHeightPx.value}px`, width: 'auto' }
+  return {
+    boxSizing: 'border-box',
+    height: `${imageHeightPx.value}px`,
+    width: 'auto',
+  }
 })
 
 const imageImgStyle = computed(() => {
-  return { display: 'block', 'box-sizing': 'border-box' }
+  return {
+    display: 'block',
+    boxSizing: 'border-box',
+    maxWidth: '100%',
+    height: '100%',
+  } as Record<string, string>
 })
 
-/**
- * Ширина колонки для MasonryWall.
- */
 const masonryColumnWidth = computed(() => 200)
 
 import type { FilesListResponse } from '~/types/files'
@@ -590,7 +615,6 @@ function onReorder(from: number, to: number) {
 }
 
 const masonryKey = computed(() => {
-  // Всё, что влияет на layout masonry
   return JSON.stringify({
     columns: columns.value,
     distance: distancePx.value,
@@ -659,7 +683,7 @@ const masonryKey = computed(() => {
                 >
                   <img
                     :src="item.url"
-                    :style="[imageImgStyle, imageBorderStyle]"
+                    :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]"
                   />
                 </ImageWrapper>
               </template>
@@ -686,7 +710,7 @@ const masonryKey = computed(() => {
               >
                 <img
                   :src="img.url"
-                  :style="[imageImgStyle, imageBorderStyle]"
+                  :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]"
                 />
               </ImageWrapper>
             </div>
