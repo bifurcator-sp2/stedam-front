@@ -278,7 +278,7 @@ const layoutMarginStyle = computed(() => collectMarginStyle('margin'))
 const layoutPaddingStyle = computed(() => collectPaddingStyle('padding'))
 
 // ==================== Пропорции текст / картинки ====================
-const cols = 12
+const cols = 24
 const textPercent = computed(() => Number(getDefault(value.value, 'text.cols')) / cols)
 const imagesPercent = computed(() => clamp(1 - textPercent.value, 0, 1))
 
@@ -309,6 +309,21 @@ const textBlockStyle = computed(() => ({
   ...textPaddingStyle.value,
   ...textMarginStyle.value,
 }))
+
+/**
+ * Горизонтальное позиционирование текстового блока, когда
+ * изображения не отображаются (layout === 'text').
+ * Значение берётся из 'text-block-position' как есть
+ * ('flex-start' | 'center' | 'flex-end').
+ */
+const textOnlyAlignStyle = computed(() => {
+  if (needDisplayImage.value) return {}
+  const pos = getDefault(value.value, 'text.text-block-position')
+  if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
+    return { justifyContent: pos }
+  }
+  return { justifyContent: 'center' }
+})
 
 const textCols = computed(() =>
   clampInt(getDefault(value.value, 'text.text-cols'), 1, 4, 1)
@@ -521,13 +536,17 @@ const masonryKey = computed(() => {
       />
       <div :style="[layoutMarginStyle]">
         <div
-          :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle]"
-          :class="['flex', 'items-start', 'justify-center', layoutClass]"
+          :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, textOnlyAlignStyle]"
+          :class="[
+            'flex',
+            'items-start',
+            layoutClass,
+          ]"
         >
-          <div :style="{ flex: `0 0 ${imagesPercent * 100}%` }">
+          <div v-if="needDisplayImage" :style="{ flex: `0 0 ${imagesPercent * 100}%` }">
             <!-- Masonry (JS) -->
             <MasonryWall
-              v-if="needDisplayImage && isMasonry"
+              v-if="isMasonry"
               :items="filesModel.images"
               :column-width="masonryColumnWidth"
               :gap="distancePx"
@@ -558,7 +577,7 @@ const masonryKey = computed(() => {
 
             <!-- Column / Row (CSS) -->
             <div
-              v-else-if="needDisplayImage"
+              v-else
               :class="[imagesContainerClass]"
               :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
             >
