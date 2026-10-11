@@ -1444,36 +1444,24 @@ function reset() {
 }
 
 /* Границы условного «экрана устройства» */
-.viewport-frame__screen--bounded {
-  /* Рамка снаружи, чтобы не влиять на layout */
-  outline: 1px dashed var(--ui-border, #a5acb5);
-  outline-offset: 12px;
-  border-radius: 2px;
-}
-
-/* Метки по углам рамки */
+/* Только левая и правая границы, ровно по краям контента. */
 .viewport-frame__screen--bounded::before,
 .viewport-frame__screen--bounded::after {
   content: '';
   position: absolute;
-  width: 10px;
-  height: 10px;
-  border-color: var(--ui-primary, #3b82f6);
-  border-style: solid;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--ui-border, #a5acb5);
   pointer-events: none;
-  opacity: 0.5;
 }
 
 .viewport-frame__screen--bounded::before {
-  top: -12px;
-  left: -12px;
-  border-width: 1px 0 0 1px;
+  left: 0;
 }
 
 .viewport-frame__screen--bounded::after {
-  bottom: -12px;
-  right: -12px;
-  border-width: 0 1px 1px 0;
+  right: 0;
 }
 
 .viewport-frame__label {

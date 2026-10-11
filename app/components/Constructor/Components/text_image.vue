@@ -750,4 +750,17 @@ img:last-child {
   hyphens: auto;
   min-width: 0;
 }
+
+/* Полное выравнивание: последняя строка тоже растягивается */
+.block-title-break.text-justify-all,
+.block-title-break.text-justify-all :deep(*) {
+  text-align: justify;
+  text-align-last: justify;
+}
+
+/* match-parent */
+.block-title-break.text-match-parent,
+.block-title-break.text-match-parent :deep(*) {
+  text-align: match-parent;
+}
 </style>
