@@ -449,7 +449,7 @@ const imageItemStyle = computed(() => {
 })
 
 const imageImgStyle = computed(() => {
-  return { display: 'block' }
+  return { display: 'block', 'box-sizing': 'border-box' }
 })
 
 /**
@@ -546,11 +546,11 @@ const masonryKey = computed(() => {
                   @restore="fileContainerRef?.restoreFile($event)"
                   @reorder="onReorder"
                   :class="imageItemClass"
-                  :style="[imageItemStyle, imageBorderStyle]"
+                  :style="[imageItemStyle]"
                 >
                   <img
                     :src="item.url"
-                    :style="imageImgStyle"
+                    :style="[imageImgStyle, imageBorderStyle]"
                   />
                 </ImageWrapper>
               </template>
@@ -573,11 +573,11 @@ const masonryKey = computed(() => {
                 @restore="fileContainerRef?.restoreFile($event)"
                 @reorder="onReorder"
                 :class="imageItemClass"
-                :style="[imageItemStyle, imageBorderStyle]"
+                :style="[imageItemStyle]"
               >
                 <img
                   :src="img.url"
-                  :style="imageImgStyle"
+                  :style="[imageImgStyle, imageBorderStyle]"
                 />
               </ImageWrapper>
             </div>
