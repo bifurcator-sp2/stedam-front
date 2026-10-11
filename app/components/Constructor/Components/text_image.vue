@@ -283,13 +283,23 @@ const textPercent = computed(() => Number(getDefault(value.value, 'text.cols')) 
 const imagesPercent = computed(() => clamp(1 - textPercent.value, 0, 1))
 
 // ==================== Text ====================
-const previewTitle = computed(() => getDefault(value.value, 'text.title'))
-const previewText = computed(() => getDefault(value.value, 'text.text'))
+//
+// В новом формате в 'text' три независимых блока:
+//   title, summary, text
+// У каждого — своя группа настроек:
+//   text.title-settings.*, text.summary-settings.*, text.text-settings.*
+// Каждая группа содержит:
+//   editor, text-block-align, text-size, container, text-cols
+//
+// Рендерим их однообразно, как раньше делали previewTitle/previewText.
 
-const tag = computed(
-  () => `Prose${getDefault(value.value, 'text.header-type').toUpperCase()}`
-)
-const textSize = computed(() => ' ' + getDefault(value.value, 'text.text-size') + ' ')
+type TextFieldKey = 'title' | 'summary' | 'text'
+
+const textFieldKeys: TextFieldKey[] = ['title', 'summary', 'text']
+
+const previewTitle   = computed(() => getDefault(value.value, 'text.title'))
+const previewSummary = computed(() => getDefault(value.value, 'text.summary'))
+const previewText    = computed(() => getDefault(value.value, 'text.text'))
 
 const textBcgStyle = computed(() => {
   const v = getDefault(value.value, 'text.background-color')
@@ -340,9 +350,60 @@ const imagesOnlyAlignStyle = computed(() => {
   return { justifyContent: 'center' }
 })
 
-const textCols = computed(() =>
-  clampInt(getDefault(value.value, 'text.text-cols'), 1, 4, 1)
-)
+/**
+ * Для одного текстового поля (title/summary/text) собрать всё,
+ * что нужно для рендера: контейнер, размер, кол-во колонок и т.п.
+ */
+function textFieldMeta(field: TextFieldKey) {
+  const settingsPath = `text.${field}-settings`
+
+  const containerRaw = getDefault(value.value, `${settingsPath}.container`)
+  const container = containerRaw || 'ProseP'
+
+  const sizeRaw = getDefault(value.value, `${settingsPath}.text-size`)
+  const sizeClass = sizeRaw ? ` ${sizeRaw} ` : ' '
+
+  const alignRaw = getDefault(value.value, `${settingsPath}.text-block-align`)
+  const alignClass = alignRaw ? `text-${alignRaw}` : ''
+
+  const colsValue = clampInt(
+    getDefault(value.value, `${settingsPath}.text-cols`),
+    1, 4, 1
+  )
+
+  return {
+    container,
+    sizeClass,
+    alignClass,
+    colsValue,
+  }
+}
+
+const titleMeta   = computed(() => textFieldMeta('title'))
+const summaryMeta = computed(() => textFieldMeta('summary'))
+const textMeta    = computed(() => textFieldMeta('text'))
+
+/**
+ * Список полей, которые реально нужно рендерить.
+ * Поле попадает в список, если у него непустое значение.
+ */
+const visibleTextFields = computed(() => {
+  const map: Record<TextFieldKey, string> = {
+    title:   previewTitle.value,
+    summary: previewSummary.value,
+    text:    previewText.value,
+  }
+  return textFieldKeys
+    .filter((k) => !!map[k])
+    .map((k) => ({
+      key: k,
+      value: map[k],
+      meta:
+        k === 'title'   ? titleMeta.value   :
+          k === 'summary' ? summaryMeta.value :
+            textMeta.value,
+    }))
+})
 
 /**
  * Записать значение в дерево схемы и форсировать эмит update:modelValue.
@@ -365,8 +426,16 @@ function commitTitle(v: string) {
   commitText('text.title', v)
 }
 
+function commitSummary(v: string) {
+  commitText('text.summary', v)
+}
+
 function commitBody(v: string) {
   commitText('text.text', v)
+}
+
+function commitField(field: TextFieldKey, v: string) {
+  commitText(`text.${field}`, v)
 }
 
 // ==================== Images ====================
@@ -627,26 +696,17 @@ const masonryKey = computed(() => {
             :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
           >
             <component
-              v-if="previewTitle"
-              :is="tag"
-              class="mt-0 block-title-break"
+              v-for="field in visibleTextFields"
+              :key="field.key"
+              :is="field.meta.container"
+              :style="{ columnCount: field.meta.colsValue }"
+              :class="[field.meta.sizeClass, field.meta.alignClass, 'block-title-break']"
               v-inline-edit="{
-                get: () => previewTitle,
-                set: commitTitle,
+                get: () => field.value,
+                set: (v: string) => commitField(field.key, v),
                 renderFormulas: true,
               }"
             ></component>
-
-            <ProseP
-              v-if="previewText"
-              :style="{ columnCount: textCols }"
-              :class="[textSize, 'block-title-break']"
-              v-inline-edit="{
-                get: () => previewText,
-                set: commitBody,
-                renderFormulas: true,
-              }"
-            ></ProseP>
           </div>
         </div>
       </div>
