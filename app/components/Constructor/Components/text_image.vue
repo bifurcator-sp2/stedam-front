@@ -313,12 +313,27 @@ const textBlockStyle = computed(() => ({
 /**
  * Горизонтальное позиционирование текстового блока, когда
  * изображения не отображаются (layout === 'text').
- * Значение берётся из 'text-block-position' как есть
+ * Значение берётся из 'text.text-block-position'
  * ('flex-start' | 'center' | 'flex-end').
  */
 const textOnlyAlignStyle = computed(() => {
   if (needDisplayImage.value) return {}
   const pos = getDefault(value.value, 'text.text-block-position')
+  if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
+    return { justifyContent: pos }
+  }
+  return { justifyContent: 'center' }
+})
+
+/**
+ * Горизонтальное позиционирование блока изображений, когда
+ * текстовый блок не отображается (layout === 'image').
+ * Значение берётся из 'images.images-block-position'
+ * ('flex-start' | 'center' | 'flex-end').
+ */
+const imagesOnlyAlignStyle = computed(() => {
+  if (needDisplayText.value) return {}
+  const pos = getDefault(value.value, 'images.images-block-position')
   if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
     return { justifyContent: pos }
   }
@@ -536,7 +551,13 @@ const masonryKey = computed(() => {
       />
       <div :style="[layoutMarginStyle]">
         <div
-          :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, textOnlyAlignStyle]"
+          :style="[
+            layoutBcgStyle,
+            layoutBorderStyle,
+            layoutPaddingStyle,
+            textOnlyAlignStyle,
+            imagesOnlyAlignStyle,
+          ]"
           :class="[
             'flex',
             'items-start',
