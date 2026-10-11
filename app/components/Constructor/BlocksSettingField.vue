@@ -29,26 +29,68 @@ const { sanitizeHtml } = useSanitize()
 // Режим блока icon: 'manual' | 'picker'
 const iconMode = ref<'manual' | 'picker'>('manual')
 
+// Иконка типа — для мини-бейджа рядом с лейблом
+const typeIcon = computed(() => {
+  switch (model.value.type) {
+    case 'string': return 'i-lucide-type'
+    case 'select': return 'i-lucide-list'
+    case 'int':    return 'i-lucide-hash'
+    case 'color':  return 'i-lucide-palette'
+    case 'bool':   return 'i-lucide-toggle-left'
+    case 'icon':   return 'i-lucide-smile'
+    case 'image':  return 'i-lucide-image'
+    default:       return 'i-lucide-circle-dot'
+  }
+})
+
 // ============================================================
 // Тип "string" — авторесайз + санитайз
 // ============================================================
 
-
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
-/** Двусторонний computed: чтение — из модели, запись — с санитайзом. */
+/** Черновик ввода: пока фокус в textarea — храним сырую строку, чтобы можно было набирать HTML. */
+const stringDraft = ref<string>('')
+
+/** Черновик актуален только при активном редактировании. */
+const isEditing = ref(false)
+
+/** Значение из модели, как есть. */
+const modelString = computed<string>(() => {
+  const v = model.value.default
+  return typeof v === 'string' ? v : ''
+})
+
+/** То, что показываем в textarea. */
 const stringModel = computed<string>({
   get() {
-    const v = model.value.default
-    return typeof v === 'string' ? v : ''
+    return isEditing.value ? stringDraft.value : modelString.value
   },
   set(raw: string) {
-    const clean = sanitizeHtml(raw)
-    if (clean !== model.value.default) {
-      model.value = { ...model.value, default: clean }
-    }
+    // Во время ввода просто копим сырьё — санитайз отложим.
+    stringDraft.value = raw
   },
 })
+
+/** Зафиксировать: санитайзим черновик и пишем в модель. */
+function commitString() {
+  const clean = sanitizeHtml(stringDraft.value)
+  isEditing.value = false
+  if (clean !== model.value.default) {
+    model.value = { ...model.value, default: clean }
+  }
+  // Синхронизируем черновик с тем, что реально ушло в модель.
+  stringDraft.value = clean
+}
+
+function onStringFocus() {
+  stringDraft.value = modelString.value
+  isEditing.value = true
+}
+
+function onStringBlur() {
+  commitString()
+}
 
 /** Подгоняем высоту textarea под контент. */
 function resizeTextarea() {
@@ -69,11 +111,17 @@ onMounted(async () => {
   resizeTextarea()
 })
 
-// Пересчитываем высоту при внешнем изменении модели
+// Пересчитываем высоту при любом изменении отображаемого значения
 watch(stringModel, async () => {
   await nextTick()
   resizeTextarea()
 })
+
+// Если модель изменили снаружи, пока мы не редактируем — подтягиваем в черновик
+watch(modelString, (val) => {
+  if (!isEditing.value) stringDraft.value = val
+})
+
 
 // ============================================================
 // Тип "image"
@@ -168,112 +216,133 @@ function updateChild(index: number, updated: SettingItem) {
 </script>
 
 <template>
-  <div class="field" :class="{ 'field-group': model.children?.length }">
-    <!-- Заголовок группы -->
-    <div v-if="model.children?.length" class="field-group-header">
-      <UIcon name="i-lucide-folder-tree" class="field-group-icon" />
-      <span class="field-group-title">{{ model.label }}</span>
-      <span class="field-group-key">{{ model.key }}</span>
-    </div>
+  <div class="field" :class="{ 'field--group': model.children?.length }">
+    <!-- ============ ГРУППА ============ -->
+    <template v-if="model.children?.length">
+      <div class="group-head">
+        <span class="group-head__chev">
+          <UIcon name="i-lucide-chevron-right" />
+        </span>
+        <UIcon name="i-lucide-folder-tree" class="group-head__icon" />
+        <span class="group-head__title">{{ model.label }}</span>
+        <span class="group-head__key">{{ model.key }}</span>
+      </div>
 
-    <!-- Тип "icon" — иконка слева, настройки справа -->
+      <div class="group-body">
+        <BlocksSettingField
+          v-for="(child, index) in model.children"
+          :key="child.key"
+          :model-value="child"
+          :block-id="blockId"
+          :model-name="modelName"
+          @update:model-value="updateChild(index, $event)"
+        />
+      </div>
+    </template>
+
+    <!-- ============ ICON ============ -->
     <template v-else-if="model.type === 'icon'">
-      <div class="field-icon">
-        <div class="field-icon-preview">
+      <div class="icon-field">
+        <div class="icon-field__preview" :class="{ 'is-empty': !model.default }">
           <UIcon
             v-if="model.default"
             :name="model.default"
-            class="field-icon-preview__svg"
+            class="icon-field__svg"
           />
-          <span v-else class="field-icon-preview__empty">нет иконки</span>
+          <UIcon v-else name="i-lucide-image-off" class="icon-field__ph" />
         </div>
 
-        <div class="field-icon-body">
-          <!-- Режим: ручной ввод -->
-          <template v-if="iconMode === 'manual'">
-            <div class="field-icon-input-row">
-              <UInput
-                v-model="model.default"
-                size="xs"
-                placeholder="i-lucide-hop"
-                class="field-control"
-              />
-              <UButton
-                icon="i-lucide-grid-2x2"
-                size="xs"
-                color="neutral"
-                variant="soft"
-                title="Выбрать из библиотеки"
-                @click="iconMode = 'picker'"
-              />
+        <div class="icon-field__body">
+          <div class="icon-field__row">
+            <span class="icon-field__label">{{ model.label }}</span>
+            <span class="icon-field__mode">{{ iconMode === 'manual' ? 'вручную' : 'из набора' }}</span>
+          </div>
+
+          <!-- Ручной ввод -->
+          <div v-if="iconMode === 'manual'" class="icon-field__input">
+            <UInput
+              v-model="model.default"
+              size="xs"
+              placeholder="i-lucide-hop"
+              class="field-control"
+            />
+            <UButton
+              icon="i-lucide-grid-2x2"
+              size="xs"
+              color="neutral"
+              variant="soft"
+              square
+              title="Выбрать из библиотеки"
+              @click="iconMode = 'picker'"
+            />
+          </div>
+
+          <!-- Пикер -->
+          <div v-else class="icon-field__input">
+            <Vue3IconPicker
+              v-model="model.default"
+              placeholder="Поиск иконки..."
+              icon-library="lucide"
+              class="field-control"
+            />
+            <UButton
+              icon="i-lucide-keyboard"
+              size="xs"
+              color="neutral"
+              variant="soft"
+              square
+              title="Ввести вручную"
+              @click="iconMode = 'manual'"
+            />
+          </div>
+
+          <!-- Подсказка (только в ручном режиме) -->
+          <div v-if="iconMode === 'manual'" class="icon-hint">
+            <div class="icon-hint__line">
+              <span class="icon-hint__tag">синтаксис</span>
+              <code>i-набор:имя</code>
+              <span class="icon-hint__sep">·</span>
+              <span class="icon-hint__tag">пример</span>
+              <code>i-lucide-hop</code>
             </div>
-
-            <div class="field-icon-hint">
-              <div class="field-icon-hint__row">
-                <span class="field-icon-hint__label">Синтаксис:</span>
-                <code class="field-icon-hint__code">i-набор:имя</code>
-              </div>
-
-              <div class="field-icon-hint__row">
-                <span class="field-icon-hint__label">Например:</span>
-                <code class="field-icon-hint__code">i-lucide-hop</code>
-              </div>
-
-              <div class="field-icon-hint__links">
-                <a
-                  href="https://icones.js.org"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="field-icon-hint__link"
-                >
-                  <UIcon name="i-lucide-external-link" class="field-icon-hint__link-icon" />
-                  icones.js.org
-                </a>
-                <a
-                  href="https://lucide.dev/icons/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="field-icon-hint__link"
-                >
-                  <UIcon name="i-lucide-external-link" class="field-icon-hint__link-icon" />
-                  lucide.dev/icons
-                </a>
-              </div>
+            <div class="icon-hint__links">
+              <a
+                href="https://icones.js.org"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="icon-hint__link"
+              >
+                <UIcon name="i-lucide-external-link" />
+                icones.js.org
+              </a>
+              <a
+                href="https://lucide.dev/icons/"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="icon-hint__link"
+              >
+                <UIcon name="i-lucide-external-link" />
+                lucide.dev
+              </a>
             </div>
-          </template>
-
-          <!-- Режим: пикер -->
-          <template v-else>
-            <div class="field-icon-input-row">
-              <Vue3IconPicker
-                v-model="model.default"
-                placeholder="Поиск иконки..."
-                icon-library="lucide"
-                class="field-control"
-              />
-              <UButton
-                icon="i-lucide-keyboard"
-                size="xs"
-                color="neutral"
-                variant="soft"
-                title="Ввести вручную"
-                @click="iconMode = 'manual'"
-              />
-            </div>
-          </template>
+          </div>
         </div>
       </div>
     </template>
 
-    <!-- Тип "image" — FileContainer для картинок -->
+    <!-- ============ IMAGE ============ -->
     <template v-else-if="model.type === 'image'">
-      <div class="field-image">
-        <div class="field-image-header">
-          <span class="field-image-label">{{ model.label }}</span>
-          <span v-if="imagePurpose" class="field-image-purpose">{{ imagePurpose }}</span>
+      <div class="image-field">
+        <div class="image-field__head">
+          <span class="image-field__label">
+            <UIcon name="i-lucide-image" class="image-field__label-icon" />
+            {{ model.label }}
+          </span>
+          <span v-if="imagePurpose" class="image-field__purpose">
+            {{ imagePurpose }}
+          </span>
         </div>
 
-        <!-- Dropzone -->
         <FileContainer
           ref="fileContainerRef"
           v-if="imagePurpose"
@@ -285,13 +354,12 @@ function updateChild(index: number, updated: SettingItem) {
           v-model:files="imageFiles"
         />
 
-        <div v-else class="field-image-empty">
+        <div v-else class="image-field__empty">
           <UIcon name="i-lucide-info" />
           <span>Не задан purpose для изображения</span>
         </div>
 
-        <!-- Сетка превью -->
-        <div v-if="imageFiles.images.length" class="field-image-grid">
+        <div v-if="imageFiles.images.length" class="image-grid">
           <ImageWrapper
             v-for="(img, idx) in imageFiles.images"
             :key="img.url ?? idx"
@@ -302,176 +370,256 @@ function updateChild(index: number, updated: SettingItem) {
             @remove="onRemove($event)"
             @restore="onRestore($event)"
           >
-            <img
-              :src="img.url"
-              class="w-16 h-16 object-cover rounded bg-gray-100"
-            />
+            <img :src="img.url" class="image-grid__thumb" />
           </ImageWrapper>
         </div>
       </div>
     </template>
 
-    <!-- Листовые типы -->
+    <!-- ============ ЛИСТОВЫЕ ============ -->
     <template v-else>
-      <!-- string — отдельная раскладка: лейбл сверху, авторесайз-textarea + превью -->
+      <!-- string -->
       <template v-if="model.type === 'string'">
-        <label class="field-label" :title="model.key">{{ model.label }}</label>
-        <div class="field-string">
-          <textarea
-            ref="textareaRef"
-            v-model="stringModel"
-            class="field-string__textarea"
-            rows="1"
-            spellcheck="false"
-            @input="autoResize"
-          />
+        <div class="leaf-head">
+          <UIcon :name="typeIcon" class="leaf-head__icon" />
+          <span class="leaf-head__label">{{ model.label }}</span>
+          <span class="leaf-head__key">{{ model.key }}</span>
         </div>
+
+        <textarea
+          ref="textareaRef"
+          v-model="stringModel"
+          class="string-input"
+          rows="1"
+          spellcheck="false"
+          @input="autoResize"
+          @focus="onStringFocus"
+          @blur="onStringBlur"
+        />
+
+
       </template>
 
-      <!-- остальные листовые типы — в grid-строке -->
-      <div v-else class="field-row">
-        <label class="field-label" :title="model.key">{{ model.label }}</label>
+      <!-- остальные листовые -->
+      <div v-else class="leaf-row">
+        <span class="leaf-row__label">
+          <UIcon :name="typeIcon" class="leaf-row__icon" />
+          <span class="leaf-row__text" :title="model.key">{{ model.label }}</span>
+        </span>
 
-        <USelect
-          v-if="model.type === 'select'"
-          v-model="model.default"
-          :items="model.allowed"
-          size="xs"
-          class="field-control"
-        />
-        <ColorPicker
-          v-else-if="model.type === 'color'"
-          v-model="model.default"
-          :items="model.allowed ?? []"
-          :columns="6"
-          class="field-control"
-        />
-        <UInputNumber
-          v-else-if="model.type === 'int'"
-          v-model="model.default"
-          size="xs"
-          class="field-control"
-        />
-        <USwitch
-          v-else-if="model.type === 'bool'"
-          v-model="model.default"
-          size="xs"
-          class="field-control"
-        />
+        <div class="leaf-row__control">
+          <USelect
+            v-if="model.type === 'select'"
+            v-model="model.default"
+            :items="model.allowed"
+            size="xs"
+            class="field-control"
+          />
+          <ColorPicker
+            v-else-if="model.type === 'color'"
+            v-model="model.default"
+            :items="model.allowed ?? []"
+            :columns="6"
+            class="field-control"
+          />
+          <UInputNumber
+            v-else-if="model.type === 'int'"
+            v-model="model.default"
+            size="xs"
+            class="field-control"
+          />
+          <USwitch
+            v-else-if="model.type === 'bool'"
+            v-model="model.default"
+            size="xs"
+            class="field-control"
+          />
+        </div>
       </div>
     </template>
-
-    <!-- Дети -->
-    <div v-if="model.children?.length" class="field-children">
-      <BlocksSettingField
-        v-for="(child, index) in model.children"
-        :key="child.key"
-        :model-value="child"
-        :block-id="blockId"
-        :model-name="modelName"
-        @update:model-value="updateChild(index, $event)"
-      />
-    </div>
   </div>
 </template>
 
 <style scoped>
-/* ====== Поле ====== */
+/* ============================================================
+   База
+   ============================================================ */
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-
-/* Листовая строка */
-.field-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-  align-items: center;
-  gap: 8px;
-  min-height: 26px;
-}
-
-.field-label {
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1.2;
-  color: var(--ui-text-muted, #6b7280);
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.field-control {
+  gap: 5px;
   min-width: 0;
 }
 
-/* ====== Группа ====== */
-
-.field-group {
+.field--group {
   gap: 6px;
-  padding: 8px 8px 8px 10px;
+  padding: 8px 10px 10px;
+  border-radius: 10px;
+  background: var(--ui-bg-elevated, #f8fafc);
   border: 1px solid var(--ui-border, #e5e7eb);
-  border-radius: 6px;
-  background: var(--ui-bg-elevated, #f9fafb);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
 }
 
-.field-group-header {
+.field--group .field--group {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--ui-border, #e5e7eb);
+  border-radius: 0;
+}
+
+/* ============================================================
+   Группа
+   ============================================================ */
+
+.group-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--ui-text, #111827);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--ui-text, #0f172a);
 }
 
-.field-group-icon {
+.group-head__chev {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: var(--ui-text-muted, #94a3b8);
+  transition: transform 0.18s ease;
+}
+
+.group-head__chev :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.field--group:hover > .group-head .group-head__chev {
+  transform: translateX(1px);
+  color: var(--ui-primary, #3b82f6);
+}
+
+.group-head__icon {
   width: 13px;
   height: 13px;
-  opacity: 0.55;
+  opacity: 0.7;
+  color: var(--ui-primary, #3b82f6);
 }
 
-.field-group-title {
+.group-head__title {
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.field-group-key {
+.group-head__key {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  font-weight: 400;
-  color: var(--ui-text-muted, #9ca3af);
-  text-transform: none;
+  font-size: 9.5px;
+  font-weight: 500;
   letter-spacing: 0;
-  padding: 1px 5px;
-  border-radius: 4px;
+  text-transform: none;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: var(--ui-text-muted, #64748b);
   background: var(--ui-bg, #ffffff);
   border: 1px solid var(--ui-border, #e5e7eb);
 }
 
-/* Вложенные группы — компактнее и с акцентной полосой */
-.field-group .field-group {
-  padding: 6px 6px 6px 8px;
-  background: transparent;
-}
-
-.field-children {
+.group-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-left: 6px;
-  margin-left: 2px;
-  border-left: 2px solid var(--ui-border, #e5e7eb);
+  gap: 5px;
 }
 
-/* Уменьшаем внутренние отступы UInput/USelect/UInputNumber,
-   чтобы панель стала компактнее */
+/* ============================================================
+   Листовые: общий заголовок (string)
+   ============================================================ */
+
+.leaf-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 1px;
+  min-width: 0;
+}
+
+.leaf-head__icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--ui-text-muted, #94a3b8);
+}
+
+.leaf-head__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ui-text, #0f172a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaf-head__key {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  color: var(--ui-text-muted, #94a3b8);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--ui-bg, #ffffff);
+  border: 1px solid var(--ui-border, #eef2f7);
+}
+
+/* ============================================================
+   Листовые: строка label | control
+   ============================================================ */
+
+.leaf-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  padding: 2px 0;
+}
+
+.leaf-row__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.leaf-row__icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--ui-text-muted, #94a3b8);
+}
+
+.leaf-row__text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ui-text, #334155);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaf-row__control {
+  min-width: 0;
+}
+
+/* Компактные контролы Nuxt UI */
+.field-control {
+  min-width: 0;
+}
+
 .field-control :deep(input),
 .field-control :deep(button) {
   padding-top: 2px;
@@ -479,257 +627,343 @@ function updateChild(index: number, updated: SettingItem) {
   font-size: 12.5px;
 }
 
-/* ====== Тип "string" ====== */
+/* ============================================================
+   STRING
+   ============================================================ */
 
-.field-string {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.field-string__textarea {
+.string-input {
   width: 100%;
-  min-height: 26px;
-  max-height: 240px;
-  padding: 4px 8px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  border-radius: 6px;
+  min-height: 30px;
+  max-height: 260px;
+  padding: 7px 10px;
+  border: 1px solid var(--ui-border, #e2e8f0);
+  border-radius: 8px;
   background: var(--ui-bg, #ffffff);
-  color: var(--ui-text, #111827);
+  color: var(--ui-text, #0f172a);
   font-family: inherit;
   font-size: 12.5px;
-  line-height: 1.45;
-  resize: none;          /* растёт сам */
-  overflow-y: auto;      /* скролл только после max-height */
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
   outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
-.field-string__textarea:focus {
+.string-input::placeholder {
+  color: var(--ui-text-muted, #94a3b8);
+}
+
+.string-input:hover {
+  border-color: var(--ui-border-accented, #cbd5e1);
+}
+
+.string-input:focus {
   border-color: var(--ui-primary, #3b82f6);
-  box-shadow: 0 0 0 2px var(--ui-primary-muted, rgba(59, 130, 246, 0.15));
+  box-shadow: 0 0 0 3px var(--ui-primary-muted, rgba(59, 130, 246, 0.15));
 }
 
-.field-string__preview {
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--ui-bg-elevated, #f9fafb);
-  border: 1px solid var(--ui-border, #e5e7eb);
+/* Превью безопасного HTML под textarea */
+.string-preview {
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--ui-bg-elevated, #f8fafc);
+  border: 1px solid var(--ui-border, #eef2f7);
   font-size: 12px;
   line-height: 1.5;
-  color: var(--ui-text, #111827);
+  color: var(--ui-text, #334155);
   overflow-wrap: anywhere;
 }
 
-.field-string__preview :deep(a) {
+.string-preview :deep(a) {
   color: var(--ui-primary, #3b82f6);
   text-decoration: underline;
 }
 
-.field-string__preview :deep(p),
-.field-string__preview :deep(ul),
-.field-string__preview :deep(ol) {
+.string-preview :deep(p),
+.string-preview :deep(ul),
+.string-preview :deep(ol) {
   margin: 0 0 4px;
 }
 
-.field-string__preview :deep(p:last-child),
-.field-string__preview :deep(ul:last-child),
-.field-string__preview :deep(ol:last-child) {
+.string-preview :deep(p:last-child),
+.string-preview :deep(ul:last-child),
+.string-preview :deep(ol:last-child) {
   margin-bottom: 0;
 }
 
-/* ====== Тип "icon" ====== */
-
-.field-icon {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: flex-start;
-  gap: 8px;
+.string-preview :deep(strong),
+.string-preview :deep(b) {
+  font-weight: 700;
 }
 
-.field-icon-preview {
+.string-preview :deep(em),
+.string-preview :deep(i) {
+  font-style: italic;
+}
+
+/* ============================================================
+   ICON
+   ============================================================ */
+
+.icon-field {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.icon-field__preview {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 6px;
-  border: 1px dashed var(--ui-border, #e5e7eb);
-  border-radius: 6px;
-  background: var(--ui-bg, #ffffff);
+  width: 56px;
+  height: 56px;
+  padding: 8px;
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(148, 163, 184, 0.06), rgba(148, 163, 184, 0.02)),
+    var(--ui-bg, #ffffff);
+  border: 1px solid var(--ui-border, #e2e8f0);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(15, 23, 42, 0.04);
   overflow: hidden;
   flex-shrink: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.field-icon-preview__svg {
+.icon-field__preview:hover {
+  border-color: var(--ui-primary, #3b82f6);
+  box-shadow: 0 0 0 3px var(--ui-primary-muted, rgba(59, 130, 246, 0.12));
+}
+
+.icon-field__preview.is-empty {
+  border-style: dashed;
+  background: var(--ui-bg-elevated, #f8fafc);
+}
+
+.icon-field__svg {
   width: 100%;
   height: 100%;
-  color: var(--ui-text, #111827);
+  color: var(--ui-text, #0f172a);
 }
 
-.field-icon-preview__empty {
-  font-size: 9px;
-  line-height: 1;
-  text-align: center;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-/* Форсим svg тянуться от родителя */
-.field-icon-preview__svg :deep(svg) {
+.icon-field__svg :deep(svg) {
   width: 100%;
   height: 100%;
 }
 
-.field-icon-body {
+.icon-field__ph {
+  width: 20px;
+  height: 20px;
+  color: var(--ui-text-muted, #cbd5e1);
+}
+
+.icon-field__body {
   display: flex;
   flex-direction: column;
   gap: 6px;
   min-width: 0;
 }
 
-.field-icon-input-row {
+.icon-field__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.icon-field__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ui-text, #0f172a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-field__mode {
+  flex-shrink: 0;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--ui-primary, #3b82f6);
+  background: var(--ui-primary-muted, rgba(59, 130, 246, 0.12));
+}
+
+.icon-field__input {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
 }
 
-.field-icon-input-row .field-control {
+.icon-field__input .field-control {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-/* ====== Подсказка ====== */
-
-.field-icon-hint {
+/* Хинт */
+.icon-hint {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--ui-bg-elevated, #f9fafb);
-  border: 1px solid var(--ui-border, #e5e7eb);
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--ui-text-muted, #6b7280);
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--ui-bg-elevated, #f8fafc);
+  border: 1px solid var(--ui-border, #eef2f7);
+  font-size: 10.5px;
+  color: var(--ui-text-muted, #64748b);
 }
 
-.field-icon-hint__row {
+.icon-hint__line {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
   min-width: 0;
 }
 
-.field-icon-hint__label {
-  flex-shrink: 0;
-  font-weight: 500;
+.icon-hint__tag {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 9px;
+  color: var(--ui-text-muted, #94a3b8);
 }
 
-.field-icon-hint__code {
+.icon-hint__sep {
+  color: var(--ui-border-accented, #cbd5e1);
+}
+
+.icon-hint code {
   display: inline-block;
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--ui-bg, #ffffff);
   border: 1px solid var(--ui-border, #e5e7eb);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10.5px;
-  color: var(--ui-text, #111827);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+  font-size: 10px;
+  color: var(--ui-text, #334155);
 }
 
-.field-icon-hint__links {
+.icon-hint__links {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 2px;
 }
 
-.field-icon-hint__link {
+.icon-hint__link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
   background: var(--ui-bg, #ffffff);
   border: 1px solid var(--ui-border, #e5e7eb);
   color: var(--ui-primary, #3b82f6);
-  font-size: 11px;
+  font-size: 10.5px;
   text-decoration: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
-.field-icon-hint__link:hover {
-  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.08));
+.icon-hint__link:hover {
+  background: var(--ui-primary-muted, rgba(59, 130, 246, 0.08));
   border-color: var(--ui-primary, #3b82f6);
+  transform: translateY(-1px);
 }
 
-.field-icon-hint__link-icon {
-  width: 12px;
-  height: 12px;
+.icon-hint__link :deep(svg) {
+  width: 11px;
+  height: 11px;
   flex-shrink: 0;
 }
 
-/* ====== Тип "image" ====== */
+/* ============================================================
+   IMAGE
+   ============================================================ */
 
-.field-image {
+.image-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
-.field-image-header {
+.image-field__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 0 2px;
+  gap: 8px;
+  padding: 0 1px;
 }
 
-.field-image-label {
+.image-field__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11.5px;
-  font-weight: 500;
-  color: var(--ui-text-muted, #6b7280);
-  letter-spacing: 0.01em;
+  font-weight: 600;
+  color: var(--ui-text, #0f172a);
 }
 
-.field-image-purpose {
+.image-field__label-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--ui-primary, #3b82f6);
+  opacity: 0.8;
+}
+
+.image-field__purpose {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 4px;
+  font-size: 9.5px;
+  padding: 2px 6px;
+  border-radius: 5px;
   background: var(--ui-bg, #ffffff);
   border: 1px solid var(--ui-border, #e5e7eb);
-  color: var(--ui-text-muted, #9ca3af);
+  color: var(--ui-text-muted, #64748b);
 }
 
-.field-image-empty {
+.image-field__empty {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 10px 12px;
-  border-radius: 6px;
-  background: var(--ui-bg-elevated, #f9fafb);
-  border: 1px dashed var(--ui-border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--ui-bg-elevated, #f8fafc);
+  border: 1px dashed var(--ui-border, #e2e8f0);
   font-size: 11.5px;
-  color: var(--ui-text-muted, #6b7280);
+  color: var(--ui-text-muted, #64748b);
 }
 
-.field-image-empty :deep(svg) {
+.image-field__empty :deep(svg) {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
 }
 
-/* Сетка превью */
-.field-image-grid {
+.image-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   align-items: flex-start;
+}
+
+.image-grid__thumb {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--ui-bg-muted, #f1f5f9);
+  border: 1px solid var(--ui-border, #e2e8f0);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.image-grid__thumb:hover {
+  transform: translateY(-1px) scale(1.02);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.1);
 }
 </style>
