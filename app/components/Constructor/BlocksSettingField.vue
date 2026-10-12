@@ -413,7 +413,7 @@ function updateChild(index: number, updated: SettingItem) {
             v-model="model.default"
             :items="model.allowed"
             size="xs"
-            class="field-control"
+            class="field-control  w-full"
           />
           <ColorPicker
             v-else-if="model.type === 'color'"

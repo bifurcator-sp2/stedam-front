@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed} from 'vue'
+import {computed, ref, onMounted, onBeforeUnmount} from 'vue'
 import {MasonryWall} from '@yeger/vue-masonry-wall'
 
 // ==================== Модель ====================
@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
 // ==================== Общие утилиты ====================
 
 import {useFormula} from '~/composables/useFormula'
+import type {InlineEditBinding} from '~/directives/inlineEdit'
 
 const {renderFormulas} = useFormula()
 
@@ -127,22 +128,12 @@ function marginStyle(settings: Record<string, any>): Record<string, string> {
   return s
 }
 
-/**
- * Разрешить фон-настройку (например 'bg-default') в CSS-переменную
- * вида '--bg-default'. Если значение пустое — null.
- */
 function resolveBgVar(settingPath: string): string | null {
   const v = getDefault(value.value, settingPath)
   const name = typeof v === 'string' ? v.replace(/^bg-/, '') : ''
   return name ? `--bg-${name}` : null
 }
 
-/**
- * Разрешить цвет рамки:
- *  - 'border-inherit' → var(--bg-…) того же контейнера (или transparent)
- *  - 'border-…'        → var(--border-…)
- *  - пусто / не строка → undefined (не задаём border-color)
- */
 function resolveBorderColor(
   colorRaw: string,
   bgVar: string | null,
@@ -393,17 +384,21 @@ const titleMeta = computed(() => textFieldMeta('title'))
 const summaryMeta = computed(() => textFieldMeta('summary'))
 const textMeta = computed(() => textFieldMeta('text'))
 
+/**
+ * Стабильный список полей для v-for.
+ * ВАЖНО: без `value` внутри объекта и без field.value в :key —
+ * иначе Vue размонтирует узел на каждый ввод и фокус улетает.
+ */
 const visibleTextFields = computed(() => {
-  const map: Record<TextFieldKey, string> = {
-    title: previewTitle.value,
-    summary: previewSummary.value,
-    text: previewText.value,
+  const map: Record<TextFieldKey, boolean> = {
+    title: !!previewTitle.value,
+    summary: !!previewSummary.value,
+    text: !!previewText.value,
   }
   return textFieldKeys
-    .filter((k) => !!map[k])
+    .filter((k) => map[k])
     .map((k) => ({
       key: k,
-      value: map[k],
       meta:
         k === 'title' ? titleMeta.value :
           k === 'summary' ? summaryMeta.value :
@@ -411,14 +406,39 @@ const visibleTextFields = computed(() => {
     }))
 })
 
+/**
+ * Стабильные bindings для v-inline-edit. Не пересоздаются на каждый рендер,
+ * т.к. это computed — Vue переиспользует ссылку, пока зависимости не изменятся.
+ */
+const inlineBindings = computed<Record<TextFieldKey, InlineEditBinding>>(() => ({
+  title: {
+    get: () => previewTitle.value,
+    set: (v: string) => commitField('title', v),
+    renderFormulas,
+  },
+  summary: {
+    get: () => previewSummary.value,
+    set: (v: string) => commitField('summary', v),
+    renderFormulas,
+  },
+  text: {
+    get: () => previewText.value,
+    set: (v: string) => commitField('text', v),
+    renderFormulas,
+  },
+}))
+
 function commitText(path: string, v: string) {
   const arr = value.value as any[] | undefined
   if (!arr) return
 
-  const ok = setDefault(arr, path, v)
-  if (!ok) return
+  const prev = getDefault(arr, path)
+  if (prev === v) return
 
-  value.value = arr.slice() as any
+  // setDefault мутирует вложенный объект — этого достаточно,
+  // если value.value реактивен (defineModel делает его reactive).
+  // Не пересоздаём массив, чтобы не размонтировать блок в родителе.
+  setDefault(arr, path, v)
 }
 
 function commitField(field: TextFieldKey, v: string) {
@@ -585,7 +605,6 @@ const imageImgStyle = computed(() => {
 const masonryColumnWidth = computed(() => 200)
 
 import type {FilesListResponse} from '~/types/files'
-import {ref, onMounted, onBeforeUnmount} from 'vue'
 
 const filesModel = ref<FilesListResponse>({
   images: [],
@@ -605,10 +624,6 @@ onBeforeUnmount(() => emit('register-files', null))
 
 // ==================== Reorder ====================
 
-/**
- * Индекс перетаскиваемого изображения — общий для всего списка.
- * null — сейчас ничего не тащим.
- */
 const draggingIndex = ref<number | null>(null)
 
 function onImageDragStart(index: number) {
@@ -619,10 +634,6 @@ function onImageDragEnd() {
   draggingIndex.value = null
 }
 
-/**
- * Вставка перед элементом с индексом `beforeIndex`.
- * from — индекс перетаскиваемого элемента в массиве.
- */
 function onDropBefore(from: number, beforeIndex: number) {
   const imgs = filesModel.value.images
   if (from < 0 || from >= imgs.length) return
@@ -642,9 +653,6 @@ function onDropBefore(from: number, beforeIndex: number) {
   filesModel.value = {...filesModel.value, images: next}
 }
 
-/**
- * Вставка после элемента с индексом `afterIndex`.
- */
 function onDropAfter(from: number, afterIndex: number) {
   const imgs = filesModel.value.images
   if (from < 0 || from >= imgs.length) return
@@ -673,7 +681,6 @@ const masonryKey = computed(() => {
     urls: filesModel.value.images.map(i => i.url).join('|'),
   })
 })
-
 </script>
 
 <template>
@@ -708,7 +715,6 @@ const masonryKey = computed(() => {
           ]"
         >
           <div v-if="needDisplayImage" :style="{ flex: `0 0 ${imagesPercent * 100}%` }">
-            <!-- Masonry (JS) -->
             <MasonryWall
               v-if="isMasonry"
               :items="filesModel.images"
@@ -743,7 +749,6 @@ const masonryKey = computed(() => {
               </template>
             </MasonryWall>
 
-            <!-- Column / Row (CSS) -->
             <div
               v-else
               :class="[imagesContainerClass]"
@@ -779,15 +784,11 @@ const masonryKey = computed(() => {
           >
             <component
               v-for="field in visibleTextFields"
-              :key="`${field.key}:${field.value}`"
+              :key="field.key"
               :is="field.meta.container"
               :style="{ columnCount: field.meta.colsValue }"
               :class="[field.meta.sizeClass, field.meta.alignClass, 'block-title-break']"
-              v-inline-edit="{
-                get: () => field.value,
-                set: (v: string) => commitField(field.key, v),
-                render: renderFormulas,
-              }"
+              v-inline-edit="inlineBindings[field.key]"
             ></component>
           </div>
         </div>
@@ -809,14 +810,12 @@ img:last-child {
   min-width: 0;
 }
 
-/* Полное выравнивание: последняя строка тоже растягивается */
 .block-title-break.text-justify-all,
 .block-title-break.text-justify-all :deep(*) {
   text-align: justify;
   text-align-last: justify;
 }
 
-/* match-parent */
 .block-title-break.text-match-parent,
 .block-title-break.text-match-parent :deep(*) {
   text-align: match-parent;
