@@ -774,7 +774,7 @@ const masonryKey = computed(() => {
           >
             <component
               v-for="field in visibleTextFields"
-              :key="field.key"
+              :key="`${field.key}:${field.value}`"
               :is="field.meta.container"
               :style="{ columnCount: field.meta.colsValue }"
               :class="[field.meta.sizeClass, field.meta.alignClass, 'block-title-break']"

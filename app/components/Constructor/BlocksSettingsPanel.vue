@@ -95,10 +95,15 @@ function updateItem(index: number, updated: SettingNode) {
 
 <style scoped>
 .properties {
+  --panel-pad: 14px;
+  --panel-gap: 18px;
+  --radius-card: 10px;
+  --radius-pill: 999px;
+
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 14px 14px 22px;
+  gap: var(--panel-gap);
+  padding: var(--panel-pad) var(--panel-pad) 24px;
 }
 
 /* ============================================================
@@ -106,22 +111,35 @@ function updateItem(index: number, updated: SettingNode) {
    ============================================================ */
 
 .meta {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--radius-card);
   background:
-    linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(59, 130, 246, 0.02)),
+    linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.015) 60%),
     var(--ui-bg-elevated, #f8fafc);
   border: 1px solid var(--ui-border, #e5e7eb);
+  overflow: hidden;
+}
+
+.meta::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, #60a5fa, #3b82f6);
+  border-radius: 0 3px 3px 0;
 }
 
 .meta__label {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ui-text-muted, #64748b);
 }
@@ -129,11 +147,12 @@ function updateItem(index: number, updated: SettingNode) {
 .meta__value {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 8px 2px 6px;
-  border-radius: 999px;
+  gap: 4px;
+  padding: 3px 9px 3px 7px;
+  border-radius: var(--radius-pill);
   background: var(--ui-bg, #ffffff);
   border: 1px solid var(--ui-border, #e5e7eb);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11.5px;
   font-weight: 600;
@@ -144,7 +163,7 @@ function updateItem(index: number, updated: SettingNode) {
   width: 11px;
   height: 11px;
   color: var(--ui-primary, #3b82f6);
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 /* ============================================================
@@ -158,11 +177,32 @@ function updateItem(index: number, updated: SettingNode) {
 }
 
 .section__head {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 2px 6px;
-  border-bottom: 1px solid var(--ui-border, #eef2f7);
+  gap: 7px;
+  padding: 0 2px 8px 10px;
+}
+
+.section__head::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--ui-primary, #3b82f6), rgba(59, 130, 246, 0.15));
+}
+
+.section__head::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--ui-border, #eef2f7), transparent 85%);
 }
 
 .section__icon {
@@ -173,9 +213,9 @@ function updateItem(index: number, updated: SettingNode) {
 
 .section__title {
   flex: 1 1 auto;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ui-text-muted, #64748b);
 }
@@ -184,15 +224,16 @@ function updateItem(index: number, updated: SettingNode) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 20px;
+  min-width: 22px;
   height: 18px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--ui-primary-muted, rgba(59, 130, 246, 0.12));
-  color: var(--ui-primary, #3b82f6);
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.16), rgba(59, 130, 246, 0.1));
+  color: var(--ui-primary, #2563eb);
   font-size: 10.5px;
   font-weight: 700;
   line-height: 1;
+  border: 1px solid rgba(59, 130, 246, 0.18);
 }
 
 /* ============================================================
@@ -202,14 +243,15 @@ function updateItem(index: number, updated: SettingNode) {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
 .field__label {
-  font-size: 11.5px;
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--ui-text-muted, #64748b);
   padding-left: 2px;
+  letter-spacing: 0.01em;
 }
 
 /* ============================================================
@@ -227,34 +269,41 @@ function updateItem(index: number, updated: SettingNode) {
    ============================================================ */
 
 .empty {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 26px 12px 24px;
+  padding: 28px 14px 26px;
   text-align: center;
   border: 1px dashed var(--ui-border, #e2e8f0);
-  border-radius: 10px;
-  background: var(--ui-bg-elevated, #f8fafc);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(59, 130, 246, 0.05), transparent 60%),
+    var(--ui-bg-elevated, #f8fafc);
+  overflow: hidden;
 }
 
 .empty__icon-wrap {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
   background: var(--ui-bg, #ffffff);
   border: 1px solid var(--ui-border, #e5e7eb);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  margin-bottom: 2px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 6px 14px rgba(15, 23, 42, 0.06);
+  margin-bottom: 4px;
 }
 
 .empty__icon {
   width: 20px;
   height: 20px;
-  color: var(--ui-text-muted, #94a3b8);
+  color: var(--ui-primary, #3b82f6);
+  opacity: 0.75;
 }
 
 .empty__title {
@@ -267,6 +316,6 @@ function updateItem(index: number, updated: SettingNode) {
   font-size: 11px;
   color: var(--ui-text-muted, #94a3b8);
   max-width: 220px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 </style>
