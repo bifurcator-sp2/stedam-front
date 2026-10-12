@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { MasonryWall } from '@yeger/vue-masonry-wall'
+import {computed} from 'vue'
+import {MasonryWall} from '@yeger/vue-masonry-wall'
 
 // ==================== Модель ====================
-const value = defineModel<[]>({ default: () => [] })
+const value = defineModel<[]>({default: () => []})
 
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
@@ -16,6 +16,11 @@ const props = withDefaults(defineProps<{
 })
 
 // ==================== Общие утилиты ====================
+
+import {useFormula} from '~/composables/useFormula'
+
+const {renderFormulas} = useFormula()
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
@@ -206,36 +211,36 @@ function collectBorderStyle(
   bgVar: string | null = null,
 ): Record<string, string> {
   const border: Record<string, any> = {
-    color:  getDefault(value.value, `${borderPath}.color`),
-    top:    getDefault(value.value, `${borderPath}.top`),
-    right:  getDefault(value.value, `${borderPath}.right`),
+    color: getDefault(value.value, `${borderPath}.color`),
+    top: getDefault(value.value, `${borderPath}.top`),
+    right: getDefault(value.value, `${borderPath}.right`),
     bottom: getDefault(value.value, `${borderPath}.bottom`),
-    left:   getDefault(value.value, `${borderPath}.left`),
+    left: getDefault(value.value, `${borderPath}.left`),
   }
   const radius: Record<string, any> = {
-    'top-left':     getDefault(value.value, `${radiusPath}.top-left`),
-    'top-right':    getDefault(value.value, `${radiusPath}.top-right`),
+    'top-left': getDefault(value.value, `${radiusPath}.top-left`),
+    'top-right': getDefault(value.value, `${radiusPath}.top-right`),
     'bottom-right': getDefault(value.value, `${radiusPath}.bottom-right`),
-    'bottom-left':  getDefault(value.value, `${radiusPath}.bottom-left`),
+    'bottom-left': getDefault(value.value, `${radiusPath}.bottom-left`),
   }
-  return { ...borderStyle(border, bgVar), ...radiusStyle(radius) }
+  return {...borderStyle(border, bgVar), ...radiusStyle(radius)}
 }
 
 function collectPaddingStyle(basePath: string): Record<string, string> {
   return paddingStyle({
-    'padding-top':    getDefault(value.value, `${basePath}.top`),
-    'padding-right':  getDefault(value.value, `${basePath}.right`),
+    'padding-top': getDefault(value.value, `${basePath}.top`),
+    'padding-right': getDefault(value.value, `${basePath}.right`),
     'padding-bottom': getDefault(value.value, `${basePath}.bottom`),
-    'padding-left':   getDefault(value.value, `${basePath}.left`),
+    'padding-left': getDefault(value.value, `${basePath}.left`),
   })
 }
 
 function collectMarginStyle(basePath: string): Record<string, string> {
   return marginStyle({
-    'margin-top':    getDefault(value.value, `${basePath}.top`),
-    'margin-right':  getDefault(value.value, `${basePath}.right`),
+    'margin-top': getDefault(value.value, `${basePath}.top`),
+    'margin-right': getDefault(value.value, `${basePath}.right`),
     'margin-bottom': getDefault(value.value, `${basePath}.bottom`),
-    'margin-left':   getDefault(value.value, `${basePath}.left`),
+    'margin-left': getDefault(value.value, `${basePath}.left`),
   })
 }
 
@@ -314,14 +319,14 @@ type TextFieldKey = 'title' | 'summary' | 'text'
 
 const textFieldKeys: TextFieldKey[] = ['title', 'summary', 'text']
 
-const previewTitle   = computed(() => getDefault(value.value, 'text.title'))
+const previewTitle = computed(() => getDefault(value.value, 'text.title'))
 const previewSummary = computed(() => getDefault(value.value, 'text.summary'))
-const previewText    = computed(() => getDefault(value.value, 'text.text'))
+const previewText = computed(() => getDefault(value.value, 'text.text'))
 
 const textBcgStyle = computed(() => {
   const v = getDefault(value.value, 'text.background-color')
   const name = v?.replace(/^bg-/, '')
-  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+  return name ? {backgroundColor: `var(--bg-${name})`} : {}
 })
 
 const textPaddingStyle = computed(() => collectPaddingStyle('text.padding'))
@@ -345,18 +350,18 @@ const textOnlyAlignStyle = computed(() => {
   if (needDisplayImage.value) return {}
   const pos = getDefault(value.value, 'text.text-block-position')
   if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
-    return { justifyContent: pos }
+    return {justifyContent: pos}
   }
-  return { justifyContent: 'center' }
+  return {justifyContent: 'center'}
 })
 
 const imagesOnlyAlignStyle = computed(() => {
   if (needDisplayText.value) return {}
   const pos = getDefault(value.value, 'images.images-block-position')
   if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
-    return { justifyContent: pos }
+    return {justifyContent: pos}
   }
-  return { justifyContent: 'center' }
+  return {justifyContent: 'center'}
 })
 
 function textFieldMeta(field: TextFieldKey) {
@@ -384,15 +389,15 @@ function textFieldMeta(field: TextFieldKey) {
   }
 }
 
-const titleMeta   = computed(() => textFieldMeta('title'))
+const titleMeta = computed(() => textFieldMeta('title'))
 const summaryMeta = computed(() => textFieldMeta('summary'))
-const textMeta    = computed(() => textFieldMeta('text'))
+const textMeta = computed(() => textFieldMeta('text'))
 
 const visibleTextFields = computed(() => {
   const map: Record<TextFieldKey, string> = {
-    title:   previewTitle.value,
+    title: previewTitle.value,
     summary: previewSummary.value,
-    text:    previewText.value,
+    text: previewText.value,
   }
   return textFieldKeys
     .filter((k) => !!map[k])
@@ -400,7 +405,7 @@ const visibleTextFields = computed(() => {
       key: k,
       value: map[k],
       meta:
-        k === 'title'   ? titleMeta.value   :
+        k === 'title' ? titleMeta.value :
           k === 'summary' ? summaryMeta.value :
             textMeta.value,
     }))
@@ -424,7 +429,7 @@ function commitField(field: TextFieldKey, v: string) {
 const imagesBcgStyle = computed(() => {
   const v = getDefault(value.value, 'images.background-color')
   const name = v?.replace(/^bg-/, '')
-  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+  return name ? {backgroundColor: `var(--bg-${name})`} : {}
 })
 
 const imagesBorderStyle = computed(() =>
@@ -579,14 +584,14 @@ const imageImgStyle = computed(() => {
 
 const masonryColumnWidth = computed(() => 200)
 
-import type { FilesListResponse } from '~/types/files'
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import type {FilesListResponse} from '~/types/files'
+import {ref, onMounted, onBeforeUnmount} from 'vue'
 
 const filesModel = ref<FilesListResponse>({
   images: [],
   files: [],
-  temp: { images: [], files: [] },
-  stored: { images: [], files: [] },
+  temp: {images: [], files: []},
+  stored: {images: [], files: []},
 })
 
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
@@ -634,7 +639,7 @@ function onDropBefore(from: number, beforeIndex: number) {
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
 
-  filesModel.value = { ...filesModel.value, images: next }
+  filesModel.value = {...filesModel.value, images: next}
 }
 
 /**
@@ -656,7 +661,7 @@ function onDropAfter(from: number, afterIndex: number) {
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
 
-  filesModel.value = { ...filesModel.value, images: next }
+  filesModel.value = {...filesModel.value, images: next}
 }
 
 const masonryKey = computed(() => {
@@ -781,7 +786,7 @@ const masonryKey = computed(() => {
               v-inline-edit="{
                 get: () => field.value,
                 set: (v: string) => commitField(field.key, v),
-                renderFormulas: true,
+                render: renderFormulas,
               }"
             ></component>
           </div>

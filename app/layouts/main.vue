@@ -155,7 +155,7 @@ const sidebarWidth = computed(() => {
 
       </header>
 
-      <div class="p-6">
+      <div>
         <slot/>
       </div>
     </main>
