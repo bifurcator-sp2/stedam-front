@@ -384,11 +384,6 @@ const titleMeta = computed(() => textFieldMeta('title'))
 const summaryMeta = computed(() => textFieldMeta('summary'))
 const textMeta = computed(() => textFieldMeta('text'))
 
-/**
- * Стабильный список полей для v-for.
- * ВАЖНО: без `value` внутри объекта и без field.value в :key —
- * иначе Vue размонтирует узел на каждый ввод и фокус улетает.
- */
 const visibleTextFields = computed(() => {
   const map: Record<TextFieldKey, boolean> = {
     title: !!previewTitle.value,
@@ -406,10 +401,6 @@ const visibleTextFields = computed(() => {
     }))
 })
 
-/**
- * Стабильные bindings для v-inline-edit. Не пересоздаются на каждый рендер,
- * т.к. это computed — Vue переиспользует ссылку, пока зависимости не изменятся.
- */
 const inlineBindings = computed<Record<TextFieldKey, InlineEditBinding>>(() => ({
   title: {
     get: () => previewTitle.value,
@@ -435,9 +426,6 @@ function commitText(path: string, v: string) {
   const prev = getDefault(arr, path)
   if (prev === v) return
 
-  // setDefault мутирует вложенный объект — этого достаточно,
-  // если value.value реактивен (defineModel делает его reactive).
-  // Не пересоздаём массив, чтобы не размонтировать блок в родителе.
   setDefault(arr, path, v)
 }
 
@@ -545,7 +533,7 @@ const imageFitClass = computed(() => {
 
 const imagesContainerClass = computed(() => {
   if (isMasonry.value) return ''
-  if (imagesFlexDirection.value === 'column') return ''
+  if (imagesFlexDirection.value === 'column') return 'images-columns'
   return 'flex flex-row flex-wrap'
 })
 
@@ -557,6 +545,9 @@ const imagesContainerStyle = computed(() => {
   }
 
   if (imagesFlexDirection.value === 'column') {
+    // CSS Multi-column: masonry-эффект, одинаково в Chrome и Firefox.
+    // Контейнер НЕ flex — иначе Chrome схлопывает всё в одну колонку.
+    base.display = 'block'
     base.columnCount = String(Math.max(1, columns.value))
     base.columnGap = `${distancePx.value}px`
   } else if (imagesFlexDirection.value === 'row') {
@@ -573,19 +564,24 @@ const imageItemClass = computed(() => {
     return 'w-full h-auto block'
   }
   if (imagesFlexDirection.value === 'column') {
-    return 'w-full h-auto break-inside-avoid'
+    return 'image-column-item'
   }
   return `w-auto ${imageFitClass.value}`
 })
 
 const imageItemStyle = computed(() => {
   if (isMasonry.value) return {}
+
   if (imagesFlexDirection.value === 'column') {
     return {
       boxSizing: 'border-box',
+      display: 'block',
+      width: '100%',
+      minWidth: 0,
       marginBottom: `${distancePx.value}px`,
     }
   }
+
   return {
     boxSizing: 'border-box',
     height: `${imageHeightPx.value}px`,
@@ -594,6 +590,17 @@ const imageItemStyle = computed(() => {
 })
 
 const imageImgStyle = computed(() => {
+  // В column-режиме растягиваем картинку до ширины колонки,
+  // высота — пропорционально (auto).
+  if (imagesFlexDirection.value === 'column' && !isMasonry.value) {
+    return {
+      display: 'block',
+      boxSizing: 'border-box',
+      width: '100%',
+      height: 'auto',
+      maxWidth: '100%',
+    } as Record<string, string>
+  }
   return {
     display: 'block',
     boxSizing: 'border-box',
@@ -819,5 +826,37 @@ img:last-child {
 .block-title-break.text-match-parent,
 .block-title-break.text-match-parent :deep(*) {
   text-align: match-parent;
+}
+
+/*
+  Multi-column контейнер для изображений (режим "column").
+  Работает одинаково в Chrome и Firefox: картинки распределяются
+  по колонкам, не разрезаясь между ними.
+*/
+.images-columns {
+  column-fill: balance;
+  -webkit-column-fill: balance;
+}
+
+/*
+  Элемент-обёртка одной картинки внутри multi-column.
+  width: 100% в multi-column = ширина колонки, поэтому маленькие
+  изображения растягиваются до ширины соседей.
+*/
+.image-column-item {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+  display: block;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Дополнительная страховка: сама картинка на всю ширину обёртки */
+.image-column-item > img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
 }
 </style>
