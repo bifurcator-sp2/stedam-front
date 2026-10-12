@@ -4,6 +4,7 @@ import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vu
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import FileContainer from '~/components/FileContainer.vue'
+import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 
 // ==================== Типы ====================
 
@@ -61,87 +62,6 @@ interface ViewportPreset {
   icon: string
   group?: string
 }
-
-// ==================== Ресайз панелей ====================
-
-const MIN_LEFT = 180
-const MAX_LEFT = 500
-const MIN_RIGHT = 200
-const MAX_RIGHT = 600
-
-const leftWidth = ref(260)
-const rightWidth = ref(500)
-
-type Side = 'left' | 'right' | null
-const resizing = ref<Side>(null)
-
-let startOffset = 0
-
-function startResize(side: Exclude<Side, null>, e: PointerEvent) {
-  e.preventDefault()
-
-  resizing.value = side
-
-  if (side === 'left') {
-    startOffset = e.clientX - leftWidth.value
-  } else {
-    startOffset = window.innerWidth - e.clientX - rightWidth.value
-  }
-
-  const root = document.documentElement
-  root.style.cursor = 'col-resize'
-  root.style.userSelect = 'none'
-}
-
-function onPointerMove(e: PointerEvent) {
-  if (!resizing.value) return
-
-  const winW = window.innerWidth
-
-  if (resizing.value === 'left') {
-    const maxByWindow = winW - rightWidth.value - 4 - 4 - MIN_RIGHT - 200
-    const max = Math.max(MIN_LEFT, Math.min(MAX_LEFT, maxByWindow))
-
-    leftWidth.value = clamp(e.clientX - startOffset, MIN_LEFT, max)
-  } else {
-    const maxByWindow = winW - leftWidth.value - 4 - 4 - MIN_LEFT - 200
-    const max = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, maxByWindow))
-
-    rightWidth.value = clamp(winW - e.clientX - startOffset, MIN_RIGHT, max)
-  }
-}
-
-function endResize() {
-  if (!resizing.value) return
-
-  resizing.value = null
-
-  const root = document.documentElement
-  root.style.cursor = ''
-  root.style.userSelect = ''
-}
-
-onMounted(() => {
-  window.addEventListener('pointermove', onPointerMove)
-  window.addEventListener('pointerup', endResize)
-  window.addEventListener('pointercancel', endResize)
-  window.addEventListener('blur', endResize)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('pointermove', onPointerMove)
-  window.removeEventListener('pointerup', endResize)
-  window.removeEventListener('pointercancel', endResize)
-  window.removeEventListener('blur', endResize)
-})
-
-function clamp(v: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, v))
-}
-
-const gridStyle = computed(() => ({
-  gridTemplateColumns: `${leftWidth.value}px 4px 1fr 4px ${rightWidth.value}px`,
-}))
 
 // ==================== Загрузка типов блоков ====================
 
@@ -232,7 +152,7 @@ const activePreset = computed(() =>
 )
 
 const viewportLabel = computed(() =>
-  viewportWidth.value === null ? 'Авто' : `${viewportWidth.value}`
+  viewportWidth.value === null ? 'Авто' : `${viewportWidth.value}`,
 )
 
 const groupedPresets = computed(() => {
@@ -558,454 +478,321 @@ function reset() {
 </script>
 
 <template>
-  <div class="constructor-root">
-    <div class="constructor-grid" :style="gridStyle">
-      <!-- === ЛЕВАЯ ПАНЕЛЬ: типы блоков === -->
-      <aside class="panel panel-left">
-        <header class="panel-header">Типы блоков</header>
-        <div class="panel-body">
-          <div class="palette-list">
-            <!-- Все блоки -->
-            <div
-              class="palette-item"
-              :class="{ 'palette-item-active': !listTypeCode && !editingBlock }"
+  <ConstructPanels
+    left-title="Типы блоков"
+    :main-title="centerTitle"
+    right-title="Свойства"
+  >
+    <!-- ==================== LEFT ==================== -->
+    <template #left>
+      <div class="palette-list">
+        <!-- Все блоки -->
+        <div
+          class="palette-item"
+          :class="{ 'palette-item-active': !listTypeCode && !editingBlock }"
+        >
+          <button
+            type="button"
+            class="palette-name"
+            @click.stop="showAllBlocks"
+          >
+            <UIcon name="i-lucide-list" class="w-4 h-4 shrink-0" />
+            <span class="truncate">Все блоки</span>
+          </button>
+        </div>
+
+        <div v-if="pending" class="empty-state">Загрузка…</div>
+        <div v-else-if="error" class="empty-state">
+          Не удалось загрузить типы блоков
+        </div>
+
+        <template v-else>
+          <div
+            v-for="type in blockTypes ?? []"
+            :key="type.code"
+            class="palette-item"
+            :class="{ 'palette-item-active': listTypeCode === type.code && !editingBlock }"
+            :title="type.description ?? type.name"
+          >
+            <!-- Кнопка «+» — создаёт новый editingBlock из типа -->
+            <button
+              type="button"
+              class="palette-add"
+              :aria-label="`Добавить блок «${type.name}»`"
+              @click.stop="addBlock(type)"
             >
+              <UIcon name="i-lucide-plus" class="w-4 h-4 shrink-0" />
+            </button>
+
+            <!-- Название — переход к списку блоков этого типа -->
+            <button
+              type="button"
+              class="palette-name"
+              @click.stop="openTypeList(type.code)"
+            >
+              <UIcon :name="iconOf(type)" class="w-4 h-4 shrink-0" />
+              <span class="truncate">{{ type.name }}</span>
+            </button>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <!-- ==================== MAIN HEADER ==================== -->
+    <template #main-header>
+      <span>{{ centerTitle }}</span>
+
+      <div class="viewport-controls">
+        <!-- Кнопка выбора ширины -->
+        <div class="viewport-picker" v-if="editingBlock">
+          <button
+            type="button"
+            class="viewport-picker__button"
+            :title="activePreset?.label ?? 'Авто'"
+            @click="viewportMenuOpen = !viewportMenuOpen"
+          >
+            <UIcon
+              :name="activePreset?.icon ?? 'i-lucide-maximize'"
+              class="viewport-picker__icon"
+            />
+            <span class="viewport-picker__value">{{ viewportLabel }}</span>
+            <UIcon name="i-lucide-chevron-down" class="viewport-picker__chevron" />
+          </button>
+
+          <!-- Выпадающее меню -->
+          <Transition name="viewport-menu-fade">
+            <div
+              v-if="viewportMenuOpen"
+              class="viewport-menu"
+              @click.stop
+            >
+              <!-- Авто -->
               <button
                 type="button"
-                class="palette-name"
-                @click.stop="showAllBlocks"
+                class="viewport-menu__item"
+                :class="{ 'viewport-menu__item--active': viewportWidth === null }"
+                @click="selectAuto"
               >
-                <UIcon name="i-lucide-list" class="w-4 h-4 shrink-0" />
-                <span class="truncate">Все блоки</span>
+                <UIcon name="i-lucide-maximize" class="viewport-menu__icon" />
+                <span class="viewport-menu__label">Без ограничения</span>
+                <span class="viewport-menu__width">авто</span>
               </button>
-            </div>
 
-            <div v-if="pending" class="empty-state">Загрузка…</div>
-            <div v-else-if="error" class="empty-state">
-              Не удалось загрузить типы блоков
-            </div>
+              <div class="viewport-menu__divider" />
 
-            <template v-else>
-              <div
-                v-for="type in blockTypes ?? []"
-                :key="type.code"
-                class="palette-item"
-                :class="{ 'palette-item-active': listTypeCode === type.code && !editingBlock }"
-                :title="type.description ?? type.name"
+              <!-- Пресеты по группам -->
+              <template
+                v-for="(group, groupName) in groupedPresets"
+                :key="groupName"
               >
-                <!-- Кнопка «+» — создаёт новый editingBlock из типа -->
-                <button
-                  type="button"
-                  class="palette-add"
-                  :aria-label="`Добавить блок «${type.name}»`"
-                  @click.stop="addBlock(type)"
-                >
-                  <UIcon name="i-lucide-plus" class="w-4 h-4 shrink-0" />
-                </button>
+                <div class="viewport-menu__group">{{ groupName }}</div>
 
-                <!-- Название — переход к списку блоков этого типа -->
+                <button
+                  v-for="preset in group"
+                  :key="preset.key"
+                  type="button"
+                  class="viewport-menu__item"
+                  :class="{ 'viewport-menu__item--active': activePreset?.key === preset.key }"
+                  @click="selectPreset(preset)"
+                >
+                  <UIcon :name="preset.icon" class="viewport-menu__icon" />
+                  <span class="viewport-menu__label">{{ preset.label }}</span>
+                  <span class="viewport-menu__width">{{ preset.width }}</span>
+                </button>
+              </template>
+
+              <div class="viewport-menu__divider" />
+
+              <!-- Произвольная ширина -->
+              <div class="viewport-menu__custom">
+                <UIcon name="i-lucide-pencil-ruler" class="viewport-menu__icon" />
+                <span class="viewport-menu__label">Своя ширина</span>
+                <div class="viewport-menu__input-wrap">
+                  <input
+                    v-model="customWidth"
+                    type="number"
+                    min="320"
+                    max="3840"
+                    placeholder="px"
+                    class="viewport-menu__input"
+                    @keydown.enter="applyCustomWidth"
+                  />
+                  <span class="viewport-menu__input-suffix">px</span>
+                </div>
                 <button
                   type="button"
-                  class="palette-name"
-                  @click.stop="openTypeList(type.code)"
+                  class="viewport-menu__apply"
+                  title="Применить"
+                  @click="applyCustomWidth"
                 >
-                  <UIcon :name="iconOf(type)" class="w-4 h-4 shrink-0" />
-                  <span class="truncate">{{ type.name }}</span>
+                  <UIcon name="i-lucide-check" />
                 </button>
               </div>
-            </template>
+            </div>
+          </Transition>
+
+          <!-- Клик вне меню -->
+          <div
+            v-if="viewportMenuOpen"
+            class="viewport-backdrop"
+            @click="viewportMenuOpen = false"
+          />
+        </div>
+
+        <UButton
+          v-if="editingBlock"
+          icon="i-lucide-rotate-ccw"
+          size="xs"
+          color="neutral"
+          variant="ghost"
+          @click="reset"
+        >
+          Сбросить
+        </UButton>
+      </div>
+    </template>
+
+    <!-- ==================== MAIN ==================== -->
+    <template #main>
+      <!-- === Режим редактирования конкретного блока === -->
+      <template v-if="editingBlock">
+        <div class="viewport-frame" :class="{ 'viewport-frame--bounded': viewportWidth !== null }">
+          <div
+            class="viewport-frame__screen bg-default mx-auto"
+            :style="viewportStyle"
+            :class="{ 'viewport-frame__screen--bounded': viewportWidth !== null }"
+          >
+            <LoadingOverlay :loading="saving">
+              <TextBlock
+                :key="`${editingBlock.id}-${blockKey}`"
+                :mode="'body'"
+                v-model="editingBlock.settings"
+                :id="editingBlock.id || 0"
+                @register-files="fileContainerRef = $event"
+              />
+            </LoadingOverlay>
+          </div>
+
+          <div v-if="viewportWidth" class="viewport-frame__label">
+            <UIcon name="i-lucide-monitor" class="viewport-frame__label-icon" />
+            <span>{{ viewportWidth }} px</span>
           </div>
         </div>
-      </aside>
+      </template>
 
-      <!-- === ЛЕВЫЙ РЕСАЙЗЕР === -->
-      <div
-        class="resizer"
-        :class="{ 'resizer-active': resizing === 'left' }"
-        @pointerdown="startResize('left', $event)"
-      >
-        <div class="resizer-bar" />
-      </div>
+      <!-- === Режим списка блоков === -->
+      <template v-else>
+        <div v-if="listLoading" class="empty-state">Загрузка…</div>
 
-      <!-- === ЦЕНТР === -->
-      <main class="panel panel-center">
-        <header class="panel-header">
-          <div class="panel-header-row">
-            <span>{{ centerTitle }}</span>
+        <div v-else-if="listError" class="empty-state">
+          {{ listError }}
+        </div>
 
-            <div class="viewport-controls">
-              <!-- Кнопка выбора ширины -->
-              <div class="viewport-picker" v-if="editingBlock">
-                <button
-                  type="button"
-                  class="viewport-picker__button"
-                  :title="activePreset?.label ?? 'Авто'"
-                  @click="viewportMenuOpen = !viewportMenuOpen"
-                >
-                  <UIcon
-                    :name="activePreset?.icon ?? 'i-lucide-maximize'"
-                    class="viewport-picker__icon"
-                  />
-                  <span class="viewport-picker__value">{{ viewportLabel }}</span>
-                  <UIcon name="i-lucide-chevron-down" class="viewport-picker__chevron" />
-                </button>
+        <div
+          v-else-if="!blocksPage || blocksPage.data.length === 0"
+          class="empty-state"
+        >
+          {{ listTypeCode ? 'Блоков этого типа пока нет' : 'Блоков пока нет' }}
+        </div>
 
-                <!-- Выпадающее меню -->
-                <Transition name="viewport-menu-fade">
-                  <div
-                    v-if="viewportMenuOpen"
-                    class="viewport-menu"
-                    @click.stop
-                  >
-                    <!-- Авто -->
-                    <button
-                      type="button"
-                      class="viewport-menu__item"
-                      :class="{ 'viewport-menu__item--active': viewportWidth === null }"
-                      @click="selectAuto"
-                    >
-                      <UIcon name="i-lucide-maximize" class="viewport-menu__icon" />
-                      <span class="viewport-menu__label">Без ограничения</span>
-                      <span class="viewport-menu__width">авто</span>
-                    </button>
-
-                    <div class="viewport-menu__divider" />
-
-                    <!-- Пресеты по группам -->
-                    <template
-                      v-for="(group, groupName) in groupedPresets"
-                      :key="groupName"
-                    >
-                      <div class="viewport-menu__group">{{ groupName }}</div>
-
-                      <button
-                        v-for="preset in group"
-                        :key="preset.key"
-                        type="button"
-                        class="viewport-menu__item"
-                        :class="{ 'viewport-menu__item--active': activePreset?.key === preset.key }"
-                        @click="selectPreset(preset)"
-                      >
-                        <UIcon :name="preset.icon" class="viewport-menu__icon" />
-                        <span class="viewport-menu__label">{{ preset.label }}</span>
-                        <span class="viewport-menu__width">{{ preset.width }}</span>
-                      </button>
-                    </template>
-
-                    <div class="viewport-menu__divider" />
-
-                    <!-- Произвольная ширина -->
-                    <div class="viewport-menu__custom">
-                      <UIcon name="i-lucide-pencil-ruler" class="viewport-menu__icon" />
-                      <span class="viewport-menu__label">Своя ширина</span>
-                      <div class="viewport-menu__input-wrap">
-                        <input
-                          v-model="customWidth"
-                          type="number"
-                          min="320"
-                          max="3840"
-                          placeholder="px"
-                          class="viewport-menu__input"
-                          @keydown.enter="applyCustomWidth"
-                        />
-                        <span class="viewport-menu__input-suffix">px</span>
-                      </div>
-                      <button
-                        type="button"
-                        class="viewport-menu__apply"
-                        title="Применить"
-                        @click="applyCustomWidth"
-                      >
-                        <UIcon name="i-lucide-check" />
-                      </button>
-                    </div>
-                  </div>
-                </Transition>
-
-                <!-- Клик вне меню -->
-                <div
-                  v-if="viewportMenuOpen"
-                  class="viewport-backdrop"
-                  @click="viewportMenuOpen = false"
-                />
-              </div>
-
-              <UButton
-                v-if="editingBlock"
-                icon="i-lucide-rotate-ccw"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                @click="reset"
-              >
-                Сбросить
-              </UButton>
-            </div>
-          </div>
-        </header>
-        <div class="panel-body">
-          <!-- === Режим редактирования конкретного блока === -->
-          <template v-if="editingBlock">
-            <div class="viewport-frame" :class="{ 'viewport-frame--bounded': viewportWidth !== null }">
-              <div
-                class="viewport-frame__screen bg-default mx-auto"
-                :style="viewportStyle"
-                :class="{ 'viewport-frame__screen--bounded': viewportWidth !== null }"
-              >
-                <LoadingOverlay :loading="saving">
-                  <TextBlock
-                    :key="`${editingBlock.id}-${blockKey}`"
-                    :mode="'body'"
-                    v-model="editingBlock.settings"
-                    :id="editingBlock.id || 0"
-                    @register-files="fileContainerRef = $event"
-                  />
-                </LoadingOverlay>
-              </div>
-
-              <div v-if="viewportWidth" class="viewport-frame__label">
-                <UIcon name="i-lucide-monitor" class="viewport-frame__label-icon" />
-                <span>{{ viewportWidth }} px</span>
-              </div>
-            </div>
-          </template>
-
-          <!-- === Режим списка блоков === -->
-          <template v-else>
-            <div v-if="listLoading" class="empty-state">Загрузка…</div>
-
-            <div v-else-if="listError" class="empty-state">
-              {{ listError }}
-            </div>
-
-            <div
-              v-else-if="!blocksPage || blocksPage.data.length === 0"
-              class="empty-state"
+        <template v-else>
+          <div class="blocks-list">
+            <button
+              v-for="item in blocksPage.data"
+              :key="item.id"
+              type="button"
+              class="block-card"
+              @click="openBlock(item.id)"
             >
-              {{ listTypeCode ? 'Блоков этого типа пока нет' : 'Блоков пока нет' }}
-            </div>
+              <UIcon
+                :name="iconOfSettings(item.settings)"
+                class="block-card-icon size-16!"
+              />
 
-            <template v-else>
-              <div class="blocks-list">
-                <button
-                  v-for="item in blocksPage.data"
-                  :key="item.id"
-                  type="button"
-                  class="block-card"
-                  @click="openBlock(item.id)"
-                >
-                  <UIcon
-                    :name="iconOfSettings(item.settings)"
-                    class="block-card-icon size-16!"
-                  />
-
-                  <div class="block-card-main">
-                    <div class="block-card-title">
-                      {{ item.title || item.name || `Блок №${item.id}` }}
-                    </div>
-                    <div v-if="item.description" class="block-card-desc">
-                      {{ item.description }}
-                    </div>
-                    <div class="block-card-meta">
-                      <span v-if="item.name" class="block-card-chip">{{ item.name }}</span>
-                      <span class="block-card-id">#{{ item.id }}</span>
-                    </div>
-                  </div>
-                  <UIcon name="i-lucide-chevron-right" class="block-card-arrow" />
-                </button>
+              <div class="block-card-main">
+                <div class="block-card-title">
+                  {{ item.title || item.name || `Блок №${item.id}` }}
+                </div>
+                <div v-if="item.description" class="block-card-desc">
+                  {{ item.description }}
+                </div>
+                <div class="block-card-meta">
+                  <span v-if="item.name" class="block-card-chip">{{ item.name }}</span>
+                  <span class="block-card-id">#{{ item.id }}</span>
+                </div>
               </div>
+              <UIcon name="i-lucide-chevron-right" class="block-card-arrow" />
+            </button>
+          </div>
 
-              <!-- Пагинация -->
-              <div v-if="blocksPage.meta.last_page > 1" class="pagination">
-                <UButton
-                  icon="i-lucide-chevron-left"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  :disabled="blocksPage.meta.current_page <= 1"
-                  @click="goToPage(blocksPage.meta.current_page - 1)"
-                >
-                  Назад
-                </UButton>
-
-                <span class="pagination-info">
-                  {{ blocksPage.meta.current_page }} / {{ blocksPage.meta.last_page }}
-                </span>
-
-                <UButton
-                  icon="i-lucide-chevron-right"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  :disabled="blocksPage.meta.current_page >= blocksPage.meta.last_page"
-                  @click="goToPage(blocksPage.meta.current_page + 1)"
-                >
-                  Вперёд
-                </UButton>
-              </div>
-            </template>
-          </template>
-        </div>
-      </main>
-
-      <!-- === ПРАВЫЙ РЕСАЙЗЕР === -->
-      <div
-        class="resizer"
-        :class="{ 'resizer-active': resizing === 'right' }"
-        @pointerdown="startResize('right', $event)"
-      >
-        <div class="resizer-bar" />
-      </div>
-
-      <!-- === ПРАВАЯ ПАНЕЛЬ: свойства === -->
-      <aside class="panel panel-right">
-        <header class="panel-header">
-          <div class="panel-header-row">
-            <span>Свойства</span>
+          <!-- Пагинация -->
+          <div v-if="blocksPage.meta.last_page > 1" class="pagination">
             <UButton
-              icon="i-lucide-save"
+              icon="i-lucide-chevron-left"
               size="xs"
-              color="primary"
-              variant="soft"
-              :loading="saving"
-              :disabled="!editingBlock || saving"
-              @click="save"
+              color="neutral"
+              variant="ghost"
+              :disabled="blocksPage.meta.current_page <= 1"
+              @click="goToPage(blocksPage.meta.current_page - 1)"
             >
-              Сохранить
+              Назад
+            </UButton>
+
+            <span class="pagination-info">
+              {{ blocksPage.meta.current_page }} / {{ blocksPage.meta.last_page }}
+            </span>
+
+            <UButton
+              icon="i-lucide-chevron-right"
+              size="xs"
+              color="neutral"
+              variant="ghost"
+              :disabled="blocksPage.meta.current_page >= blocksPage.meta.last_page"
+              @click="goToPage(blocksPage.meta.current_page + 1)"
+            >
+              Вперёд
             </UButton>
           </div>
-        </header>
-        <div class="panel-body">
-          <LoadingOverlay :loading="saving">
-            <div v-if="!editingBlock" class="empty-state">
-              Выберите блок в центре.
-            </div>
+        </template>
+      </template>
+    </template>
 
-            <BlocksSettingsPanel
-              v-else
-              v-model:id="editingBlock.id"
-              v-model:title="editingBlock.title"
-              v-model:description="editingBlock.description"
-              v-model:settings="editingBlock.settings"
-            />
-          </LoadingOverlay>
+    <!-- ==================== RIGHT HEADER ==================== -->
+    <template #right-header>
+      <span>Свойства</span>
+      <UButton
+        icon="i-lucide-save"
+        size="xs"
+        color="primary"
+        variant="soft"
+        :loading="saving"
+        :disabled="!editingBlock || saving"
+        @click="save"
+      >
+        Сохранить
+      </UButton>
+    </template>
+
+    <!-- ==================== RIGHT ==================== -->
+    <template #right>
+      <LoadingOverlay :loading="saving">
+        <div v-if="!editingBlock" class="empty-state">
+          Выберите блок в центре.
         </div>
-      </aside>
-    </div>
-  </div>
+
+        <BlocksSettingsPanel
+          v-else
+          v-model:id="editingBlock.id"
+          v-model:title="editingBlock.title"
+          v-model:description="editingBlock.description"
+          v-model:settings="editingBlock.settings"
+        />
+      </LoadingOverlay>
+    </template>
+  </ConstructPanels>
 </template>
 
 <style scoped>
-/* ==================== Общая структура ==================== */
-
-.constructor-root {
-  width: 100%;
-  height: 100dvh;
-  overflow: hidden;
-  background: var(--ui-bg, #ffffff);
-}
-
-.constructor-grid {
-  display: grid;
-  height: 100%;
-  width: 100%;
-}
-
-.panel {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.panel-left {
-  border-right: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-}
-
-.panel-right {
-  border-left: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-}
-
-.panel-center {
-}
-
-.panel-header {
-  flex-shrink: 0;
-  height: 48px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ui-text-muted, #6b7280);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--ui-border, #e5e7eb);
-}
-
-.panel-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 8px;
-}
-
-.panel-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-/* ==================== Ресайзеры ==================== */
-
-.resizer {
-  position: relative;
-  width: 4px;
-  cursor: col-resize;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease;
-  user-select: none;
-  touch-action: none;
-}
-
-.resizer::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  right: -4px;
-  cursor: col-resize;
-  z-index: 1;
-}
-
-.resizer:hover,
-.resizer-active {
-  background: var(--ui-primary, #3b82f6);
-}
-
-.resizer-bar {
-  width: 2px;
-  height: 32px;
-  border-radius: 2px;
-  background: var(--ui-border, #d1d5db);
-  transition: background 0.15s ease;
-  pointer-events: none;
-}
-
-.resizer:hover .resizer-bar,
-.resizer-active .resizer-bar {
-  background: #ffffff;
-}
-
 /* ==================== Палитра (левая) ==================== */
 
 .palette-list {
@@ -1434,7 +1221,6 @@ function reset() {
 }
 
 .viewport-frame--bounded {
-  /* Место под рамку, чтобы она не «прилипала» к краям */
   padding: 24px 16px;
 }
 
@@ -1443,8 +1229,6 @@ function reset() {
   position: relative;
 }
 
-/* Границы условного «экрана устройства» */
-/* Только левая и правая границы, ровно по краям контента. */
 .viewport-frame__screen--bounded::before,
 .viewport-frame__screen--bounded::after {
   content: '';
