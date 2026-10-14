@@ -91,10 +91,16 @@ function iconOf(type: Pick<BlockType, 'default_settings'>): string {
   return (iconField?.default as string | undefined) ?? 'i-lucide-square'
 }
 
-function iconOfSettings(settings: SettingNode[] | undefined): string {
-  const fields = Array.isArray(settings) ? settings : []
-  const iconField = fields.find((f: any) => f.key === 'icon')
-  return (iconField?.default as string | undefined) ?? 'i-lucide-square'
+function iconOfSettings(settings: Record<string, any> | SettingNode[] | undefined): string {
+  if (Array.isArray(settings)) {
+    const iconField = settings.find((f: any) => f.key === 'icon')
+    return (iconField?.default as string | undefined) ?? 'i-lucide-square'
+  }
+  if (settings && typeof settings === 'object') {
+    const icon = (settings as Record<string, any>).icon
+    return typeof icon === 'string' && icon ? icon : 'i-lucide-square'
+  }
+  return 'i-lucide-square'
 }
 
 // ==================== Выбранный блок ====================
@@ -493,10 +499,8 @@ function reset() {
               @click="openBlock(item.id)"
             >
               <UIcon
-                :name="iconOfSettings(
-                  Array.isArray(item.settings) ? item.settings : undefined
-                )"
-                class="block-card-icon size-16!"
+                :name="iconOfSettings(item.settings)"
+                class="size-16 shrink-0 text-muted"
               />
 
               <div class="block-card-main">

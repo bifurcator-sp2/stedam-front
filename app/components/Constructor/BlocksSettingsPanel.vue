@@ -42,7 +42,7 @@ function updatePublicItem(path: number[], updated: SettingNode) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 px-3.5 pb-6 pt-3.5">
+  <div class="flex flex-col gap-4 px-3.5 pb-6 pt-3.5 block-settings-panel">
     <template v-if="mode === 'admin'">
       <!-- Шапка с ID -->
       <div

@@ -363,12 +363,22 @@ const readingTimeText = computed(() => {
   return `${wholeMinutes} мин ${seconds} сек`
 })
 
-// ==================== Клик по пустому месту ====================
+// ==================== Глобальная деактивация ====================
 
-function onRootClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
+/**
+ * Клик где угодно — снимаем активацию, кроме случаев:
+ *   • клик по блоку (.block-wrapper) — там своя обработка activate;
+ *   • клик по правой панели свойств (.block-settings-panel);
+ *   • клик по drop-зоне или hover-панели действий блока.
+ */
+function onGlobalPointerDown(e: PointerEvent) {
+  const target = e.target as HTMLElement | null
+  if (!target) return
+
   if (target.closest('.block-wrapper')) return
+  if (target.closest('.block-settings-panel')) return
   if (target.closest('[data-drop-zone]')) return
+  if (target.closest('[data-block-action]')) return
 
   deactivate()
 }
@@ -377,10 +387,12 @@ function onRootClick(e: MouseEvent) {
 
 onMounted(() => {
   window.addEventListener('dragend', clearDragOver)
+  document.addEventListener('pointerdown', onGlobalPointerDown, true)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('dragend', clearDragOver)
+  document.removeEventListener('pointerdown', onGlobalPointerDown, true)
 })
 
 function clearDragOver() {
@@ -396,7 +408,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 min-h-full" @click="onRootClick">
+  <div class="flex flex-col gap-4 min-h-full">
     <!-- === Шапка урока === -->
     <div class="flex flex-col gap-2">
       <input
