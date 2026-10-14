@@ -16,7 +16,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Профиль', icon: 'i-lucide-user', to: '/profile' },
   { label: 'Конструктор блоков', icon: 'i-lucide-layout-dashboard', to: '/construct' },
-  { label: 'Конструктор уроков', icon: 'i-lucide-pencil-ruler', to: '/construct-lesson' },
+  { label: 'Уроки', icon: 'i-lucide-pencil-ruler', to: '/lessons' },
 ]
 
 </script>

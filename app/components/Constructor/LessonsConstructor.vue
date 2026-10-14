@@ -1,27 +1,23 @@
 <script setup lang="ts">
-// ==================== Импорты ====================
+// app/components/Constructor/LessonsConstructor.vue
 
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
-
-// ==================== Типы ====================
-
-interface BlockStructItem {
-  id: number
-  code: string
-  type: 'info' | 'task'
-  name: string
-  description: string | null
-  default_settings: SettingNode[]
-  blocks_count: number
-  blocks: Array<{
-    id: number
-    block_type_id: number
-    title: string | null
-    description: string | null
-    settings: SettingNode[]
-  }>
-}
+import Lesson from '~/components/Constructor/Lesson.vue'
+import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
+import LoadingOverlay from '~/components/LoadingOverlay.vue'
+import FileContainer from '~/components/FileContainer.vue'
+import { mergeFlat, unmergeFlat, isPlainObject } from '~/utils/constructors'
+import { useAutosave } from '~/composables/useAutosave'
+import type {
+  LessonModel,
+  LessonBlockModel,
+  BlockStructItem,
+  DraggedBlockSource,
+  LessonSavePayload,
+  LessonResponse,
+} from '~/types/lesson'
+import { createEmptyLesson } from '~/types/lesson'
 
 // ==================== Зависимости ====================
 
@@ -29,19 +25,53 @@ const api = useApi()
 const route = useRoute()
 const router = useRouter()
 
-// ==================== Загрузка структуры ====================
+// ==================== Структура типов ====================
 
 const {
   data: struct,
-  pending,
-  error,
+  pending: structPending,
+  error: structError,
 } = await useAsyncData('block-types-struct', () =>
   api.get<{ data: BlockStructItem[] }>('/block-types/struct'),
 )
 
 const structItems = computed<BlockStructItem[]>(() => struct.value?.data ?? [])
 
-// ==================== Аккордеон: только один открыт ====================
+// ==================== Модель урока ====================
+
+const lesson = ref<LessonModel>(createEmptyLesson())
+
+// ==================== Активный блок ====================
+
+const activeBlockLocalId = ref<string | null>(null)
+
+const activeBlock = computed<LessonBlockModel | null>(() => {
+  if (!activeBlockLocalId.value) return null
+  return lesson.value.blocks.find((b) => b.localId === activeBlockLocalId.value) ?? null
+})
+
+// ==================== FileContainer-ы ====================
+
+const fileContainers = ref<Record<string, InstanceType<typeof FileContainer> | null>>({})
+
+function onRegisterFiles(blockLocalId: string, inst: any) {
+  if (inst) {
+    fileContainers.value[blockLocalId] = inst
+  } else {
+    delete fileContainers.value[blockLocalId]
+  }
+}
+
+// ==================== Заголовок ====================
+
+const centerTitle = computed(() => {
+  if (lesson.value.id && lesson.value.id > 0) {
+    return `Урок №${lesson.value.id}`
+  }
+  return 'Новый урок'
+})
+
+// ==================== Аккордеон ====================
 
 const openTypeId = ref<number | null>(null)
 
@@ -49,7 +79,7 @@ function toggleType(id: number) {
   openTypeId.value = openTypeId.value === id ? null : id
 }
 
-// ==================== Хелпер: иконка ====================
+// ==================== Хелперы ====================
 
 function iconOf(type: Pick<BlockStructItem, 'default_settings'>): string {
   const fields = Array.isArray(type.default_settings) ? type.default_settings : []
@@ -57,10 +87,11 @@ function iconOf(type: Pick<BlockStructItem, 'default_settings'>): string {
   return (iconField?.default as string | undefined) ?? 'i-lucide-square'
 }
 
-function iconOfBlock(block: { settings?: SettingNode[] | null }): string {
-  const fields = Array.isArray(block.settings) ? block.settings : []
-  const iconField = fields.find((f: any) => f.key === 'icon')
-  return (iconField?.default as string | undefined) ?? 'i-lucide-file-text'
+function iconOfBlock(block: { settings?: Record<string, any> | null }): string {
+  if (isPlainObject(block.settings) && block.settings.icon) {
+    return block.settings.icon
+  }
+  return 'i-lucide-file-text'
 }
 
 // ==================== Тултип ====================
@@ -83,12 +114,9 @@ const TOOLTIP_OFFSET = 8
 
 function showTooltip(e: MouseEvent, text: string | null | undefined) {
   if (!text) return
-
   const target = e.currentTarget as HTMLElement
   if (!target) return
-
   const rect = target.getBoundingClientRect()
-
   tooltip.value = {
     visible: true,
     text,
@@ -101,7 +129,7 @@ function hideTooltip() {
   tooltip.value.visible = false
 }
 
-// ==================== Автоскролл длинных названий ====================
+// ==================== Автоскролл ====================
 
 const scrollingNameId = ref<number | null>(null)
 const nameShift = ref(0)
@@ -109,7 +137,6 @@ const nameShift = ref(0)
 function onNameEnter(typeId: number, e: MouseEvent) {
   const target = e.currentTarget as HTMLElement | null
   if (!target) return
-
   const inner = target.querySelector('.struct-name__inner') as HTMLElement | null
   if (!inner) return
 
@@ -129,256 +156,458 @@ function onNameLeave() {
   scrollingNameId.value = null
 }
 
-// ==================== Выбранный блок ====================
+// ==================== Drag ====================
 
-const editingItem = ref<{ id: number; title: string; description: string } | null>(null)
-const saving = ref(false)
-
-const centerTitle = computed(() => {
-  if (editingItem.value) {
-    return editingItem.value.id > 0
-      ? `Редактирование №${editingItem.value.id}`
-      : 'Создание'
+function onBlockDragStart(
+  e: DragEvent,
+  type: BlockStructItem,
+  block: BlockStructItem['blocks'][0],
+) {
+  if (!e.dataTransfer) return
+  if (block.id <= 0) {
+    e.preventDefault()
+    return
   }
-  return 'Список'
-})
 
-// ==================== Действия ====================
+  const source: DraggedBlockSource = { type, block }
+  ;(window as any).__draggedBlockSource = source
 
-function openItem(id: number) {
-  router.replace({ query: { id: String(id) } })
+  e.dataTransfer.effectAllowed = 'copy'
+  e.dataTransfer.setData('text/plain', String(block.id))
 }
 
-function addItem(typeId: number) {
-  editingItem.value = { id: 0, title: '', description: '' }
-  router.replace({ query: { add: '1', type: String(typeId) } })
+function onBlockDragEnd() {
+  ;(window as any).__draggedBlockSource = null
 }
+
+// ==================== Загрузка урока ====================
+
+const loading = ref(false)
+const creating = ref(false)
+const loadError = ref<string | null>(null)
+
+async function loadLesson(id: number) {
+  loading.value = true
+  loadError.value = null
+
+  try {
+    const res = await api.get<{ data: LessonResponse } | LessonResponse>(`/lessons/${id}`)
+    const data = (res as any).data ?? res
+
+    const blocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
+      const type = structItems.value.find((t) => t.code === b.block_type_code)
+      const sourceBlock = type?.blocks.find((sb) => sb.id === b.block_id)
+
+      const fullSettings = mergeFlat(
+        type?.default_settings ?? [],
+        sourceBlock?.settings ?? undefined,
+        b.settings ?? undefined,
+      )
+
+      return {
+        localId: crypto.randomUUID(),
+        id: b.id,
+        blockId: b.block_id ?? null,
+        blockTypeCode: b.block_type_code ?? '',
+        settings: fullSettings,
+        images: b.images ?? [],
+        files: b.files ?? [],
+      }
+    })
+
+    isProgrammatic.value = true
+    lesson.value = {
+      id: data.id,
+      title: data.title ?? '',
+      description: data.description ?? '',
+      locale: data.locale ?? 'ru',
+      saved: data.saved ?? false,
+      published: data.published ?? false,
+      blocks,
+    }
+  } catch (e) {
+    console.error('[loadLesson] failed', e)
+    loadError.value = 'Не удалось загрузить урок'
+  } finally {
+    loading.value = false
+    await nextTick()
+    isProgrammatic.value = false
+  }
+}
+
+async function createAndRedirect() {
+  if (creating.value) return
+  creating.value = true
+
+  try {
+    const res = await api.post<{ data: LessonResponse } | LessonResponse>('/lessons/make')
+    const data = (res as any).data ?? res
+
+    await router.replace({ query: { id: String(data.id) } })
+  } catch (e) {
+    console.error('[createAndRedirect] failed', e)
+    loadError.value = 'Не удалось создать урок'
+  } finally {
+    creating.value = false
+  }
+}
+
+// ==================== Сохранение ====================
+
+const saving = ref(false)
+const isProgrammatic = ref(false)
+
+const busy = computed(() =>
+  loading.value || creating.value || saving.value
+)
 
 async function save() {
+  if (!lesson.value.id) return
+
   saving.value = true
   try {
-    // TODO: реальное сохранение
+    // Синхронизируем images/files из FileContainer-ов в модель
+    for (const block of lesson.value.blocks) {
+      const container = fileContainers.value[block.localId]
+      if (!container) continue
+
+      const files = container.getFiles?.()
+      if (!files) continue
+
+      block.images = (files.images ?? []).filter((i: any) => !i.toDelete)
+      block.files  = (files.files  ?? []).filter((f: any) => !f.toDelete)
+    }
+
+    const payload: LessonSavePayload = {
+      title:       lesson.value.title,
+      description: lesson.value.description,
+      locale:      lesson.value.locale,
+      saved:       true,
+      published:   lesson.value.published,
+      blocks: lesson.value.blocks.map((block) => {
+        const type = structItems.value.find((t) => t.code === block.blockTypeCode)
+        const sourceBlock = type?.blocks.find((sb) => sb.id === block.blockId)
+
+        return {
+          id: block.id,
+          settings: unmergeFlat(
+            block.settings,
+            type?.default_settings ?? [],
+            sourceBlock?.settings ?? undefined,
+          ),
+          images: block.images,
+          files:  block.files,
+        }
+      }),
+    }
+
+    const res = await api.put<{ data: LessonResponse } | LessonResponse>(
+      `/lessons/${lesson.value.id}`,
+      payload,
+    )
+
+    const data = (res as any).data ?? res
+
+    const updatedBlocks = lesson.value.blocks.map((block, idx) => {
+      const savedBlock = data.blocks?.[idx]
+      if (!savedBlock) return block
+
+      return {
+        ...block,
+        id: savedBlock.id,
+        blockId: savedBlock.block_id,
+        blockTypeCode: savedBlock.block_type_code,
+        images: savedBlock.images ?? block.images,
+        files:  savedBlock.files  ?? block.files,
+      }
+    })
+
+    isProgrammatic.value = true
+    lesson.value = {
+      ...lesson.value,
+      saved:     data.saved ?? true,
+      published: data.published ?? lesson.value.published,
+      blocks:    updatedBlocks,
+    }
+  } catch (e) {
+    console.error('[save] failed', e)
   } finally {
     saving.value = false
+    await nextTick()
+    isProgrammatic.value = false
   }
 }
 
-function reset() {
-  editingItem.value = null
-  router.replace({ query: {} })
-}
+// ==================== Автосохранение ====================
 
-// ==================== Watch: query ====================
+const { remaining: autosaveRemaining, cancel: cancelAutosave } = useAutosave({
+  delaySec: 5,
+  canRun: () =>
+    !!lesson.value.id
+    && lesson.value.blocks.length > 0
+    && !busy.value,
+  save,
+  watchSource: () => lesson.value,
+  isProgrammatic: () => isProgrammatic.value,
+  // Селектор лайтбокса кропа из FileContainer
+  extraPopupSelectors: ['.crop-modal-backdrop'],
+})
+
+// Пока идёт сохранение — отменяем запланированное автосохранение
+watch(saving, (val) => {
+  if (val) cancelAutosave()
+})
+
+// ==================== Watch: ?id ====================
 
 watch(
   () => route.query.id,
-  (id) => {
-    if (!id || typeof id !== 'string') return
-    // TODO: загрузить элемент по id
+  async (id) => {
+    if (structItems.value.length === 0) return
+
+    if (!id || typeof id !== 'string') {
+      await createAndRedirect()
+      return
+    }
+
+    const numId = Number(id)
+    if (!Number.isFinite(numId)) {
+      await createAndRedirect()
+      return
+    }
+
+    if (lesson.value.id === numId) return
+    await loadLesson(numId)
   },
   { immediate: true },
 )
 
 watch(
-  () => route.query.add,
-  (add) => {
-    if (!add) return
-    // TODO: инициализировать создание
+  structItems,
+  async (items) => {
+    if (items.length === 0) return
+
+    const id = route.query.id
+
+    if (!id || typeof id !== 'string') {
+      await createAndRedirect()
+      return
+    }
+
+    const numId = Number(id)
+    if (!Number.isFinite(numId)) {
+      await createAndRedirect()
+      return
+    }
+    if (lesson.value.id === numId) return
+
+    await loadLesson(numId)
   },
-  { immediate: true },
 )
+
+// ==================== Модели для right panel ====================
+
+const activeBlockIdModel = computed({
+  get: () => activeBlock.value?.id ?? null,
+  set: (v) => {
+    if (activeBlock.value) {
+      activeBlock.value.id = v ?? 0
+    }
+  },
+})
+
+const activeBlockSettingsModel = computed({
+  get: () => activeBlock.value?.settings ?? [],
+  set: (v) => {
+    if (activeBlock.value) {
+      activeBlock.value.settings = v
+    }
+  },
+})
+
+// ==================== Lifecycle ====================
+
+onMounted(() => {
+  window.addEventListener('dragend', onBlockDragEnd)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('dragend', onBlockDragEnd)
+})
 </script>
 
 <template>
   <ConstructPanels
-    left-title="Типы блоков"
+    left-title="Блоки"
     :main-title="centerTitle"
     right-title="Свойства"
-    :show-viewport-picker="!!editingItem"
+    :show-viewport-picker="true"
   >
     <!-- ==================== LEFT ==================== -->
     <template #left>
-      <div class="struct-panel">
-        <!-- Загрузка -->
-        <div v-if="pending" class="empty-state">Загрузка…</div>
+      <LoadingOverlay :loading="busy">
+        <div class="struct-panel">
+          <div v-if="structPending" class="empty-state">Загрузка…</div>
+          <div v-else-if="structError" class="empty-state">
+            Не удалось загрузить структуру
+          </div>
+          <div v-else-if="structItems.length === 0" class="empty-state">
+            Пока ничего нет
+          </div>
 
-        <!-- Ошибка -->
-        <div v-else-if="error" class="empty-state">
-          Не удалось загрузить структуру
-        </div>
-
-        <!-- Пусто -->
-        <div v-else-if="structItems.length === 0" class="empty-state">
-          Пока ничего нет
-        </div>
-
-        <!-- Аккордеон -->
-        <template v-else>
-          <div
-            v-for="type in structItems"
-            :key="type.id"
-            class="struct-item"
-            :class="{ 'struct-item--open': openTypeId === type.id }"
-          >
-            <!-- Хедер типа -->
-            <button
-              type="button"
-              class="struct-head"
-              @click="toggleType(type.id)"
-              @mouseenter="showTooltip($event, type.description)"
-              @mouseleave="hideTooltip"
+          <template v-else>
+            <div
+              v-for="type in structItems"
+              :key="type.id"
+              class="struct-item"
+              :class="{ 'struct-item--open': openTypeId === type.id }"
             >
-              <span
-                class="struct-chevron"
-                :class="{ 'struct-chevron--open': openTypeId === type.id }"
-              >
-                <UIcon name="i-lucide-chevron-right" class="w-4 h-4" />
-              </span>
-
-              <UIcon :name="iconOf(type)" class="struct-icon" />
-
-              <span
-                class="struct-name"
-                @mouseenter="onNameEnter(type.id, $event)"
-                @mouseleave="onNameLeave"
+              <button
+                type="button"
+                class="struct-head"
+                @click="toggleType(type.id)"
+                @mouseenter="showTooltip($event, type.description)"
+                @mouseleave="hideTooltip"
               >
                 <span
-                  class="struct-name__inner"
-                  :style="{
-                    transform: scrollingNameId === type.id
-                      ? `translateX(-${nameShift}px)`
-                      : 'translateX(0)',
-                  }"
+                  class="struct-chevron"
+                  :class="{ 'struct-chevron--open': openTypeId === type.id }"
                 >
-                  {{ type.name }}
+                  <UIcon name="i-lucide-chevron-right" class="w-4 h-4" />
                 </span>
-              </span>
 
-              <span
-                class="struct-count"
-                :class="{ 'struct-count--empty': type.blocks_count === 0 }"
-              >
-                {{ type.blocks_count }}
-              </span>
+                <UIcon :name="iconOf(type)" class="struct-icon" />
 
-              <!-- Кнопка «+» добавить блок этого типа -->
-              <span
-                class="struct-add"
-                role="button"
-                :aria-label="`Добавить блок «${type.name}»`"
-                @click.stop="addItem(type.id)"
-              >
-                <UIcon name="i-lucide-plus" class="w-4 h-4" />
-              </span>
-            </button>
-
-            <!-- Список блоков внутри типа -->
-            <Transition name="struct-expand">
-              <div v-if="openTypeId === type.id" class="struct-body">
-                <div v-if="type.blocks.length === 0" class="struct-empty">
-                  Блоков этого типа пока нет
-                </div>
-
-                <template v-else>
-                  <button
-                    v-for="block in type.blocks"
-                    :key="block.id"
-                    type="button"
-                    class="struct-block"
-                    @click="openItem(block.id)"
-                    @mouseenter="showTooltip($event, block.description)"
-                    @mouseleave="hideTooltip"
+                <span
+                  class="struct-name"
+                  @mouseenter="onNameEnter(type.id, $event)"
+                  @mouseleave="onNameLeave"
+                >
+                  <span
+                    class="struct-name__inner"
+                    :style="{
+                      transform: scrollingNameId === type.id
+                        ? `translateX(-${nameShift}px)`
+                        : 'translateX(0)',
+                    }"
                   >
-                    <UIcon
-                      :name="iconOfBlock(block)"
-                      class="struct-block__icon"
-                    />
-                    <span class="struct-block__title">
-                      {{ block.title || `Блок №${block.id}` }}
-                    </span>
-                    <span class="struct-block__id">#{{ block.id }}</span>
-                  </button>
-                </template>
-              </div>
-            </Transition>
-          </div>
-        </template>
-      </div>
+                    {{ type.name }}
+                  </span>
+                </span>
+
+                <span
+                  class="struct-count"
+                  :class="{ 'struct-count--empty': type.blocks_count === 0 }"
+                >
+                  {{ type.blocks_count }}
+                </span>
+              </button>
+
+              <Transition name="struct-expand">
+                <div v-if="openTypeId === type.id" class="struct-body">
+                  <div v-if="type.blocks.length === 0" class="struct-empty">
+                    Блоков этого типа пока нет
+                  </div>
+
+                  <template v-else>
+                    <div
+                      v-for="block in type.blocks"
+                      :key="block.id"
+                      class="struct-block"
+                      draggable="true"
+                      @dragstart="onBlockDragStart($event, type, block)"
+                      @dragend="onBlockDragEnd"
+                      @mouseenter="showTooltip($event, block.description)"
+                      @mouseleave="hideTooltip"
+                    >
+                      <UIcon
+                        :name="iconOfBlock(block)"
+                        class="struct-block__icon"
+                      />
+                      <span class="struct-block__title">
+                        {{ block.title || `Блок №${block.id}` }}
+                      </span>
+                      <span class="struct-block__id">#{{ block.id }}</span>
+                    </div>
+                  </template>
+                </div>
+              </Transition>
+            </div>
+          </template>
+        </div>
+      </LoadingOverlay>
     </template>
 
     <!-- ==================== MAIN HEADER ==================== -->
     <template #main-header>
       <div class="main-header-inner">
         <span>{{ centerTitle }}</span>
-
-        <UButton
-          v-if="editingItem"
-          icon="i-lucide-rotate-ccw"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="reset"
-        >
-          Сбросить
-        </UButton>
       </div>
     </template>
 
     <!-- ==================== MAIN ==================== -->
     <template #main>
-      <!-- === Режим редактирования === -->
-      <template v-if="editingItem">
-        <div class="center-placeholder">
-          <UIcon name="i-lucide-pencil-ruler" class="center-placeholder__icon" />
-          <span class="center-placeholder__label">
-            Здесь будет редактор
-          </span>
-        </div>
-      </template>
-
-      <!-- === Режим списка === -->
-      <template v-else>
-        <div class="center-placeholder">
-          <UIcon name="i-lucide-layout-list" class="center-placeholder__icon" />
-          <span class="center-placeholder__label">
-            Здесь будет список элементов
-          </span>
-        </div>
-      </template>
+      <LoadingOverlay :loading="busy">
+        <Lesson
+          v-model="lesson"
+          v-model:active-block-local-id="activeBlockLocalId"
+          :struct-items="structItems"
+          @register-files="onRegisterFiles"
+        />
+      </LoadingOverlay>
     </template>
 
     <!-- ==================== RIGHT HEADER ==================== -->
     <template #right-header>
       <span>Свойства</span>
-      <UButton
-        icon="i-lucide-save"
-        size="xs"
-        color="primary"
-        variant="soft"
-        :loading="saving"
-        :disabled="!editingItem || saving"
-        @click="save"
-      >
-        Сохранить
-      </UButton>
+
+      <div class="right-actions">
+        <Transition name="autosave-fade">
+          <span
+            v-if="autosaveRemaining !== null"
+            class="autosave-chip"
+            :title="`Автосохранение произойдет через ${autosaveRemaining} с`"
+          >
+            <UIcon name="i-lucide-save" class="autosave-chip__icon" />
+            <span class="autosave-chip__text">
+              {{ autosaveRemaining }}
+            </span>
+          </span>
+        </Transition>
+
+        <UButton
+          icon="i-lucide-save"
+          size="xs"
+          color="primary"
+          variant="soft"
+          :loading="saving"
+          :disabled="busy || lesson.blocks.length === 0"
+          @click="save"
+        >
+          Сохранить
+        </UButton>
+      </div>
     </template>
 
     <!-- ==================== RIGHT ==================== -->
     <template #right>
-      <div v-if="!editingItem" class="empty-state">
-        Выберите элемент в центре.
-      </div>
+      <LoadingOverlay :loading="busy">
+        <div v-if="!activeBlock" class="empty-state">
+          Выберите блок в центре.
+        </div>
 
-      <div v-else class="right-placeholder">
-        <UIcon name="i-lucide-sliders-horizontal" class="right-placeholder__icon" />
-        <span class="right-placeholder__label">
-          Здесь будет панель настроек
-        </span>
-      </div>
+        <BlocksSettingsPanel
+          v-else
+          model-name="lesson_blocks"
+          mode="public"
+          v-model:id="activeBlockIdModel"
+          v-model:settings="activeBlockSettingsModel"
+        />
+      </LoadingOverlay>
     </template>
   </ConstructPanels>
 
-  <!-- ==================== Тултип (вне панели, поверх всего) ==================== -->
+  <!-- ==================== Тултип ==================== -->
   <Teleport to="body">
     <Transition name="struct-tooltip-fade">
       <div
@@ -397,7 +626,7 @@ watch(
 </template>
 
 <style scoped>
-/* ==================== Заголовок центральной панели ==================== */
+/* ==================== Хедер центра ==================== */
 
 .main-header-inner {
   display: flex;
@@ -406,7 +635,52 @@ watch(
   min-width: 0;
 }
 
-/* ==================== Аккордеон типов ==================== */
+/* ==================== Хедер правой панели ==================== */
+
+.right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.autosave-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--ui-bg-elevated, #f8fafc);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text-muted, #64748b);
+}
+
+.autosave-chip__icon {
+  width: 12px;
+  height: 12px;
+  color: var(--ui-primary, #3b82f6);
+}
+
+.autosave-chip__text {
+  min-width: 10px;
+  text-align: center;
+}
+
+.autosave-fade-enter-active,
+.autosave-fade-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.autosave-fade-enter-from,
+.autosave-fade-leave-to {
+  opacity: 0;
+  transform: translateX(4px);
+}
+
+/* ==================== Аккордеон ==================== */
 
 .struct-panel {
   display: flex;
@@ -430,8 +704,6 @@ watch(
   border-color: var(--ui-primary, #3b82f6);
   box-shadow: 0 1px 3px rgba(59, 130, 246, 0.08);
 }
-
-/* --- Хедер типа --- */
 
 .struct-head {
   position: relative;
@@ -459,7 +731,6 @@ watch(
   border-radius: 8px 8px 0 0;
 }
 
-/* Шеврон */
 .struct-chevron {
   display: inline-flex;
   align-items: center;
@@ -476,7 +747,6 @@ watch(
   color: var(--ui-primary, #3b82f6);
 }
 
-/* Иконка типа */
 .struct-icon {
   flex-shrink: 0;
   width: 16px;
@@ -488,7 +758,6 @@ watch(
   color: var(--ui-primary, #3b82f6);
 }
 
-/* Название типа — контейнер (обрезает) */
 .struct-name {
   flex: 1 1 auto;
   min-width: 0;
@@ -498,7 +767,6 @@ watch(
   white-space: nowrap;
 }
 
-/* Внутренний слой с текстом — двигается */
 .struct-name__inner {
   display: inline-block;
   white-space: nowrap;
@@ -506,7 +774,6 @@ watch(
   will-change: transform;
 }
 
-/* Счётчик */
 .struct-count {
   flex-shrink: 0;
   display: inline-flex;
@@ -528,31 +795,6 @@ watch(
   color: var(--ui-text-muted, #9ca3af);
 }
 
-/* Кнопка «+» */
-.struct-add {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
-  color: var(--ui-text-muted, #9ca3af);
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
-}
-
-.struct-item:hover .struct-add {
-  opacity: 1;
-}
-
-.struct-add:hover {
-  background: var(--ui-primary, #3b82f6);
-  color: #ffffff;
-}
-
-/* --- Тело аккордеона --- */
-
 .struct-body {
   display: flex;
   flex-direction: column;
@@ -569,27 +811,30 @@ watch(
   color: var(--ui-text-muted, #9ca3af);
 }
 
-/* --- Элемент блока --- */
-
 .struct-block {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   padding: 6px 8px;
-  border: none;
   border-radius: 5px;
   background: transparent;
   text-align: left;
   font-size: 12px;
   color: var(--ui-text, #111827);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  cursor: grab;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
 .struct-block:hover {
   background: var(--ui-bg, #ffffff);
   color: var(--ui-primary, #3b82f6);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.struct-block:active {
+  cursor: grabbing;
 }
 
 .struct-block__icon {
@@ -618,8 +863,6 @@ watch(
   color: var(--ui-text-muted, #9ca3af);
 }
 
-/* --- Анимация раскрытия --- */
-
 .struct-expand-enter-active,
 .struct-expand-leave-active {
   overflow: hidden;
@@ -638,7 +881,7 @@ watch(
   opacity: 1;
 }
 
-/* ==================== Тултип (Teleport в body) ==================== */
+/* ==================== Тултип ==================== */
 
 :global(.struct-tooltip-floating) {
   position: fixed;
@@ -677,52 +920,6 @@ watch(
 :global(.struct-tooltip-fade-leave-to) {
   opacity: 0;
   transform: translate(-50%, calc(-100% + 4px));
-}
-
-/* ==================== Заглушка центра ==================== */
-
-.center-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  min-height: 320px;
-  padding: 48px 24px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.center-placeholder__icon {
-  width: 48px;
-  height: 48px;
-  opacity: 0.5;
-}
-
-.center-placeholder__label {
-  font-size: 14px;
-}
-
-/* ==================== Заглушка правой панели ==================== */
-
-.right-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 48px 24px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.right-placeholder__icon {
-  width: 40px;
-  height: 40px;
-  opacity: 0.5;
-}
-
-.right-placeholder__label {
-  font-size: 13px;
-  text-align: center;
 }
 
 /* ==================== Пустое состояние ==================== */

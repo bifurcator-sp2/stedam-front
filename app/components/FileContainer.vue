@@ -23,12 +23,23 @@ const props = withDefaults(defineProps<{
   showToDeleteImages?: boolean
   /** Назначение набора (avatar, cover, background-image). Опционально. */
   purpose?: string | null
+  /**
+   * Готовые данные файлов.
+   *
+   * Если задан — FileContainer НЕ грузит через API, а использует только их.
+   * Это работает при ЛЮБОМ modelId (не только при 0).
+   *
+   * Так поля типа `image` в настройках блоков могут хранить свои данные
+   * в дереве настроек (model.default), а не в API.
+   */
+  initialFiles?: FilesListResponse | null
 }>(), {
   fileType: 'all',
   forceCrop: true,
   maxImages: -1,
   showToDeleteImages: false,
   purpose: null,
+  initialFiles: null,
 })
 
 const api = useApi()
@@ -55,23 +66,7 @@ const listLoading = ref(false)
 // Локально удалённые stored-URL
 // ============================================================
 
-// URL'ы stored-изображений, помеченные на удаление в текущей сессии.
-// Нужны, чтобы refresh() не возвращал их обратно.
 const deletedStoredUrls = ref<Set<string>>(new Set())
-
-// ============================================================
-// Логи
-// ============================================================
-
-const DEBUG = true
-
-function log(...args: unknown[]) {
-  if (DEBUG) console.log('[FileContainer]', ...args)
-}
-
-function warn(...args: unknown[]) {
-  if (DEBUG) console.warn('[FileContainer]', ...args)
-}
 
 // ============================================================
 // Внутреннее состояние
@@ -251,7 +246,31 @@ function emptyFiles(): FilesListResponse {
 
 async function refresh() {
   listLoading.value = true
+
   try {
+    // === Если заданы initialFiles — используем их всегда, не ходим в API ===
+    if (props.initialFiles) {
+      const filterDeleted = <T extends { url: string }>(
+        list: T[] | undefined,
+      ): T[] => (list ?? []).filter((i) => !isDeleted(i.url))
+
+      files.value = {
+        images: filterDeleted(props.initialFiles.images),
+        files:  filterDeleted(props.initialFiles.files),
+        temp: {
+          images: filterDeleted(props.initialFiles.temp?.images),
+          files:  filterDeleted(props.initialFiles.temp?.files),
+        },
+        stored: {
+          images: filterDeleted(props.initialFiles.stored?.images),
+          files:  filterDeleted(props.initialFiles.stored?.files),
+        },
+      }
+
+      return
+    }
+
+    // === Обычная загрузка через API ===
     const res = await api.get<Partial<FilesListResponse> | null>(
       `/files/preload/${props.modelName}/${props.modelId}`,
       { params: purposeParams() },
@@ -288,10 +307,21 @@ onMounted(refresh)
 watch(
   () => [props.modelName, props.modelId, props.purpose],
   () => {
-    // Сбрасываем удалённые при смене модели/purpose
     deletedStoredUrls.value = new Set()
     refresh()
   },
+)
+
+// Реагируем на изменение initialFiles (например, при дропе блока)
+// Теперь — при любом modelId, потому что initialFiles имеет приоритет.
+watch(
+  () => props.initialFiles,
+  (val) => {
+    if (val) {
+      refresh()
+    }
+  },
+  { deep: true, immediate: true },
 )
 
 // ============================================================
@@ -348,7 +378,6 @@ async function processFiles(list: File[]) {
   const images = list.filter((f) => f.type.startsWith('image/'))
   const plain  = list.filter((f) => !f.type.startsWith('image/'))
 
-  // --- Лимит по изображениям ---
   let acceptedImages = images
   let rejected = 0
 
@@ -365,7 +394,6 @@ async function processFiles(list: File[]) {
     }
   }
 
-  // Тост один раз на попытку
   if (rejected > 0) {
     toast.add({
       title: 'Достигнут лимит изображений',
@@ -375,7 +403,6 @@ async function processFiles(list: File[]) {
     })
   }
 
-  // --- Кроп для принятых изображений ---
   const plainFiles: File[] = []
 
   for (const file of acceptedImages) {
@@ -388,7 +415,6 @@ async function processFiles(list: File[]) {
     }
   }
 
-  // --- Не-изображения (если fileType позволяет) ---
   if (props.fileType !== 'image' && plain.length) {
     plainFiles.push(...plain)
   }
@@ -461,8 +487,7 @@ function destroyCropper() {
   if (cropperInstance) {
     try {
       cropperInstance.destroy()
-    } catch (e) { /* ignore */
-    }
+    } catch (e) { /* ignore */ }
     cropperInstance = null
   }
 }
@@ -470,7 +495,6 @@ function destroyCropper() {
 function applyAspectRatio(aspect: number) {
   if (!cropperInstance) return
   cropperInstance.setAspectRatio(aspect)
-  log('applyAspectRatio', { aspect })
 }
 
 // ============================================================
@@ -525,7 +549,6 @@ async function initCropper() {
     if (currentInitUrl !== myUrl) return
 
     if (!img.naturalWidth || !img.naturalHeight) {
-      warn('ABORT: изображение без размеров')
       return
     }
 
@@ -534,7 +557,6 @@ async function initCropper() {
 
     const hasSize = await waitForWrapSize(wrap)
     if (!hasSize) {
-      warn('ABORT: .cropper-wrap без размеров')
       return
     }
 
@@ -554,15 +576,7 @@ async function initCropper() {
       cropBoxMovable: true,
       cropBoxResizable: true,
       toggleDragModeOnDblclick: false,
-      ready() {
-        log('cropper ready (v1)')
-      },
     })
-
-    log('cropper initialized (v1)', {
-      aspectRatio: selectedRatioValue.value,
-    })
-
   } finally {
     cropperInitializing = false
   }
@@ -671,9 +685,38 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
       { params: purposeParams() },
     )
 
-    await refresh()
+    // После загрузки — принудительно обновляем files.value из API,
+    // потому что пользователь только что загрузил файл и ждёт его увидеть.
+    await refreshAfterUpload()
   } finally {
     uploading.value = false
+  }
+}
+
+/**
+ * Обновление после upload.
+ * Всегда идёт в API, потому что нужно увидеть свежезагруженный файл.
+ */
+async function refreshAfterUpload() {
+  const res = await api.get<Partial<FilesListResponse> | null>(
+    `/files/preload/${props.modelName}/${props.modelId}`,
+    { params: purposeParams() },
+  )
+
+  const filterDeleted = <T extends { url: string }>(list: T[] | undefined): T[] =>
+    (list ?? []).filter((i) => !isDeleted(i.url))
+
+  files.value = {
+    images: filterDeleted(res?.images),
+    files:  (res?.files ?? []).filter((f) => !isDeleted(f.url)),
+    temp: {
+      images: filterDeleted(res?.temp?.images),
+      files:  (res?.temp?.files ?? []).filter((f) => !isDeleted(f.url)),
+    },
+    stored: {
+      images: filterDeleted(res?.stored?.images),
+      files:  (res?.stored?.files ?? []).filter((f) => !isDeleted(f.url)),
+    },
   }
 }
 
@@ -687,16 +730,13 @@ async function removeFile(item: ImageItem | FileItem) {
     return
   }
 
-  // stored — запоминаем URL как удалённый в текущей сессии
   deletedStoredUrls.value.add(item.url)
   deletedStoredUrls.value = new Set(deletedStoredUrls.value)
 
-  // и сразу убираем из модели
   removeFromModel(item.url)
 }
 
 function restoreFile(item: ImageItem | FileItem) {
-  // Убираем из удалённых
   if (deletedStoredUrls.value.has(item.url)) {
     deletedStoredUrls.value.delete(item.url)
     deletedStoredUrls.value = new Set(deletedStoredUrls.value)
@@ -737,7 +777,6 @@ function getFiles(): FilesListResponse {
   return files.value
 }
 
-// Публичные методы для родителя
 defineExpose({
   refresh,
   removeTempFile,
@@ -776,7 +815,7 @@ onUnmounted(() => {
 })
 
 // ============================================================
-// Событие наружу (для обратной совместимости)
+// Событие наружу
 // ============================================================
 
 const emit = defineEmits<{
@@ -1031,12 +1070,8 @@ watch(() => files.value.stored, (val) => {
 }
 
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* ==================== Лимит достигнут ==================== */
@@ -1110,15 +1145,9 @@ watch(() => files.value.stored, (val) => {
 }
 
 @keyframes crop-shake {
-  0%, 100% {
-    transform: translateX(0);
-  }
-  25% {
-    transform: translateX(-4px);
-  }
-  75% {
-    transform: translateX(4px);
-  }
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
 }
 
 .crop-modal__header {

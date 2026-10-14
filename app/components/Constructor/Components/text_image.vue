@@ -1,26 +1,32 @@
 <script setup lang="ts">
-import {computed, ref, onMounted, onBeforeUnmount} from 'vue'
-import {MasonryWall} from '@yeger/vue-masonry-wall'
+import { computed, ref, onMounted, onBeforeUnmount, watch, toRaw } from 'vue'
+import { MasonryWall } from '@yeger/vue-masonry-wall'
+import type { FilesListResponse } from '~/types/files'
 
 // ==================== Модель ====================
-const value = defineModel<[]>({default: () => []})
+const value = defineModel<[]>({ default: () => [] })
 
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
   id?: number
   allowDragAndDrop?: boolean
   showToDeleteImages?: boolean
+  /** Готовые изображения (для рендера блока без API — например, в уроке) */
+  initialImages?: any[]
+  modelName?: string | null
 }>(), {
   allowDragAndDrop: true,
   showToDeleteImages: false,
+  initialImages: () => [],
+  modelName: 'blocks',
 })
 
 // ==================== Общие утилиты ====================
 
-import {useFormula} from '~/composables/useFormula'
-import type {InlineEditBinding} from '~/directives/inlineEdit'
+import { useFormula } from '~/composables/useFormula'
+import type { InlineEditBinding } from '~/directives/inlineEdit'
 
-const {renderFormulas} = useFormula()
+const { renderFormulas } = useFormula()
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
@@ -214,7 +220,7 @@ function collectBorderStyle(
     'bottom-right': getDefault(value.value, `${radiusPath}.bottom-right`),
     'bottom-left': getDefault(value.value, `${radiusPath}.bottom-left`),
   }
-  return {...borderStyle(border, bgVar), ...radiusStyle(radius)}
+  return { ...borderStyle(border, bgVar), ...radiusStyle(radius) }
 }
 
 function collectPaddingStyle(basePath: string): Record<string, string> {
@@ -317,7 +323,7 @@ const previewText = computed(() => getDefault(value.value, 'text.text'))
 const textBcgStyle = computed(() => {
   const v = getDefault(value.value, 'text.background-color')
   const name = v?.replace(/^bg-/, '')
-  return name ? {backgroundColor: `var(--bg-${name})`} : {}
+  return name ? { backgroundColor: `var(--bg-${name})` } : {}
 })
 
 const textPaddingStyle = computed(() => collectPaddingStyle('text.padding'))
@@ -341,18 +347,18 @@ const textOnlyAlignStyle = computed(() => {
   if (needDisplayImage.value) return {}
   const pos = getDefault(value.value, 'text.text-block-position')
   if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
-    return {justifyContent: pos}
+    return { justifyContent: pos }
   }
-  return {justifyContent: 'center'}
+  return { justifyContent: 'center' }
 })
 
 const imagesOnlyAlignStyle = computed(() => {
   if (needDisplayText.value) return {}
   const pos = getDefault(value.value, 'images.images-block-position')
   if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') {
-    return {justifyContent: pos}
+    return { justifyContent: pos }
   }
-  return {justifyContent: 'center'}
+  return { justifyContent: 'center' }
 })
 
 function textFieldMeta(field: TextFieldKey) {
@@ -437,7 +443,7 @@ function commitField(field: TextFieldKey, v: string) {
 const imagesBcgStyle = computed(() => {
   const v = getDefault(value.value, 'images.background-color')
   const name = v?.replace(/^bg-/, '')
-  return name ? {backgroundColor: `var(--bg-${name})`} : {}
+  return name ? { backgroundColor: `var(--bg-${name})` } : {}
 })
 
 const imagesBorderStyle = computed(() =>
@@ -545,8 +551,6 @@ const imagesContainerStyle = computed(() => {
   }
 
   if (imagesFlexDirection.value === 'column') {
-    // CSS Multi-column: masonry-эффект, одинаково в Chrome и Firefox.
-    // Контейнер НЕ flex — иначе Chrome схлопывает всё в одну колонку.
     base.display = 'block'
     base.columnCount = String(Math.max(1, columns.value))
     base.columnGap = `${distancePx.value}px`
@@ -590,8 +594,6 @@ const imageItemStyle = computed(() => {
 })
 
 const imageImgStyle = computed(() => {
-  // В column-режиме растягиваем картинку до ширины колонки,
-  // высота — пропорционально (auto).
   if (imagesFlexDirection.value === 'column' && !isMasonry.value) {
     return {
       display: 'block',
@@ -611,23 +613,206 @@ const imageImgStyle = computed(() => {
 
 const masonryColumnWidth = computed(() => 200)
 
-import type {FilesListResponse} from '~/types/files'
+// ==================== Files model ====================
 
 const filesModel = ref<FilesListResponse>({
   images: [],
   files: [],
-  temp: {images: [], files: []},
-  stored: {images: [], files: []},
+  temp: { images: [], files: [] },
+  stored: { images: [], files: [] },
 })
 
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
+
+/**
+ * Готовые файлы для FileContainer.
+ * Преобразуем props.initialImages в структуру FilesListResponse.
+ *
+ * ВАЖНО: используем toRaw, чтобы снять Vue-Proxy с реактивных объектов.
+ * structuredClone на Proxy падает с DataCloneError, поэтому используем
+ * ручное поверхностное копирование.
+ */
+const formattedInitialFiles = computed<FilesListResponse | null>(() => {
+  const imgs = props.initialImages
+  if (!Array.isArray(imgs) || imgs.length === 0) {
+    return null
+  }
+
+  const raw = toRaw(imgs)
+  const images = raw.map((i: any) => ({ ...toRaw(i) }))
+
+  return {
+    images,
+    files: [],
+    temp: { images: [], files: [] },
+    stored: { images, files: [] },
+  }
+})
+
+// ==================== Emit ====================
 
 const emit = defineEmits<{
   (e: 'register-files', inst: InstanceType<typeof FileContainer> | null): void
 }>()
 
 onMounted(() => emit('register-files', fileContainerRef.value))
-onBeforeUnmount(() => emit('register-files', null))
+
+// ==================== FileContainer: hover-панель ====================
+
+const rootRef = ref<HTMLElement | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+
+/** Показывать FileContainer: по ховеру на text_image или во время drag-over. */
+const showFilePanel = ref(false)
+const isFileDragOver = ref(false)
+
+/** Координаты панели (position: fixed) — top, left, width. */
+const panelTop = ref(0)
+const panelLeft = ref(0)
+const panelWidth = ref(0)
+
+let hoverTimer: ReturnType<typeof setTimeout> | null = null
+let rafId: number | null = null
+
+/**
+ * Считает позицию панели по getBoundingClientRect корневого элемента.
+ * Панель растёт вверх от rect.top — за это отвечает transform: translateY(-100%).
+ * Прозрачный зазор между панелью и блоком реализован padding-bottom
+ * у самой панели, поэтому нижняя граница bounding rect панели примыкает
+ * к верхней границе блока, и мёртвой зоны для ховера нет.
+ */
+function computePanelRect() {
+  const root = rootRef.value
+  if (!root) return
+
+  const rect = root.getBoundingClientRect()
+  panelWidth.value = rect.width
+  panelLeft.value = rect.left
+  panelTop.value = rect.top
+}
+
+function scheduleRectUpdate() {
+  if (rafId !== null) return
+  rafId = requestAnimationFrame(() => {
+    rafId = null
+    if (showFilePanel.value) computePanelRect()
+  })
+}
+
+function onRootEnter() {
+  if (hoverTimer) clearTimeout(hoverTimer)
+  // небольшая задержка, чтобы панель не мигала при быстром проходе мыши
+  hoverTimer = setTimeout(() => {
+    computePanelRect()
+    showFilePanel.value = true
+  }, 150)
+}
+
+function onRootLeave() {
+  if (hoverTimer) {
+    clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+  // не скрываем, если идёт drag файла — иначе нельзя будет бросить
+  if (!isFileDragOver.value) {
+    showFilePanel.value = false
+  }
+}
+
+function onRootDragEnter(e: DragEvent) {
+  const dt = e.dataTransfer
+  if (!dt) return
+  if (!Array.from(dt.types).includes('Files')) return
+  isFileDragOver.value = true
+  computePanelRect()
+  showFilePanel.value = true
+}
+
+function onRootDragLeave(e: DragEvent) {
+  const related = e.relatedTarget as Node | null
+  const root = rootRef.value
+  const panel = panelRef.value
+
+  if (panel && related && panel.contains(related)) return
+  if (root && related && root.contains(related)) return
+
+  isFileDragOver.value = false
+  if (!root?.matches(':hover') && !panel?.matches(':hover')) {
+    showFilePanel.value = false
+  }
+}
+
+/**
+ * mouseleave на корне. Панель в body (Teleport), поэтому relatedTarget
+ * может указывать на неё — учитываем это и не скрываем панель.
+ */
+function onRootMouseLeave(e: MouseEvent) {
+  const related = e.relatedTarget as Node | null
+  const panel = panelRef.value
+
+  if (panel && related && panel.contains(related)) return
+
+  if (hoverTimer) {
+    clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+  if (!isFileDragOver.value) {
+    showFilePanel.value = false
+  }
+}
+
+function onPanelMouseLeave(e: MouseEvent) {
+  const related = e.relatedTarget as Node | null
+  const root = rootRef.value
+  const panel = panelRef.value
+
+  if (panel && related && panel.contains(related)) return
+  if (root && related && root.contains(related)) return
+
+  if (!isFileDragOver.value) {
+    showFilePanel.value = false
+  }
+}
+
+function onPanelDragEnter() {
+  isFileDragOver.value = true
+  showFilePanel.value = true
+}
+
+function onPanelDragLeave(e: DragEvent) {
+  const related = e.relatedTarget as Node | null
+  const root = rootRef.value
+  const panel = panelRef.value
+
+  if (panel && related && panel.contains(related)) return
+  if (root && related && root.contains(related)) return
+
+  isFileDragOver.value = false
+  if (!root?.matches(':hover') && !panel?.matches(':hover')) {
+    showFilePanel.value = false
+  }
+}
+
+// ==================== Отслеживание позиции при скролле/ресайзе ====================
+
+function onScrollOrResize() {
+  if (showFilePanel.value) scheduleRectUpdate()
+}
+
+// ==================== Lifecycle хуков для hover-панели ====================
+
+onMounted(() => {
+  window.addEventListener('scroll', onScrollOrResize, true)
+  window.addEventListener('resize', onScrollOrResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onScrollOrResize, true)
+  window.removeEventListener('resize', onScrollOrResize)
+  if (hoverTimer) clearTimeout(hoverTimer)
+  if (rafId !== null) cancelAnimationFrame(rafId)
+  emit('register-files', null)
+})
 
 // ==================== Reorder ====================
 
@@ -657,7 +842,7 @@ function onDropBefore(from: number, beforeIndex: number) {
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
 
-  filesModel.value = {...filesModel.value, images: next}
+  filesModel.value = { ...filesModel.value, images: next }
 }
 
 function onDropAfter(from: number, afterIndex: number) {
@@ -676,7 +861,7 @@ function onDropAfter(from: number, afterIndex: number) {
   const [moved] = next.splice(from, 1)
   next.splice(to, 0, moved)
 
-  filesModel.value = {...filesModel.value, images: next}
+  filesModel.value = { ...filesModel.value, images: next }
 }
 
 const masonryKey = computed(() => {
@@ -697,44 +882,107 @@ const masonryKey = computed(() => {
     </template>
 
     <template #body>
-      <FileContainer
-        ref="fileContainerRef"
-        model-name="blocks"
-        :model-id="id"
-        file-type="image"
-        :max-images="imagesCount"
-        :show-to-delete-images="showToDeleteImages"
-        v-model:files="filesModel"
-      />
-      <div :style="[layoutMarginStyle]">
-        <div
-          :style="[
-            layoutBcgStyle,
-            layoutBorderStyle,
-            layoutPaddingStyle,
-            textOnlyAlignStyle,
-            imagesOnlyAlignStyle,
-          ]"
-          :class="[
-            'flex',
-            'items-start',
-            layoutClass,
-          ]"
-        >
-          <div v-if="needDisplayImage" :style="{ flex: `0 0 ${imagesPercent * 100}%` }">
-            <MasonryWall
-              v-if="isMasonry"
-              :items="filesModel.images"
-              :column-width="masonryColumnWidth"
-              :gap="distancePx"
-              :min-columns="columns"
-              :max-columns="columns"
-              :ssr-columns="columns"
-              :key="masonryKey"
+      <div
+        ref="rootRef"
+        class="text-image-root"
+        @mouseenter="onRootEnter"
+        @mouseleave="onRootMouseLeave"
+        @dragenter.prevent="onRootDragEnter"
+        @dragover.prevent
+        @dragleave="onRootDragLeave"
+      >
+        <!-- FileContainer как всплывающая панель над всем (Teleport в body) -->
+        <Teleport to="body">
+          <Transition name="file-panel-fade">
+            <div
+              v-show="showFilePanel"
+              ref="panelRef"
+              class="file-panel"
+              :style="{
+                top: panelTop + 'px',
+                left: panelLeft + 'px',
+                width: panelWidth + 'px',
+              }"
+              @mouseleave="onPanelMouseLeave"
+              @dragenter.prevent="onPanelDragEnter"
+              @dragover.prevent
+              @dragleave="onPanelDragLeave"
             >
-              <template #default="{ item }">
+              <div class="file-panel__inner">
+                <FileContainer
+                  ref="fileContainerRef"
+                  :model-name="modelName"
+                  :model-id="id"
+                  file-type="image"
+                  :max-images="imagesCount"
+                  :show-to-delete-images="showToDeleteImages"
+                  :initial-files="formattedInitialFiles"
+                  v-model:files="filesModel"
+                />
+              </div>
+            </div>
+          </Transition>
+        </Teleport>
+
+        <div :style="[layoutMarginStyle]">
+          <div
+            :style="[
+              layoutBcgStyle,
+              layoutBorderStyle,
+              layoutPaddingStyle,
+              textOnlyAlignStyle,
+              imagesOnlyAlignStyle,
+            ]"
+            :class="[
+              'flex',
+              'items-start',
+              layoutClass,
+            ]"
+          >
+            <div v-if="needDisplayImage" :style="{ flex: `0 0 ${imagesPercent * 100}%` }">
+              <MasonryWall
+                v-if="isMasonry"
+                :items="filesModel.images"
+                :column-width="masonryColumnWidth"
+                :gap="distancePx"
+                :min-columns="columns"
+                :max-columns="columns"
+                :ssr-columns="columns"
+                :key="masonryKey"
+              >
+                <template #default="{ item }">
+                  <ImageWrapper
+                    :item="item"
+                    :siblings="filesModel.images"
+                    :allow-drag-and-drop="allowDragAndDrop"
+                    :show-to-delete="showToDeleteImages"
+                    :dragging-index="draggingIndex"
+                    @drag-start="onImageDragStart"
+                    @drag-end="onImageDragEnd"
+                    @remove="fileContainerRef?.removeFile($event)"
+                    @restore="fileContainerRef?.restoreFile($event)"
+                    @drop-before="onDropBefore"
+                    @drop-after="onDropAfter"
+                    :class="imageItemClass"
+                    :style="[imageItemStyle]"
+                  >
+                    <img
+                      :src="item.url"
+                      :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]"
+                    />
+                  </ImageWrapper>
+                </template>
+              </MasonryWall>
+
+              <div
+                v-else
+                :class="[imagesContainerClass]"
+                :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
+              >
                 <ImageWrapper
-                  :item="item"
+                  v-for="(img, idx) in filesModel.images"
+                  :key="img.url ?? idx"
+                  :item="img"
                   :siblings="filesModel.images"
                   :allow-drag-and-drop="allowDragAndDrop"
                   :show-to-delete="showToDeleteImages"
@@ -749,54 +997,25 @@ const masonryKey = computed(() => {
                   :style="[imageItemStyle]"
                 >
                   <img
-                    :src="item.url"
+                    :src="img.url"
                     :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]"
                   />
                 </ImageWrapper>
-              </template>
-            </MasonryWall>
-
-            <div
-              v-else
-              :class="[imagesContainerClass]"
-              :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle]"
-            >
-              <ImageWrapper
-                v-for="(img, idx) in filesModel.images"
-                :key="img.url ?? idx"
-                :item="img"
-                :siblings="filesModel.images"
-                :allow-drag-and-drop="allowDragAndDrop"
-                :show-to-delete="showToDeleteImages"
-                :dragging-index="draggingIndex"
-                @drag-start="onImageDragStart"
-                @drag-end="onImageDragEnd"
-                @remove="fileContainerRef?.removeFile($event)"
-                @restore="fileContainerRef?.restoreFile($event)"
-                @drop-before="onDropBefore"
-                @drop-after="onDropAfter"
-                :class="imageItemClass"
-                :style="[imageItemStyle]"
-              >
-                <img
-                  :src="img.url"
-                  :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]"
-                />
-              </ImageWrapper>
+              </div>
             </div>
-          </div>
-          <div
-            v-if="needDisplayText"
-            :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
-          >
-            <component
-              v-for="field in visibleTextFields"
-              :key="field.key"
-              :is="field.meta.container"
-              :style="{ columnCount: field.meta.colsValue }"
-              :class="[field.meta.sizeClass, field.meta.alignClass, 'block-title-break']"
-              v-inline-edit="inlineBindings[field.key]"
-            ></component>
+            <div
+              v-if="needDisplayText"
+              :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
+            >
+              <component
+                v-for="field in visibleTextFields"
+                :key="field.key"
+                :is="field.meta.container"
+                :style="{ columnCount: field.meta.colsValue }"
+                :class="[field.meta.sizeClass, field.meta.alignClass, 'block-title-break']"
+                v-inline-edit="inlineBindings[field.key]"
+              ></component>
+            </div>
           </div>
         </div>
       </div>
@@ -858,5 +1077,52 @@ img:last-child {
   width: 100%;
   height: auto;
   max-width: 100%;
+}
+
+/* ==================== FileContainer: hover-панель ==================== */
+
+.text-image-root {
+  position: relative;
+}
+
+/*
+  Панель вынесена в <body> через Teleport. position: fixed,
+  координаты top/left/width — инлайн из getBoundingClientRect.
+  Никакой родитель не может её обрезать.
+
+  transform: translateY(-100%) поднимает панель над блоком.
+
+  padding-bottom: 6px — прозрачный «мостик» между панелью и блоком.
+  Он ЧАСТЬ панели: нижняя граница bounding rect панели примыкает к блоку,
+  значит при переходе мыши из блока в панель нет мёртвой зоны.
+
+  Визуально фон/бордер/тень — у .file-panel__inner, поэтому зазор виден.
+*/
+.file-panel {
+  position: fixed;
+  z-index: 9999;
+  transform: translateY(-100%);
+  padding-bottom: 6px;
+}
+
+.file-panel__inner {
+  background: var(--ui-bg, #ffffff);
+  border: 1px solid var(--ui-border, #e5e7eb);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow:
+    0 10px 30px rgba(15, 23, 42, 0.12),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.file-panel-fade-enter-active,
+.file-panel-fade-leave-active {
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.file-panel-fade-enter-from,
+.file-panel-fade-leave-to {
+  opacity: 0;
+  transform: translateY(calc(-100% + 4px));
 }
 </style>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, nextTick, toRaw } from 'vue'
 import { Vue3IconPicker } from 'vue3-icon-picker'
 import 'vue3-icon-picker/dist/style.css'
 import type { FilesListResponse, ImageItem } from '~/types/files'
@@ -12,15 +12,20 @@ interface SettingItem {
   default?: any
   allowed?: any[]
   purpose?: string
+  public?: true | false
   children?: SettingItem[]
 }
+const props = withDefaults(
+  defineProps<{
+    blockId?: number | null
+    modelName?: string | null
+    mode?: 'admin' | 'public'
+  }>(),
+  {
+    mode: 'admin',
+  },
+)
 
-const props = defineProps<{
-  /** id блока — нужен для FileContainer */
-  blockId?: number | null
-  /** имя модели для FileContainer */
-  modelName?: string | null
-}>()
 
 const model = defineModel<SettingItem>({ required: true })
 
@@ -169,30 +174,55 @@ const resolvedModelName = computed<string>(() => {
 })
 
 /**
- * imageFiles.images → model.default
+ * Готовые файлы для FileContainer.
+ *
+ * Преобразуем model.default (массив ImageItem[]) в FilesListResponse.
+ * Симметрично тому, как это делает text_image.vue через initialImages.
+ *
+ * Используем toRaw, чтобы снять Vue-Proxy с реактивных объектов
+ * (structuredClone на Proxy падает с DataCloneError).
+ */
+const formattedInitialFiles = computed<FilesListResponse | null>(() => {
+  const val = model.value.default
+  if (!Array.isArray(val) || val.length === 0) {
+    return null
+  }
+
+  const raw = toRaw(val)
+  const images = raw.map((i: any) => ({ ...toRaw(i) }))
+
+  return {
+    images,
+    files: [],
+    temp: { images: [], files: [] },
+    stored: { images, files: [] },
+  }
+})
+
+/**
+ * imageFiles.images → model.default.
+ *
+ * Единственная синхронизация. Обратной (model.default → imageFiles)
+ * не нужно — её делает initialFiles при монтировании.
+ *
+ * Защита от пустоты не нужна: FileContainer больше не ходит в API,
+ * когда передан initialFiles, поэтому не может обнулить модель
+ * race-condition'ом.
  */
 watch(
   () => imageFiles.value.images,
   (images) => {
+    const current = model.value.default
+    const same =
+      Array.isArray(current) &&
+      current.length === images.length &&
+      current.every((x: any, i: number) => x?.url === images[i]?.url)
+
+    if (same) return
+
     model.value = { ...model.value, default: images }
   },
   { deep: true },
-)
-
-/**
- * model.default → imageFiles.images (только при первом монтировании)
- */
-watch(
-  () => model.value.default,
-  (val) => {
-    if (Array.isArray(val) && val.length && !imageFiles.value.images.length) {
-      imageFiles.value = {
-        ...imageFiles.value,
-        images: val,
-      }
-    }
-  },
-  { immediate: true },
 )
 
 function onRemove(item: ImageItem) {
@@ -350,6 +380,7 @@ function updateChild(index: number, updated: SettingItem) {
           :model-id="blockId ?? 0"
           :purpose="imagePurpose"
           :max-images="maxImages"
+          :initial-files="formattedInitialFiles"
           file-type="image"
           v-model:files="imageFiles"
         />

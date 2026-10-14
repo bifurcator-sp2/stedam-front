@@ -1,10 +1,24 @@
 <script setup lang="ts">
+// app/components/Constructor/BlocksConstructor.vue
+//
+// Конструктор блоков (библиотека).
+// Задачи:
+//   1. Левая панель — типы блоков + список сохранённых блоков.
+//   2. Центр — режим списка ИЛИ редактор блока (TextBlock).
+//   3. Правая панель — BlocksSettingsPanel для активного блока.
+//
+// Изменения относительно предыдущей версии:
+//   • mergeSchemaWithSaved заменён на mergeFlat (из ~/utils/constructors).
+//   • При сохранении settings сжимается через unmergeFlat.
+//   • При загрузке settings разворачивается через mergeFlat.
+
 import { ref, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import FileContainer from '~/components/FileContainer.vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
+import { mergeFlat, unmergeFlat } from '~/utils/constructors'
 
 // ==================== Типы ====================
 
@@ -38,7 +52,7 @@ interface BlockResource {
   name: string | null
   title: string | null
   description: string | null
-  settings: SettingNode[]
+  settings: Record<string, any> | SettingNode[]
   created_at: string
   updated_at: string
 }
@@ -220,12 +234,19 @@ watch(
 
       const item = createBlockFromType(type)
 
+      // Разворачиваем плоские переопределения в полное дерево
+      const fullSettings = mergeFlat(
+        type.default_settings,
+        isPlainSettings(block.settings) ? block.settings : undefined,
+        undefined,
+      )
+
       editingBlock.value = {
         ...item,
-        id:          block.id,
-        title:       block.title ?? item.title,
+        id: block.id,
+        title: block.title ?? item.title,
         description: block.description ?? item.description,
-        settings:    mergeSchemaWithSaved(type.default_settings, block.settings),
+        settings: fullSettings,
       }
     } catch (e) {
       console.error('[load block by id] failed', e)
@@ -234,38 +255,15 @@ watch(
   { immediate: true },
 )
 
-function mergeSchemaWithSaved(
-  schema: SettingNode[] | undefined,
-  saved: SettingNode[] | undefined,
-): SettingNode[] {
-  if (!Array.isArray(schema)) return saved ?? []
-
-  const savedByKey = new Map<string, SettingNode>()
-  for (const item of saved ?? []) {
-    if (item?.key) savedByKey.set(item.key, item)
-  }
-
-  return schema.map((schemaItem) => {
-    const savedItem = savedByKey.get(schemaItem.key)
-
-    if (!savedItem) {
-      return structuredClone(schemaItem)
-    }
-
-    const merged: SettingNode = {
-      ...structuredClone(schemaItem),
-      default: savedItem.default ?? schemaItem.default,
-    }
-
-    if (schemaItem.children?.length) {
-      merged.children = mergeSchemaWithSaved(
-        schemaItem.children,
-        savedItem.children ?? [],
-      )
-    }
-
-    return merged
-  })
+/**
+ * Проверка: settings — плоский объект переопределений (не массив).
+ */
+function isPlainSettings(s: unknown): s is Record<string, any> {
+  return (
+    typeof s === 'object' &&
+    s !== null &&
+    !Array.isArray(s)
+  )
 }
 
 // ==================== Watch: список блоков ====================
@@ -324,11 +322,18 @@ async function save() {
 
     const filesModel = fileContainerRef.value?.getFiles?.() ?? null
 
+    // Сжимаем полное дерево в плоские переопределения
+    const compactSettings = unmergeFlat(
+      block.settings,
+      block.default_settings,
+      undefined, // у библиотечного блока родителя нет
+    )
+
     const payload: Record<string, any> = {
       block_type_id: block.block_type_id,
       title:         block.title,
       description:   block.description,
-      settings:      block.settings,
+      settings:      compactSettings,
     }
 
     if (filesModel) {
@@ -343,12 +348,13 @@ async function save() {
     const saved: BlockResource =
       (res as { data?: BlockResource }).data ?? (res as BlockResource)
 
+    // После сохранения — settings остаются полным деревом в памяти
     editingBlock.value = {
       ...block,
       id:          saved.id,
       title:       saved.title ?? block.title,
       description: saved.description ?? '',
-      settings:    saved.settings ?? block.settings,
+      settings:    block.settings, // НЕ перезаписываем — в памяти полное дерево
     }
 
     router.replace({
@@ -487,7 +493,9 @@ function reset() {
               @click="openBlock(item.id)"
             >
               <UIcon
-                :name="iconOfSettings(item.settings)"
+                :name="iconOfSettings(
+                  Array.isArray(item.settings) ? item.settings : undefined
+                )"
                 class="block-card-icon size-16!"
               />
 
@@ -564,6 +572,7 @@ function reset() {
 
         <BlocksSettingsPanel
           v-else
+          mode="admin"
           v-model:id="editingBlock.id"
           v-model:title="editingBlock.title"
           v-model:description="editingBlock.description"
