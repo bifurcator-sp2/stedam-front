@@ -317,6 +317,8 @@ function goToPage(page: number) {
 
 // ==================== Сохранение ====================
 
+// ==================== Сохранение ====================
+
 const saving = ref(false)
 
 async function save() {
@@ -328,12 +330,10 @@ async function save() {
     const isUpdate = block.id > 0
 
     // Сжимаем полное дерево в плоские переопределения.
-    // Изображения (images.gallery.default) сохраняются внутри settings —
-    // отдельный payload.files/images больше не нужен.
     const compactSettings = unmergeFlat(
       block.settings,
       block.default_settings,
-      undefined, // у библиотечного блока родителя нет
+      undefined,
     )
 
     const payload: Record<string, any> = {
@@ -350,13 +350,20 @@ async function save() {
     const saved: BlockResource =
       (res as { data?: BlockResource }).data ?? (res as BlockResource)
 
-    // После сохранения — settings остаются полным деревом в памяти
+    // ВАЖНО: Берем обновленные настройки от сервера (где temp заменены на store)
+    // и разворачиваем их обратно в полное дерево
+    const fullSettings = mergeFlat(
+      block.default_settings,
+      isPlainSettings(saved.settings) ? saved.settings : undefined,
+      undefined,
+    )
+
     editingBlock.value = {
       ...block,
       id:          saved.id,
       title:       saved.title ?? block.title,
       description: saved.description ?? '',
-      settings:    block.settings, // НЕ перезаписываем — в памяти полное дерево
+      settings:    fullSettings, // <-- Перезаписываем настройки ответом сервера!
     }
 
     router.replace({

@@ -312,12 +312,23 @@ async function save() {
       const savedBlock = data.blocks?.[idx]
       if (!savedBlock) return block
 
+      const type = structItems.value.find((t) => t.code === savedBlock.block_type_code)
+      const sourceBlock = type?.blocks.find((sb) => sb.id === savedBlock.block_id)
+
+      // ВАЖНО: Разворачиваем обновленные настройки от сервера обратно в дерево
+      const fullSettings = mergeFlat(
+        type?.default_settings ?? [],
+        sourceBlock?.settings ?? undefined,
+        savedBlock.settings ?? undefined,
+      )
+
       return {
         ...block,
         id: savedBlock.id,
         blockId: savedBlock.block_id,
         blockTypeCode: savedBlock.block_type_code,
-        images: savedBlock.images ?? block.images,
+        settings: fullSettings, // <-- Обновляем настройки ответом сервера
+        images: savedBlock.images ?? block.images, // (на всякий случай)
         files:  savedBlock.files  ?? block.files,
       }
     })

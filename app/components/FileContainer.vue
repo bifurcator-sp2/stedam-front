@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<{
    * Готовые данные файлов.
    *
    * Если задан — FileContainer использует их как стартовое состояние.
-   * Новые файлы всё равно грузятся на бэк, если modelId > 0 и purpose задан.
+   * Новые файлы всё равно грузятся на бэк, если purpose задан.
    */
   initialFiles?: FilesListResponse | null
 }>(), {
@@ -122,12 +122,6 @@ const isCropModalOpen = computed(() => !!activeCrop.value)
 // Лимит изображений
 // ============================================================
 
-/**
- * Нормализованный лимит.
- *   -1 — без лимита (null, undefined, отрицательные числа),
- *    0 — запрещено,
- *    N — максимум.
- */
 const normalizedMaxImages = computed<number>(() => {
   const v = props.maxImages
   if (v == null) return -1
@@ -332,9 +326,6 @@ watch(
 
 /**
  * Реагируем на изменение initialFiles.
- *
- * ВАЖНО: обрабатываем и null — если родитель сбросил initialFiles,
- * FileContainer должен очистить локальный стейт.
  */
 watch(
   () => props.initialFiles,
@@ -696,13 +687,12 @@ async function skipCrop() {
 async function uploadFiles(list: File[], ratio: string | null = null) {
   uploading.value = true
   try {
-    // === Когда initialFiles задан, но есть modelId и purpose —
-    //     всё равно грузим на бэк. initialFiles в этом случае используется
-    //     только как стартовое состояние. ===
-    const canUseBackend = props.modelId > 0 && !!props.purpose
+    // === ИЗМЕНЕНИЕ: Разрешаем работу с бэкендом даже при modelId === 0,
+    // если задан purpose. Бэкенд создаст FileSet-заглушку с model_id = 0 ===
+    const canUseBackend = !!props.purpose
 
     if (props.initialFiles && !canUseBackend) {
-      // Чисто локальный режим (например, конструктор блока без modelId/purpose)
+      // Чисто локальный режим (например, когда purpose вообще не задан)
       for (const file of list) {
         const url = URL.createObjectURL(file)
         const item: ImageItem = {
@@ -734,6 +724,7 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
       fd.append('ratios[]', ratio ?? '')
     })
 
+    // modelId может быть 0, для бэкенда это сигнал создать/использовать временный FileSet
     const res = await api.post<{ uploaded?: ImageItem[] }>(
       `/files/preload/${props.modelName}/${props.modelId}`,
       fd,
@@ -741,16 +732,16 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
     )
 
     if (props.initialFiles) {
-      const uploaded = (res?.uploaded ?? []).filter(
-        (u) => u.url && !files.value.images.some((i) => i.url === u.url),
-      )
+      const uploaded = (res?.uploaded ?? [])
+        .filter((u) => u.url && !files.value.images.some((i) => i.url === u.url))
+        .map((u) => ({ ...u, source: 'temp' as const })) // Обеспечиваем статус temp для только что загруженных
 
       files.value = {
         ...files.value,
         images: [...files.value.images, ...uploaded],
-        stored: {
-          ...files.value.stored,
-          images: [...files.value.stored.images, ...uploaded],
+        temp: {
+          ...files.value.temp,
+          images: [...(files.value.temp?.images ?? []), ...uploaded],
         },
       }
     } else {
