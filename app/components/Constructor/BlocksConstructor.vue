@@ -11,12 +11,14 @@
 //   • mergeSchemaWithSaved заменён на mergeFlat (из ~/utils/constructors).
 //   • При сохранении settings сжимается через unmergeFlat.
 //   • При загрузке settings разворачивается через mergeFlat.
+//   • Убран FileContainer и payload.files/payload.images — изображения
+//     теперь живут внутри settings (images.gallery.default) и сохраняются
+//     вместе с деревом настроек.
 
 import { ref, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
-import FileContainer from '~/components/FileContainer.vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 import { mergeFlat, unmergeFlat } from '~/utils/constructors'
 
@@ -106,7 +108,6 @@ function iconOfSettings(settings: Record<string, any> | SettingNode[] | undefine
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
-const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 const blockKey = ref(0)
 
 // ==================== Создание блока ====================
@@ -326,9 +327,9 @@ async function save() {
   try {
     const isUpdate = block.id > 0
 
-    const filesModel = fileContainerRef.value?.getFiles?.() ?? null
-
-    // Сжимаем полное дерево в плоские переопределения
+    // Сжимаем полное дерево в плоские переопределения.
+    // Изображения (images.gallery.default) сохраняются внутри settings —
+    // отдельный payload.files/images больше не нужен.
     const compactSettings = unmergeFlat(
       block.settings,
       block.default_settings,
@@ -340,11 +341,6 @@ async function save() {
       title:         block.title,
       description:   block.description,
       settings:      compactSettings,
-    }
-
-    if (filesModel) {
-      payload.files  = (filesModel.files  ?? []).filter((f: any) => !f.toDelete)
-      payload.images = (filesModel.images ?? []).filter((i: any) => !i.toDelete)
     }
 
     const res = isUpdate
@@ -469,7 +465,7 @@ function reset() {
             :mode="'body'"
             v-model="editingBlock.settings"
             :id="editingBlock.id || 0"
-            @register-files="fileContainerRef = $event"
+            :show-to-delete-images="true"
           />
         </LoadingOverlay>
       </template>

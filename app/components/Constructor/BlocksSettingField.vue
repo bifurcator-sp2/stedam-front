@@ -14,6 +14,7 @@ interface SettingItem {
   purpose?: string
   public?: true | false
   children?: SettingItem[]
+  params?: Record<string, any>
 }
 
 const props = withDefaults(
@@ -21,9 +22,14 @@ const props = withDefaults(
     blockId?: number | null
     modelName?: string | null
     mode?: 'admin' | 'public'
+    settings?: Record<string, any> | SettingItem[] | null
+    /** Готовый лимит изображений, вычисленный на уровне панели. */
+    maxImages?: number | null
   }>(),
   {
     mode: 'admin',
+    settings: null,
+    maxImages: undefined,
   },
 )
 
@@ -53,6 +59,25 @@ const publicIcon = computed(() =>
   model.value.public ? 'i-lucide-eye' : 'i-lucide-eye-off',
 )
 
+// ============================================================
+// Резолв пути в объекте настроек
+// ============================================================
+
+function resolvePath(root: any, path: string): any {
+  if (root == null || !path) return undefined
+
+  if (Array.isArray(root)) {
+    const [head, ...rest] = path.split('.')
+    const found = root.find((it: any) => it?.key === head)
+    if (!found) return undefined
+    if (rest.length === 0) return found.default
+    return resolvePath(found.children ?? found.default ?? found, rest.join('.'))
+  }
+
+  return path
+    .split('.')
+    .reduce((acc, part) => (acc == null ? undefined : acc[part]), root)
+}
 
 // ============================================================
 // Тип "string" — авторесайз + санитайз
@@ -60,19 +85,14 @@ const publicIcon = computed(() =>
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
-/** Черновик ввода: пока фокус в textarea — храним сырую строку, чтобы можно было набирать HTML. */
 const stringDraft = ref<string>('')
-
-/** Черновик актуален только при активном редактировании. */
 const isEditing = ref(false)
 
-/** Значение из модели, как есть. */
 const modelString = computed<string>(() => {
   const v = model.value.default
   return typeof v === 'string' ? v : ''
 })
 
-/** То, что показываем в textarea. */
 const stringModel = computed<string>({
   get() {
     return isEditing.value ? stringDraft.value : modelString.value
@@ -82,7 +102,6 @@ const stringModel = computed<string>({
   },
 })
 
-/** Зафиксировать: санитайзим черновик и пишем в модель. */
 function commitString() {
   const clean = sanitizeHtml(stringDraft.value)
   isEditing.value = false
@@ -101,7 +120,6 @@ function onStringBlur() {
   commitString()
 }
 
-/** Подгоняем высоту textarea под контент. */
 function resizeTextarea() {
   const el = textareaRef.value
   if (!el) return
@@ -146,30 +164,102 @@ const imageFiles = ref<FilesListResponse>(emptyFiles())
 
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 
+/** purpose: сначала params.purpose, потом legacy purpose, потом allowed[0]. */
 const imagePurpose = computed<string | null>(() => {
+  const fromParams = model.value.params?.purpose
+  if (typeof fromParams === 'string' && fromParams) return fromParams
+
   if (typeof model.value.purpose === 'string' && model.value.purpose) {
     return model.value.purpose
   }
+
   const first = model.value.allowed?.[0]
   return typeof first === 'string' && first ? first : null
 })
 
-const maxImages = computed<string | number | null>(() => {
-  if (typeof model.value.purpose === 'string' && model.value.purpose) {
-    return -1
+/** count: число или путь в settings. */
+const resolvedCount = computed<number | null>(() => {
+  const raw = model.value.params?.count
+  if (raw == null) return null
+
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null
   }
-  const first = model.value.allowed?.[1]
-  return first ? first : null
+
+  if (typeof raw === 'string') {
+    const val = resolvePath(props.settings, raw)
+    const num = Number(val)
+    return Number.isFinite(num) ? num : null
+  }
+
+  return null
+})
+
+/** display-images: bool или путь в settings. По умолчанию true. */
+const resolvedDisplayImages = computed<boolean>(() => {
+  const raw = model.value.params?.['display-images']
+
+  if (raw == null) return true
+  if (typeof raw === 'boolean') return raw
+
+  if (typeof raw === 'string') {
+    const val = resolvePath(props.settings, raw)
+    if (val == null) return true
+    if (typeof val === 'string') {
+      const s = val.trim().toLowerCase()
+      return !(s === '' || s === 'false' || s === '0' || s === 'no')
+    }
+    return Boolean(val)
+  }
+
+  return Boolean(raw)
+})
+
+const displayImages = computed(() => resolvedDisplayImages.value)
+
+/**
+ * Итоговый лимит изображений.
+ *
+ * Возвращает ВСЕГДА число:
+ *   • N ≥ 0 — явный лимит,
+ *   • -1    — без лимита.
+ *
+ * Приоритет:
+ *   1. Собственный params.count узла — резолвится через resolvePath
+ *      по полному дереву props.settings. Это работает и в admin-режиме,
+ *      где родительская панель для групп возвращает null.
+ *   2. Значение, посчитанное родителем (props.maxImages).
+ */
+const maxImages = computed<number>(() => {
+  // 1. Собственный params.count узла.
+  if (model.value.params?.count != null) {
+    const n = resolvedCount.value
+    if (n == null) return -1
+    return n < 0 ? -1 : n
+  }
+
+  // 2. Значение от родителя.
+  if (props.maxImages != null) {
+    return props.maxImages < 0 ? -1 : props.maxImages
+  }
+
+  return -1
 })
 
 const resolvedModelName = computed<string>(() => {
   return props.modelName || 'blocks'
 })
 
+/**
+ * Всегда возвращаем объект (даже с пустым images), чтобы FileContainer
+ * видел изменения при удалении последней картинки.
+ */
 const formattedInitialFiles = computed<FilesListResponse | null>(() => {
   const val = model.value.default
-  if (!Array.isArray(val) || val.length === 0) {
-    return null
+
+  if (!Array.isArray(val)) {
+    // Нет массива — отдаём пустую структуру, FileContainer её подхватит.
+    return emptyFiles()
   }
 
   const raw = toRaw(val)
@@ -228,7 +318,6 @@ function updateChild(index: number, updated: SettingItem) {
   >
     <!-- ============ ГРУППА ============ -->
     <template v-if="model.children?.length">
-      <!-- Левая акцентная полоса (только для группы верхнего уровня, не для вложенных) -->
       <span
         class="pointer-events-none absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-r-sm bg-gradient-to-b from-primary/55 to-primary/5"
       />
@@ -265,6 +354,8 @@ function updateChild(index: number, updated: SettingItem) {
           :block-id="blockId"
           :model-name="modelName"
           :mode="mode"
+          :settings="settings"
+          :max-images="props.maxImages"
           @update:model-value="updateChild(index, $event)"
         />
       </div>
@@ -401,6 +492,13 @@ function updateChild(index: number, updated: SettingItem) {
               {{ imagePurpose }}
             </span>
 
+            <span
+              v-if="maxImages >= 0"
+              class="rounded-full border border-default bg-default px-1.5 py-0.5 font-mono text-[9.5px] text-muted shadow-sm"
+            >
+              max {{ maxImages }}
+            </span>
+
             <UButton
               v-if="mode==='admin'"
               :icon="publicIcon"
@@ -434,7 +532,7 @@ function updateChild(index: number, updated: SettingItem) {
           <span>Не задан purpose для изображения</span>
         </div>
 
-        <div v-if="imageFiles.images.length" class="flex flex-wrap items-start gap-2">
+        <div v-if="imageFiles.images.length && displayImages" class="flex flex-wrap items-start gap-2">
           <ImageWrapper
             v-for="(img, idx) in imageFiles.images"
             :key="img.url ?? idx"

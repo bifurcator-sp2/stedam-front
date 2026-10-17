@@ -43,6 +43,14 @@ const isToDelete = computed(
   () => props.showToDelete === true && props.item.toDelete === true,
 )
 
+/**
+ * Показывать ли крестик удаления.
+ *
+ * Если родитель не запросил showToDelete — крестик не рендерим,
+ * потому что обработчик remove всё равно не навешен.
+ */
+const canRemove = computed(() => props.showToDelete === true)
+
 // ============================================================
 // Черновик
 // ============================================================
@@ -313,7 +321,7 @@ function onRestoreClick(e: MouseEvent) {
 
     <!-- Крестик удаления -->
     <button
-      v-if="!isToDelete"
+      v-if="canRemove && !isToDelete"
       type="button"
       class="image-wrapper__remove"
       aria-label="Удалить"
@@ -410,18 +418,11 @@ function onRestoreClick(e: MouseEvent) {
   transition: padding 0.12s ease, opacity 0.12s ease;
 }
 
-/* Источник перетаскивания — полупрозрачный. */
 .image-wrapper--drag-source {
   opacity: 0.4;
 }
 
 /* ==================== Индикация вставки ==================== */
-
-/*
- * При dnd-наведении добавляем зазор со стороны вставки.
- * Зазор резервирует место в layout — соседние элементы раздвигаются,
- * и становится видно, куда именно встанет картинка.
- */
 
 .image-wrapper--drop-before {
   padding-top: 10px;
@@ -431,7 +432,6 @@ function onRestoreClick(e: MouseEvent) {
   padding-bottom: 10px;
 }
 
-/* Полоса в зазоре. */
 .image-wrapper--drop-before::before,
 .image-wrapper--drop-after::after {
   content: '';
@@ -539,7 +539,6 @@ function onRestoreClick(e: MouseEvent) {
   height: 14px;
 }
 
-/* Сдвигаем бейдж «Черновик» вправо, если есть drag handle */
 .image-wrapper__drag ~ .image-wrapper__draft {
   left: 34px;
 }

@@ -14,6 +14,7 @@ import type {
 } from '~/types/lesson'
 
 const api = useApi()
+
 // ==================== Props ====================
 
 interface Props {
@@ -110,36 +111,6 @@ async function duplicateBlock(localId: string) {
   } catch (e) {
     console.error('[duplicateBlock] failed', e)
   }
-}
-
-/**
- * Извлекает массив изображений из настроек блока.
- * Используется для рендера изображений в text_image без API (id = 0).
- *
- * Ищем в settings узел с key = 'images' и берём массив из его default.
- * Если структура другая — доработаем по мере появления блоков.
- */
-function extractImagesFromSettings(settings: any[] | undefined): any[] {
-  if (!Array.isArray(settings)) return []
-
-  const imagesNode = settings.find((s) => s?.key === 'images')
-  if (!imagesNode) return []
-
-  // Вариант 1: массив прямо в default
-  if (Array.isArray(imagesNode.default)) {
-    return imagesNode.default
-  }
-
-  // Вариант 2: массив в дочернем узле
-  if (Array.isArray(imagesNode.children)) {
-    const candidates = ['default', 'files', 'items', 'list']
-    for (const key of candidates) {
-      const child = imagesNode.children.find((c: any) => c?.key === key)
-      if (Array.isArray(child?.default)) return child.default
-    }
-  }
-
-  return []
 }
 
 function moveBlockUp(localId: string) {
@@ -369,7 +340,10 @@ const readingTimeText = computed(() => {
  * Клик где угодно — снимаем активацию, кроме случаев:
  *   • клик по блоку (.block-wrapper) — там своя обработка activate;
  *   • клик по правой панели свойств (.block-settings-panel);
- *   • клик по drop-зоне или hover-панели действий блока.
+ *   • клик по drop-зоне или hover-панели действий блока;
+ *   • клик по модалке кропа FileContainer (.crop-modal-backdrop)
+ *     — иначе при нажатии «Обрезать и загрузить» активный блок
+ *     сбрасывается до того, как FileContainer отправит файл в settings.
  */
 function onGlobalPointerDown(e: PointerEvent) {
   const target = e.target as HTMLElement | null
@@ -379,6 +353,7 @@ function onGlobalPointerDown(e: PointerEvent) {
   if (target.closest('.block-settings-panel')) return
   if (target.closest('[data-drop-zone]')) return
   if (target.closest('[data-block-action]')) return
+  if (target.closest('.crop-modal-backdrop')) return
 
   deactivate()
 }
@@ -503,6 +478,7 @@ defineExpose({
               mode="body"
               model-name="lesson_blocks"
               :initial-images="block.images ?? []"
+              :show-to-delete-images="true"
               v-model:settings="block.settings"
               @register-files="onRegisterFiles(block, $event)"
             />

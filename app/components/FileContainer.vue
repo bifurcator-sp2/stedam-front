@@ -17,8 +17,13 @@ const props = withDefaults(defineProps<{
   fileType?: 'image' | 'file' | 'all'
   /** Запрещает пропускать/отменять этап кропа. По умолчанию true. */
   forceCrop?: boolean
-  /** Лимит изображений. -1 = без лимита, 0 = запрещено, N = максимум. */
-  maxImages?: number
+  /**
+   * Лимит изображений.
+   *   null/undefined или отрицательное число = без лимита,
+   *   0 = загрузка запрещена,
+   *   N > 0 = максимум.
+   */
+  maxImages?: number | null
   /** Если true — stored-картинки помечаются toDelete, а не удаляются сразу. */
   showToDeleteImages?: boolean
   /** Назначение набора (avatar, cover, background-image). Опционально. */
@@ -26,11 +31,8 @@ const props = withDefaults(defineProps<{
   /**
    * Готовые данные файлов.
    *
-   * Если задан — FileContainer НЕ грузит через API, а использует только их.
-   * Это работает при ЛЮБОМ modelId (не только при 0).
-   *
-   * Так поля типа `image` в настройках блоков могут хранить свои данные
-   * в дереве настроек (model.default), а не в API.
+   * Если задан — FileContainer использует их как стартовое состояние.
+   * Новые файлы всё равно грузятся на бэк, если modelId > 0 и purpose задан.
    */
   initialFiles?: FilesListResponse | null
 }>(), {
@@ -120,18 +122,34 @@ const isCropModalOpen = computed(() => !!activeCrop.value)
 // Лимит изображений
 // ============================================================
 
+/**
+ * Нормализованный лимит.
+ *   -1 — без лимита (null, undefined, отрицательные числа),
+ *    0 — запрещено,
+ *    N — максимум.
+ */
+const normalizedMaxImages = computed<number>(() => {
+  const v = props.maxImages
+  if (v == null) return -1
+  if (!Number.isFinite(v)) return -1
+  return v < 0 ? -1 : v
+})
+
+const hasLimit = computed(() => normalizedMaxImages.value >= 0)
+
 const aliveImageCount = computed(() =>
   (files.value.images ?? []).filter((i) => !i.toDelete).length
 )
 
 const canUploadImages = computed(() => {
-  if (props.maxImages === -1) return true
-  return aliveImageCount.value < props.maxImages
+  if (!hasLimit.value) return true
+  return aliveImageCount.value < normalizedMaxImages.value
 })
 
 const hideDropzone = computed(() => {
   if (props.fileType !== 'image') return false
-  return props.maxImages === 0 || !canUploadImages.value
+  if (!hasLimit.value) return false
+  return normalizedMaxImages.value === 0 || !canUploadImages.value
 })
 
 // ============================================================
@@ -248,7 +266,7 @@ async function refresh() {
   listLoading.value = true
 
   try {
-    // === Если заданы initialFiles — используем их всегда, не ходим в API ===
+    // === Если заданы initialFiles — используем их как стартовое состояние ===
     if (props.initialFiles) {
       const filterDeleted = <T extends { url: string }>(
         list: T[] | undefined,
@@ -312,13 +330,19 @@ watch(
   },
 )
 
-// Реагируем на изменение initialFiles (например, при дропе блока)
-// Теперь — при любом modelId, потому что initialFiles имеет приоритет.
+/**
+ * Реагируем на изменение initialFiles.
+ *
+ * ВАЖНО: обрабатываем и null — если родитель сбросил initialFiles,
+ * FileContainer должен очистить локальный стейт.
+ */
 watch(
   () => props.initialFiles,
   (val) => {
     if (val) {
       refresh()
+    } else {
+      files.value = emptyFiles()
     }
   },
   { deep: true, immediate: true },
@@ -381,9 +405,9 @@ async function processFiles(list: File[]) {
   let acceptedImages = images
   let rejected = 0
 
-  if (props.fileType !== 'file' && props.maxImages !== -1) {
+  if (props.fileType !== 'file' && hasLimit.value) {
     const alive = aliveImageCount.value
-    const free = Math.max(0, props.maxImages - alive)
+    const free = Math.max(0, normalizedMaxImages.value - alive)
 
     if (free === 0) {
       acceptedImages = []
@@ -397,7 +421,7 @@ async function processFiles(list: File[]) {
   if (rejected > 0) {
     toast.add({
       title: 'Достигнут лимит изображений',
-      description: `Максимум: ${props.maxImages}`,
+      description: `Максимум: ${normalizedMaxImages.value}`,
       color: 'warning',
       icon: 'i-lucide-triangle-alert',
     })
@@ -431,9 +455,9 @@ async function processFiles(list: File[]) {
 // ============================================================
 
 watch(
-  [() => files.value.images.length, () => props.maxImages],
+  [() => files.value.images.length, () => normalizedMaxImages.value],
   async ([, limit]) => {
-    if (limit === -1) return
+    if (limit < 0) return // без лимита
 
     const imgs = files.value.images ?? []
     if (imgs.length <= limit) return
@@ -666,12 +690,43 @@ async function skipCrop() {
 }
 
 // ============================================================
-// Загрузка на сервер
+// Загрузка
 // ============================================================
 
 async function uploadFiles(list: File[], ratio: string | null = null) {
   uploading.value = true
   try {
+    // === Когда initialFiles задан, но есть modelId и purpose —
+    //     всё равно грузим на бэк. initialFiles в этом случае используется
+    //     только как стартовое состояние. ===
+    const canUseBackend = props.modelId > 0 && !!props.purpose
+
+    if (props.initialFiles && !canUseBackend) {
+      // Чисто локальный режим (например, конструктор блока без modelId/purpose)
+      for (const file of list) {
+        const url = URL.createObjectURL(file)
+        const item: ImageItem = {
+          url,
+          source: 'temp',
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          ratio: ratio ?? undefined,
+        } as ImageItem
+
+        files.value = {
+          ...files.value,
+          images: [...files.value.images, item],
+          temp: {
+            ...files.value.temp,
+            images: [...(files.value.temp?.images ?? []), item],
+          },
+        }
+      }
+      return
+    }
+
+    // === Загрузка на бэк ===
     const fd = new FormData()
 
     list.forEach((file) => {
@@ -679,23 +734,35 @@ async function uploadFiles(list: File[], ratio: string | null = null) {
       fd.append('ratios[]', ratio ?? '')
     })
 
-    await api.post(
+    const res = await api.post<{ uploaded?: ImageItem[] }>(
       `/files/preload/${props.modelName}/${props.modelId}`,
       fd,
       { params: purposeParams() },
     )
 
-    // После загрузки — принудительно обновляем files.value из API,
-    // потому что пользователь только что загрузил файл и ждёт его увидеть.
-    await refreshAfterUpload()
+    if (props.initialFiles) {
+      const uploaded = (res?.uploaded ?? []).filter(
+        (u) => u.url && !files.value.images.some((i) => i.url === u.url),
+      )
+
+      files.value = {
+        ...files.value,
+        images: [...files.value.images, ...uploaded],
+        stored: {
+          ...files.value.stored,
+          images: [...files.value.stored.images, ...uploaded],
+        },
+      }
+    } else {
+      await refreshAfterUpload()
+    }
   } finally {
     uploading.value = false
   }
 }
 
 /**
- * Обновление после upload.
- * Всегда идёт в API, потому что нужно увидеть свежезагруженный файл.
+ * Обновление после upload (только обычный режим, без initialFiles).
  */
 async function refreshAfterUpload() {
   const res = await api.get<Partial<FilesListResponse> | null>(
@@ -725,6 +792,12 @@ async function refreshAfterUpload() {
 // ============================================================
 
 async function removeFile(item: ImageItem | FileItem) {
+  // === Режим initialFiles: локально, без API и без deletedStoredUrls ===
+  if (props.initialFiles) {
+    removeFromModel(item.url)
+    return
+  }
+
   if (item.source === 'temp') {
     await removeTempFile(item.url)
     return
@@ -746,6 +819,26 @@ function restoreFile(item: ImageItem | FileItem) {
 }
 
 async function removeTempFile(url: string) {
+  // === Режим initialFiles: локально ===
+  if (props.initialFiles) {
+    const filterOut = <T extends { url: string }>(list: T[] | undefined): T[] =>
+      (list ?? []).filter((item) => item.url !== url)
+
+    files.value = {
+      images: filterOut(files.value.images),
+      files:  filterOut(files.value.files),
+      temp: {
+        images: filterOut(files.value.temp?.images),
+        files:  filterOut(files.value.temp?.files),
+      },
+      stored: {
+        images: filterOut(files.value.stored?.images),
+        files:  filterOut(files.value.stored?.files),
+      },
+    }
+    return
+  }
+
   await api.delete(`/files/preload/${props.modelName}/${props.modelId}`, {
     body: { url },
     params: purposeParams(),
@@ -879,7 +972,7 @@ watch(() => files.value.stored, (val) => {
       <div class="limit-notice__text">
         <span class="limit-notice__title">Достигнут лимит изображений</span>
         <span class="limit-notice__hint">
-          Максимум: {{ maxImages === 0 ? 'загрузка запрещена' : maxImages }}
+          Максимум: {{ normalizedMaxImages === 0 ? 'загрузка запрещена' : normalizedMaxImages }}
         </span>
       </div>
     </div>

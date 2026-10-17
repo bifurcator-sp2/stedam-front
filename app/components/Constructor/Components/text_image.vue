@@ -4,14 +4,14 @@ import { MasonryWall } from '@yeger/vue-masonry-wall'
 import type { FilesListResponse } from '~/types/files'
 
 // ==================== Модель ====================
-const value = defineModel<[]>({ default: () => [] })
+const value = defineModel<any[]>({ default: () => [] })
 
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
   id?: number
   allowDragAndDrop?: boolean
   showToDeleteImages?: boolean
-  /** Готовые изображения (для рендера блока без API — например, в уроке) */
+  /** Готовые изображения (fallback, если нет images.gallery) */
   initialImages?: any[]
   modelName?: string | null
 }>(), {
@@ -489,13 +489,6 @@ const imageOutlineStyle = computed(() => {
 const imagesPaddingStyle = computed(() => collectPaddingStyle('images.padding'))
 const imagesMarginStyle = computed(() => collectMarginStyle('images.margin'))
 
-const imagesCount = computed(() => {
-  const raw = getDefault(value.value, 'images.count')
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return -1
-  return Math.trunc(n)
-})
-
 const columns = computed(() =>
   clampInt(getDefault(value.value, 'images.columns'), 0, 6, 1)
 )
@@ -613,7 +606,7 @@ const imageImgStyle = computed(() => {
 
 const masonryColumnWidth = computed(() => 200)
 
-// ==================== Files model ====================
+// ==================== Files model (только чтение из value) ====================
 
 const filesModel = ref<FilesListResponse>({
   images: [],
@@ -622,197 +615,60 @@ const filesModel = ref<FilesListResponse>({
   stored: { images: [], files: [] },
 })
 
-const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
+/** Достаёт массив изображений из value по пути images.gallery.default */
+function extractGallery(v: any[] | undefined): any[] {
+  if (!Array.isArray(v)) return []
 
-/**
- * Готовые файлы для FileContainer.
- * Преобразуем props.initialImages в структуру FilesListResponse.
- *
- * ВАЖНО: используем toRaw, чтобы снять Vue-Proxy с реактивных объектов.
- * structuredClone на Proxy падает с DataCloneError, поэтому используем
- * ручное поверхностное копирование.
- */
-const formattedInitialFiles = computed<FilesListResponse | null>(() => {
-  const imgs = props.initialImages
-  if (!Array.isArray(imgs) || imgs.length === 0) {
-    return null
-  }
+  const imagesNode = v.find((b: any) => b.key === 'images')
+  if (!imagesNode) return []
 
-  const raw = toRaw(imgs)
-  const images = raw.map((i: any) => ({ ...toRaw(i) }))
+  const galleryNode = imagesNode.children?.find((b: any) => b.key === 'gallery1')
+  const def = galleryNode?.default
 
-  return {
-    images,
-    files: [],
-    temp: { images: [], files: [] },
-    stored: { images, files: [] },
-  }
-})
-
-// ==================== Emit ====================
-
-const emit = defineEmits<{
-  (e: 'register-files', inst: InstanceType<typeof FileContainer> | null): void
-}>()
-
-onMounted(() => emit('register-files', fileContainerRef.value))
-
-// ==================== FileContainer: hover-панель ====================
-
-const rootRef = ref<HTMLElement | null>(null)
-const panelRef = ref<HTMLElement | null>(null)
-
-/** Показывать FileContainer: по ховеру на text_image или во время drag-over. */
-const showFilePanel = ref(false)
-const isFileDragOver = ref(false)
-
-/** Координаты панели (position: fixed) — top, left, width. */
-const panelTop = ref(0)
-const panelLeft = ref(0)
-const panelWidth = ref(0)
-
-let hoverTimer: ReturnType<typeof setTimeout> | null = null
-let rafId: number | null = null
-
-/**
- * Считает позицию панели по getBoundingClientRect корневого элемента.
- * Панель растёт вверх от rect.top — за это отвечает transform: translateY(-100%).
- * Прозрачный зазор между панелью и блоком реализован padding-bottom
- * у самой панели, поэтому нижняя граница bounding rect панели примыкает
- * к верхней границе блока, и мёртвой зоны для ховера нет.
- */
-function computePanelRect() {
-  const root = rootRef.value
-  if (!root) return
-
-  const rect = root.getBoundingClientRect()
-  panelWidth.value = rect.width
-  panelLeft.value = rect.left
-  panelTop.value = rect.top
+  if (Array.isArray(def)) return def
+  if (def && Array.isArray(def.images)) return def.images
+  return []
 }
 
-function scheduleRectUpdate() {
-  if (rafId !== null) return
-  rafId = requestAnimationFrame(() => {
-    rafId = null
-    if (showFilePanel.value) computePanelRect()
-  })
+function imagesEqual(a: any[], b: any[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((x, i) => x?.url === b[i]?.url)
 }
 
-function onRootEnter() {
-  if (hoverTimer) clearTimeout(hoverTimer)
-  // небольшая задержка, чтобы панель не мигала при быстром проходе мыши
-  hoverTimer = setTimeout(() => {
-    computePanelRect()
-    showFilePanel.value = true
-  }, 150)
-}
+// value → filesModel
+watch(
+  () => extractGallery(value.value as any[] | undefined),
+  (gallery) => {
+    if (imagesEqual(filesModel.value.images, gallery)) return
 
-function onRootLeave() {
-  if (hoverTimer) {
-    clearTimeout(hoverTimer)
-    hoverTimer = null
-  }
-  // не скрываем, если идёт drag файла — иначе нельзя будет бросить
-  if (!isFileDragOver.value) {
-    showFilePanel.value = false
-  }
-}
+    const raw = toRaw(gallery)
+    const images = raw.map((i: any) => ({ ...toRaw(i) }))
 
-function onRootDragEnter(e: DragEvent) {
-  const dt = e.dataTransfer
-  if (!dt) return
-  if (!Array.from(dt.types).includes('Files')) return
-  isFileDragOver.value = true
-  computePanelRect()
-  showFilePanel.value = true
-}
+    filesModel.value = {
+      ...filesModel.value,
+      images,
+      stored: { ...filesModel.value.stored, images },
+    }
+  },
+  { immediate: true, deep: true },
+)
 
-function onRootDragLeave(e: DragEvent) {
-  const related = e.relatedTarget as Node | null
-  const root = rootRef.value
-  const panel = panelRef.value
+// filesModel → value (после drag-and-drop reorder)
+watch(
+  () => filesModel.value.images,
+  (images) => {
+    const arr = value.value as any[] | undefined
+    if (!Array.isArray(arr)) return
 
-  if (panel && related && panel.contains(related)) return
-  if (root && related && root.contains(related)) return
+    const imagesNode = arr.find((b: any) => b.key === 'images')
+    const galleryNode = imagesNode?.children?.find((b: any) => b.key === 'gallery1')
+    if (!galleryNode) return
 
-  isFileDragOver.value = false
-  if (!root?.matches(':hover') && !panel?.matches(':hover')) {
-    showFilePanel.value = false
-  }
-}
-
-/**
- * mouseleave на корне. Панель в body (Teleport), поэтому relatedTarget
- * может указывать на неё — учитываем это и не скрываем панель.
- */
-function onRootMouseLeave(e: MouseEvent) {
-  const related = e.relatedTarget as Node | null
-  const panel = panelRef.value
-
-  if (panel && related && panel.contains(related)) return
-
-  if (hoverTimer) {
-    clearTimeout(hoverTimer)
-    hoverTimer = null
-  }
-  if (!isFileDragOver.value) {
-    showFilePanel.value = false
-  }
-}
-
-function onPanelMouseLeave(e: MouseEvent) {
-  const related = e.relatedTarget as Node | null
-  const root = rootRef.value
-  const panel = panelRef.value
-
-  if (panel && related && panel.contains(related)) return
-  if (root && related && root.contains(related)) return
-
-  if (!isFileDragOver.value) {
-    showFilePanel.value = false
-  }
-}
-
-function onPanelDragEnter() {
-  isFileDragOver.value = true
-  showFilePanel.value = true
-}
-
-function onPanelDragLeave(e: DragEvent) {
-  const related = e.relatedTarget as Node | null
-  const root = rootRef.value
-  const panel = panelRef.value
-
-  if (panel && related && panel.contains(related)) return
-  if (root && related && root.contains(related)) return
-
-  isFileDragOver.value = false
-  if (!root?.matches(':hover') && !panel?.matches(':hover')) {
-    showFilePanel.value = false
-  }
-}
-
-// ==================== Отслеживание позиции при скролле/ресайзе ====================
-
-function onScrollOrResize() {
-  if (showFilePanel.value) scheduleRectUpdate()
-}
-
-// ==================== Lifecycle хуков для hover-панели ====================
-
-onMounted(() => {
-  window.addEventListener('scroll', onScrollOrResize, true)
-  window.addEventListener('resize', onScrollOrResize)
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener('scroll', onScrollOrResize, true)
-  window.removeEventListener('resize', onScrollOrResize)
-  if (hoverTimer) clearTimeout(hoverTimer)
-  if (rafId !== null) cancelAnimationFrame(rafId)
-  emit('register-files', null)
-})
+    if (imagesEqual(galleryNode.default ?? [], images)) return
+    galleryNode.default = images
+  },
+  { deep: true },
+)
 
 // ==================== Reorder ====================
 
@@ -864,6 +720,36 @@ function onDropAfter(from: number, afterIndex: number) {
   filesModel.value = { ...filesModel.value, images: next }
 }
 
+// ==================== Удаление / восстановление ====================
+
+/**
+ * Удаление картинки из галереи.
+ *
+ * В text_image нет FileContainer, поэтому удаление прямое: фильтруем массив
+ * и синхронизируем в settings через уже существующий watch.
+ */
+function onRemoveImage(item: any) {
+  const next = filesModel.value.images.filter((i: any) => i.url !== item.url)
+
+  filesModel.value = {
+    ...filesModel.value,
+    images: next,
+    stored: { ...filesModel.value.stored, images: next },
+  }
+}
+
+function onRestoreImage(item: any) {
+  const next = filesModel.value.images.map((i: any) =>
+    i.url === item.url ? { ...i, toDelete: false } : i,
+  )
+
+  filesModel.value = {
+    ...filesModel.value,
+    images: next,
+    stored: { ...filesModel.value.stored, images: next },
+  }
+}
+
 const masonryKey = computed(() => {
   return JSON.stringify({
     columns: columns.value,
@@ -872,6 +758,22 @@ const masonryKey = computed(() => {
     count: filesModel.value.images.length,
     urls: filesModel.value.images.map(i => i.url).join('|'),
   })
+})
+
+// ==================== Lifecycle ====================
+
+function onScrollOrResize() {
+  // ререндер Masonry обеспечивается через masonryKey
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', onScrollOrResize, true)
+  window.addEventListener('resize', onScrollOrResize)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onScrollOrResize, true)
+  window.removeEventListener('resize', onScrollOrResize)
 })
 </script>
 
@@ -882,48 +784,7 @@ const masonryKey = computed(() => {
     </template>
 
     <template #body>
-      <div
-        ref="rootRef"
-        class="text-image-root"
-        @mouseenter="onRootEnter"
-        @mouseleave="onRootMouseLeave"
-        @dragenter.prevent="onRootDragEnter"
-        @dragover.prevent
-        @dragleave="onRootDragLeave"
-      >
-        <!-- FileContainer как всплывающая панель над всем (Teleport в body) -->
-        <Teleport to="body">
-          <Transition name="file-panel-fade">
-            <div
-              v-show="showFilePanel"
-              ref="panelRef"
-              class="file-panel"
-              :style="{
-                top: panelTop + 'px',
-                left: panelLeft + 'px',
-                width: panelWidth + 'px',
-              }"
-              @mouseleave="onPanelMouseLeave"
-              @dragenter.prevent="onPanelDragEnter"
-              @dragover.prevent
-              @dragleave="onPanelDragLeave"
-            >
-              <div class="file-panel__inner">
-                <FileContainer
-                  ref="fileContainerRef"
-                  :model-name="modelName"
-                  :model-id="id"
-                  file-type="image"
-                  :max-images="imagesCount"
-                  :show-to-delete-images="showToDeleteImages"
-                  :initial-files="formattedInitialFiles"
-                  v-model:files="filesModel"
-                />
-              </div>
-            </div>
-          </Transition>
-        </Teleport>
-
+      <div ref="rootRef" class="text-image-root">
         <div :style="[layoutMarginStyle]">
           <div
             :style="[
@@ -959,10 +820,10 @@ const masonryKey = computed(() => {
                     :dragging-index="draggingIndex"
                     @drag-start="onImageDragStart"
                     @drag-end="onImageDragEnd"
-                    @remove="fileContainerRef?.removeFile($event)"
-                    @restore="fileContainerRef?.restoreFile($event)"
                     @drop-before="onDropBefore"
                     @drop-after="onDropAfter"
+                    @remove="onRemoveImage"
+                    @restore="onRestoreImage"
                     :class="imageItemClass"
                     :style="[imageItemStyle]"
                   >
@@ -989,10 +850,10 @@ const masonryKey = computed(() => {
                   :dragging-index="draggingIndex"
                   @drag-start="onImageDragStart"
                   @drag-end="onImageDragEnd"
-                  @remove="fileContainerRef?.removeFile($event)"
-                  @restore="fileContainerRef?.restoreFile($event)"
                   @drop-before="onDropBefore"
                   @drop-after="onDropAfter"
+                  @remove="onRemoveImage"
+                  @restore="onRestoreImage"
                   :class="imageItemClass"
                   :style="[imageItemStyle]"
                 >
@@ -1047,21 +908,11 @@ img:last-child {
   text-align: match-parent;
 }
 
-/*
-  Multi-column контейнер для изображений (режим "column").
-  Работает одинаково в Chrome и Firefox: картинки распределяются
-  по колонкам, не разрезаясь между ними.
-*/
 .images-columns {
   column-fill: balance;
   -webkit-column-fill: balance;
 }
 
-/*
-  Элемент-обёртка одной картинки внутри multi-column.
-  width: 100% в multi-column = ширина колонки, поэтому маленькие
-  изображения растягиваются до ширины соседей.
-*/
 .image-column-item {
   break-inside: avoid;
   -webkit-column-break-inside: avoid;
@@ -1071,7 +922,6 @@ img:last-child {
   min-width: 0;
 }
 
-/* Дополнительная страховка: сама картинка на всю ширину обёртки */
 .image-column-item > img {
   display: block;
   width: 100%;
@@ -1079,50 +929,7 @@ img:last-child {
   max-width: 100%;
 }
 
-/* ==================== FileContainer: hover-панель ==================== */
-
 .text-image-root {
   position: relative;
-}
-
-/*
-  Панель вынесена в <body> через Teleport. position: fixed,
-  координаты top/left/width — инлайн из getBoundingClientRect.
-  Никакой родитель не может её обрезать.
-
-  transform: translateY(-100%) поднимает панель над блоком.
-
-  padding-bottom: 6px — прозрачный «мостик» между панелью и блоком.
-  Он ЧАСТЬ панели: нижняя граница bounding rect панели примыкает к блоку,
-  значит при переходе мыши из блока в панель нет мёртвой зоны.
-
-  Визуально фон/бордер/тень — у .file-panel__inner, поэтому зазор виден.
-*/
-.file-panel {
-  position: fixed;
-  z-index: 9999;
-  transform: translateY(-100%);
-  padding-bottom: 6px;
-}
-
-.file-panel__inner {
-  background: var(--ui-bg, #ffffff);
-  border: 1px solid var(--ui-border, #e5e7eb);
-  border-radius: 10px;
-  padding: 10px;
-  box-shadow:
-    0 10px 30px rgba(15, 23, 42, 0.12),
-    0 2px 8px rgba(15, 23, 42, 0.06);
-}
-
-.file-panel-fade-enter-active,
-.file-panel-fade-leave-active {
-  transition: opacity 0.12s ease, transform 0.12s ease;
-}
-
-.file-panel-fade-enter-from,
-.file-panel-fade-leave-to {
-  opacity: 0;
-  transform: translateY(calc(-100% + 4px));
 }
 </style>
