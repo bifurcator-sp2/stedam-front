@@ -38,7 +38,7 @@ const structItems = computed<BlockStructItem[]>(() => struct.value?.data ?? [])
 
 // ==================== Состояние raw ====================
 //
-// NEW: рядом с lesson.blocks[i] (где settings — view для рендера/панели)
+// рядом с lesson.blocks[i] (где settings — view для рендера/панели)
 // храним raw-объект от сервера. Именно он уходит в save payload.
 //
 // rawStates[localId] = {
@@ -95,7 +95,6 @@ function iconOf(type: Pick<BlockStructItem, 'default_settings'>): string {
 }
 
 function iconOfBlock(block: { settings?: any }): string {
-  // settings — view SettingNode[], ищем icon
   if (Array.isArray(block.settings)) {
     const icon = block.settings.find((n: any) => n?.key === 'icon')?.default
     if (typeof icon === 'string' && icon) return icon
@@ -104,7 +103,6 @@ function iconOfBlock(block: { settings?: any }): string {
 }
 
 // ==================== Утилиты diff / patch ====================
-// NEW: точечный патч raw по diff двух view-деревьев.
 
 import { toRaw } from 'vue'
 
@@ -183,6 +181,45 @@ function patchRawFromViewDiff(
       }
     }
   }
+}
+
+// ==================== Snapshot + retry для автосохранения ====================
+//
+// «Изменение пользователем» = любое отличие title / description / locale /
+// published / blocks[].settings от того, что последний раз подтвердил сервер.
+//
+// Зачем snapshot:
+//  - если пользователь что-то поправил, пока шёл PUT, — не затираем его
+//    правки серверным ответом, а только синхронизируем rawStates и
+//    планируем досохранить через scheduleRetrySave();
+//  - это же сравнение защищает от «двойного» retry, если параллельно
+//    сработал обычный useAutosave.
+
+function snapshotLesson(): string {
+  return JSON.stringify({
+    title: lesson.value.title,
+    description: lesson.value.description,
+    locale: lesson.value.locale,
+    published: lesson.value.published,
+    blocks: lesson.value.blocks.map((b) => ({
+      id: b.id,
+      settings: b.settings,
+    })),
+  })
+}
+
+let lastSavedSnapshot = ''
+let retrySaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleRetrySave(delayMs = 5000) {
+  if (retrySaveTimer) clearTimeout(retrySaveTimer)
+  retrySaveTimer = setTimeout(async () => {
+    retrySaveTimer = null
+    if (busy.value) return
+    if (!lesson.value.id) return
+    if (snapshotLesson() === lastSavedSnapshot) return
+    await save()
+  }, delayMs)
 }
 
 // ==================== Тултип ====================
@@ -286,15 +323,11 @@ async function loadLesson(id: number) {
     const res = await api.get<{ data: LessonResponse } | LessonResponse>(`/lessons/${id}`)
     const data = (res as any).data ?? res
 
-    // NEW: сбрасываем raw-состояния
     const nextRawStates: Record<string, RawState> = {}
 
     const blocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
       const type = structItems.value.find((t) => t.code === b.block_type_code)
 
-      // view строим ТОЛЬКО из серверного settings + схема.
-      // sourceBlock.settings (прототип) сюда не подмешиваем — сервер уже
-      // финализировал settings (syncFileSetsFromSettings + cloneFileSetsFromModel).
       const view = mergeFlat(
         type?.default_settings ?? [],
         b.settings ?? undefined,
@@ -327,6 +360,9 @@ async function loadLesson(id: number) {
       published: data.published ?? false,
       blocks,
     }
+
+    // «Чистое» состояние — с ним позже сравниваем, были ли правки.
+    lastSavedSnapshot = snapshotLesson()
   } catch (e) {
     console.error('[loadLesson] failed', e)
     loadError.value = 'Не удалось загрузить урок'
@@ -354,12 +390,11 @@ async function createAndRedirect() {
   }
 }
 
-// ==================== NEW: syncMissingRaw ====================
+// ==================== syncMissingRaw ====================
 //
-// Когда Lesson.vue через DnD/duplicate добавляет блок, он сам POST'ит
-// на сервер и кладёт новый блок в lesson.blocks (только с view — raw
-// у нас нет). Этот watcher видит новый localId без rawStates и подтягивает
-// raw через GET /lessons/{id}.
+// Lesson.vue через DnD/duplicate добавляет блок и сам POST'ит на сервер,
+// кладя в lesson.blocks только view — raw у нас нет. Подтягиваем raw
+// через GET /lessons/{id}.
 
 async function syncMissingRaw() {
   if (!lesson.value.id) return
@@ -397,13 +432,11 @@ watch(
   async () => {
     if (!lesson.value.id) return
 
-    // Подчищаем rawStates для удалённых блоков
     const currentIds = new Set(lesson.value.blocks.map((b) => b.localId))
     for (const id of Object.keys(rawStates.value)) {
       if (!currentIds.has(id)) delete rawStates.value[id]
     }
 
-    // Подтягиваем raw для новых
     await syncMissingRaw()
   },
 )
@@ -418,6 +451,13 @@ const busy = computed(() =>
 
 async function save() {
   if (!lesson.value.id) return
+  if (saving.value) return
+
+  // Любой явный save отменяет отложенный retry — иначе двойной PUT.
+  if (retrySaveTimer) {
+    clearTimeout(retrySaveTimer)
+    retrySaveTimer = null
+  }
 
   saving.value = true
   try {
@@ -425,7 +465,6 @@ async function save() {
     await syncMissingRaw()
 
     // 1. Патчим raw по diff: lastSyncedView → текущий view.
-    //    Ключи, которых нет в view (не описаны схемой), в raw не трогаются.
     for (const block of lesson.value.blocks) {
       const state = rawStates.value[block.localId]
       if (!state) continue
@@ -439,8 +478,11 @@ async function save() {
       state.lastSyncedView = deepClone(block.settings)
     }
 
-    // 2. Payload: settings = raw как есть. Никаких unmergeFlat.
-    //    images/files не отправляем — сервер их не читает.
+    // 2. Снимок на момент отправки — чтобы понять после ответа,
+    //    редактировал ли пользователь урок во время PUT.
+    const snapshotAtSave = snapshotLesson()
+
+    // 3. Payload: settings = raw как есть.
     const payload: LessonSavePayload = {
       title: lesson.value.title,
       description: lesson.value.description,
@@ -464,45 +506,76 @@ async function save() {
 
     const data = (res as any).data ?? res
 
-    // 3. Сервер — истина: пересобираем view и raw из ответа.
-    const nextRawStates: Record<string, RawState> = {}
+    // 4. Проверяем: пока шёл PUT, пользователь что-то менял?
+    const userEditedDuringSave = snapshotLesson() !== snapshotAtSave
 
-    const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-      const type = structItems.value.find((t) => t.code === b.block_type_code)
+    if (userEditedDuringSave) {
+      // НЕ трогаем lesson.value.blocks — иначе затрём правки пользователя.
+      // Синхронизируем rawStates из ответа, чтобы следующий diff
+      // (lastSyncedView → currentView) отправил именно правки пользователя.
+      const byId = new Map<number, any>()
+      for (const sb of data.blocks ?? []) byId.set(sb.id, sb)
 
-      const view = mergeFlat(
-        type?.default_settings ?? [],
-        b.settings ?? undefined,
-        undefined,
-      )
-
-      const localId = crypto.randomUUID()
-      nextRawStates[localId] = {
-        raw: deepClone(b.settings ?? {}),
-        lastSyncedView: deepClone(view),
+      for (const block of lesson.value.blocks) {
+        const state = rawStates.value[block.localId]
+        if (!state) continue
+        const sb = byId.get(block.id)
+        if (!sb) continue
+        state.raw = deepClone(sb.settings ?? {})
+        // lastSyncedView НЕ трогаем — он равен тому, что ушло на сервер.
       }
 
-      return {
-        localId,
-        id: b.id,
-        blockId: b.block_id ?? null,
-        blockTypeCode: b.block_type_code ?? '',
-        settings: view,
+      lesson.value = {
+        ...lesson.value,
+        saved: data.saved ?? true,
+        published: data.published ?? lesson.value.published,
       }
-    })
 
-    isProgrammatic.value = true
-    rawStates.value = nextRawStates
-    lesson.value = {
-      ...lesson.value,
-      saved: data.saved ?? true,
-      published: data.published ?? lesson.value.published,
-      blocks: updatedBlocks,
+      // Правки пользователя ещё не сохранены — досохранить.
+      scheduleRetrySave()
+    } else {
+      // Обычный путь: сервер — истина, пересобираем view и raw из ответа.
+      const nextRawStates: Record<string, RawState> = {}
+
+      const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
+        const type = structItems.value.find((t) => t.code === b.block_type_code)
+
+        const view = mergeFlat(
+          type?.default_settings ?? [],
+          b.settings ?? undefined,
+          undefined,
+        )
+
+        const localId = crypto.randomUUID()
+        nextRawStates[localId] = {
+          raw: deepClone(b.settings ?? {}),
+          lastSyncedView: deepClone(view),
+        }
+
+        return {
+          localId,
+          id: b.id,
+          blockId: b.block_id ?? null,
+          blockTypeCode: b.block_type_code ?? '',
+          settings: view,
+        }
+      })
+
+      isProgrammatic.value = true
+      rawStates.value = nextRawStates
+      lesson.value = {
+        ...lesson.value,
+        saved: data.saved ?? true,
+        published: data.published ?? lesson.value.published,
+        blocks: updatedBlocks,
+      }
+
+      activeBlockLocalId.value =
+        updatedBlocks.find((b) => b.id === prevActiveId)?.localId ?? null
+
+      // Фиксируем «чистое» состояние.
+      lastSavedSnapshot = snapshotLesson()
     }
-
-    // 4. Восстанавливаем активный блок по серверному id (localId сменился)
-    activeBlockLocalId.value =
-      updatedBlocks.find((b) => b.id === prevActiveId)?.localId ?? null
   } catch (e) {
     console.error('[save] failed', e)
   } finally {
@@ -580,8 +653,6 @@ watch(
 
 const activeBlockIdModel = computed(() => activeBlock.value?.id ?? null)
 
-// Панель работает с view (SettingNode[]). Правки панели пишутся в view,
-// а raw патчится при save через diff.
 const activeBlockSettingsModel = computed({
   get: () => activeBlock.value?.settings ?? [],
   set: (v) => {
@@ -599,6 +670,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('dragend', onBlockDragEnd)
+  if (retrySaveTimer) {
+    clearTimeout(retrySaveTimer)
+    retrySaveTimer = null
+  }
 })
 </script>
 
