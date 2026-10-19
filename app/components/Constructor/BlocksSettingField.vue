@@ -8,13 +8,13 @@ import { useSanitize } from '~/composables/useSanitize'
 interface SettingItem {
   key: string
   label: string
-  type: 'string' | 'select' | 'int' | 'color' | 'bool' | 'icon' | 'image'
+  type: 'string' | 'select' | 'content-type' | 'layout' | 'int' | 'color' | 'bool' | 'icon' | 'image'
   default?: any
   allowed?: any[]
   purpose?: string
   public?: true | false
   children?: SettingItem[]
-  params?: Record<string, any>
+  params?: SettingItem[] | Record<string, any>
 }
 
 const props = withDefaults(
@@ -24,16 +24,67 @@ const props = withDefaults(
     mode?: 'admin' | 'public'
     settings?: Record<string, any> | SettingItem[] | null
     maxImages?: number | null
+    /** Путь от корня настроек (например, 'text.title'). Нужен для сохранения состояния. */
+    path?: string
   }>(),
   {
     mode: 'admin',
     settings: null,
     maxImages: undefined,
+    path: '',
   },
 )
 
 const model = defineModel<SettingItem>({ required: true })
 const { sanitizeHtml } = useSanitize()
+
+// ============================================================
+// Состояние аккордеона и LocalStorage
+// ============================================================
+
+const STORAGE_KEY = 'constructor_collapsed_nodes'
+
+function loadCollapsed(): Set<string> {
+  if (import.meta.server) return new Set()
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return new Set()
+    return new Set(JSON.parse(raw) as string[])
+  } catch {
+    return new Set()
+  }
+}
+
+const collapsedPaths = ref<Set<string>>(loadCollapsed())
+
+// ВАЖНО: если props.path передан, значит он уже является полным путем до текущего узла
+const currentPath = computed(() => {
+  if (props.path) return props.path
+  return model.value.key
+})
+
+const isExpanded = computed(() => !collapsedPaths.value.has(currentPath.value))
+
+function toggleExpanded() {
+  const next = new Set(collapsedPaths.value)
+  if (next.has(currentPath.value)) next.delete(currentPath.value)
+  else next.add(currentPath.value)
+  collapsedPaths.value = next
+  saveCollapsed(next)
+}
+
+function saveCollapsed(paths: Set<string>) {
+  if (import.meta.server) return
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(paths)))
+  } catch (e) {
+    console.warn('Failed to save collapsed nodes', e)
+  }
+}
+
+function getChildPath(key: string) {
+  return currentPath.value ? `${currentPath.value}.${key}` : key
+}
 
 // ============================================================
 // Внешний вид
@@ -45,6 +96,8 @@ const typeIcon = computed(() => {
   switch (model.value.type) {
     case 'string': return 'i-lucide-type'
     case 'select': return 'i-lucide-list'
+    case 'content-type': return 'i-lucide-list'
+    case 'layout': return 'i-lucide-layout'
     case 'int':    return 'i-lucide-hash'
     case 'color':  return 'i-lucide-palette'
     case 'bool':   return 'i-lucide-toggle-left'
@@ -54,9 +107,7 @@ const typeIcon = computed(() => {
   }
 })
 
-const publicIcon = computed(() =>
-  model.value.public ? 'i-lucide-eye' : 'i-lucide-eye-off',
-)
+const publicIcon = computed(() => model.value.public ? 'i-lucide-eye' : 'i-lucide-eye-off')
 
 // ============================================================
 // Резолв пути
@@ -64,7 +115,6 @@ const publicIcon = computed(() =>
 
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
-
   if (Array.isArray(root)) {
     const [head, ...rest] = path.split('.')
     const found = root.find((it: any) => it?.key === head)
@@ -72,10 +122,32 @@ function resolvePath(root: any, path: string): any {
     if (rest.length === 0) return found.default
     return resolvePath(found.children ?? found.default ?? found, rest.join('.'))
   }
+  return path.split('.').reduce((acc, part) => (acc == null ? undefined : acc[part]), root)
+}
 
-  return path
-    .split('.')
-    .reduce((acc, part) => (acc == null ? undefined : acc[part]), root)
+// ============================================================
+// Динамические резолверы
+// ============================================================
+
+const dynamicResolvers: Record<string, (params: any, settings: any, path: string) => number | null> = {
+  'parent.count': (params, settings, path) => {
+    if (!path) return null
+    const parts = path.split('.')
+    parts.pop() // Убираем ключ текущего элемента (например, 'gallery2')
+    parts.push('count')
+    const countPath = parts.join('.')
+    const val = resolvePath(settings, countPath)
+    const num = Number(val)
+    return Number.isFinite(num) ? num : null
+  },
+}
+
+// ============================================================
+// Обновление значения (эмит события наверх)
+// ============================================================
+
+function updateDefault(val: any) {
+  model.value = { ...model.value, default: val }
 }
 
 // ============================================================
@@ -100,7 +172,7 @@ function commitString() {
   const clean = sanitizeHtml(stringDraft.value)
   isEditing.value = false
   if (clean !== model.value.default) {
-    model.value = { ...model.value, default: clean }
+    updateDefault(clean)
   }
   stringDraft.value = clean
 }
@@ -153,7 +225,8 @@ const imageFiles = ref<FilesListResponse>(emptyFiles())
 const fileContainerRef = ref<InstanceType<typeof FileContainer> | null>(null)
 
 const imagePurpose = computed<string | null>(() => {
-  const fromParams = model.value.params?.purpose
+  const params = model.value.params as Record<string, any> | undefined
+  const fromParams = params?.purpose
   if (typeof fromParams === 'string' && fromParams) return fromParams
   if (typeof model.value.purpose === 'string' && model.value.purpose) return model.value.purpose
   const first = model.value.allowed?.[0]
@@ -161,19 +234,32 @@ const imagePurpose = computed<string | null>(() => {
 })
 
 const resolvedCount = computed<number | null>(() => {
-  const raw = model.value.params?.count
+  const params = model.value.params as Record<string, any> | undefined
+  const raw = params?.count
   if (raw == null) return null
-  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? raw : null
+  }
+
   if (typeof raw === 'string') {
+    const resolver = dynamicResolvers[raw]
+    if (resolver) {
+      return resolver(params, props.settings, props.path)
+    }
+
+    // Fallback для старых путей (например, 'images.count')
     const val = resolvePath(props.settings, raw)
     const num = Number(val)
     return Number.isFinite(num) ? num : null
   }
+
   return null
 })
 
 const resolvedDisplayImages = computed<boolean>(() => {
-  const raw = model.value.params?.['display-images']
+  const params = model.value.params as Record<string, any> | undefined
+  const raw = params?.['display-images']
   if (raw == null) return true
   if (typeof raw === 'boolean') return raw
   if (typeof raw === 'string') {
@@ -193,8 +279,7 @@ const displayImages = computed(() => resolvedDisplayImages.value)
 const maxImages = computed<number>(() => {
   if (model.value.params?.count != null) {
     const n = resolvedCount.value
-    if (n == null) return -1
-    return n < 0 ? -1 : n
+    if (n != null) return n < 0 ? -1 : n
   }
   if (props.maxImages != null) {
     return props.maxImages < 0 ? -1 : props.maxImages
@@ -207,7 +292,6 @@ const resolvedModelName = computed<string>(() => props.modelName || 'blocks')
 const formattedInitialFiles = computed<FilesListResponse | null>(() => {
   let val = model.value.default
 
-  // Защита на случай, если из БД придет объект со свойством default
   if (val && typeof val === 'object' && !Array.isArray(val) && Array.isArray((val as any).default)) {
     val = (val as any).default
   }
@@ -218,7 +302,7 @@ const formattedInitialFiles = computed<FilesListResponse | null>(() => {
   const images = raw.map((i: any) => ({ ...toRaw(i) }))
 
   return {
-    images, files: [], temp: { images: [], files: [] }, stored: { images, files: [] },
+    images, files: [], temp: { images: [], files: [] }, stored: { images: [], files: [] },
   }
 })
 
@@ -227,7 +311,6 @@ watch(
   (images) => {
     let current = model.value.default
 
-    // Защита для сравнения
     if (current && typeof current === 'object' && !Array.isArray(current) && Array.isArray((current as any).default)) {
       current = (current as any).default
     }
@@ -239,11 +322,10 @@ watch(
 
     if (same) return
 
-    // Сохраняем массив напрямую в default
     if (model.value.default && typeof model.value.default === 'object' && !Array.isArray(model.value.default)) {
-      model.value = { ...model.value, default: { ...(model.value.default as any), default: images } }
+      updateDefault({ ...(model.value.default as any), default: images })
     } else {
-      model.value = { ...model.value, default: images }
+      updateDefault(images)
     }
   },
   { deep: true },
@@ -262,12 +344,52 @@ function updateChild(index: number, updated: SettingItem) {
   next[index] = updated
   model.value = { ...model.value, children: next }
 }
+
+const visibleChildren = computed(() => {
+  if (!model.value.children) return []
+
+  if (model.value.type === 'content-type') {
+    const activeChild = model.value.children.find(
+      (child) => child.key === model.value.default || child.key.startsWith(model.value.default)
+    )
+    return activeChild ? [activeChild] : []
+  }
+
+  return model.value.children
+})
+
+// ============================================================
+// Params
+// ============================================================
+
+const paramsArray = computed<SettingItem[]>(() => {
+  if (!model.value.params) return []
+  if (Array.isArray(model.value.params)) return model.value.params
+  return []
+})
+
+const visibleParams = computed(() => {
+  if (model.value.type !== 'layout') return []
+
+  if (model.value.default === 'row' || model.value.default === 'col') {
+    return paramsArray.value
+  }
+
+  return paramsArray.value.slice(0, 1)
+})
+
+function updateParam(index: number, updated: SettingItem) {
+  if (!Array.isArray(model.value.params)) return
+  const next = [...model.value.params]
+  next[index] = updated
+  model.value = { ...model.value, params: next }
+}
 </script>
 
 <template>
   <div
     class="flex min-w-0 flex-col gap-1.5"
-    :class="model.children?.length && model.type !== 'image'
+    :class="mode === 'admin' && visibleChildren.length && isExpanded
       ? 'relative gap-2 overflow-hidden rounded-[10px] border border-default bg-elevated px-3 pb-3 pl-3.5 pt-2.5 shadow-sm'
       : ''"
   >
@@ -299,12 +421,24 @@ function updateChild(index: number, updated: SettingItem) {
           </div>
 
           <div v-if="iconMode === 'manual'" class="flex min-w-0 items-center gap-1.5">
-            <UInput v-model="model.default" size="xs" placeholder="i-lucide-hop" class="min-w-0 flex-1" />
+            <UInput
+              :model-value="model.default"
+              size="xs"
+              placeholder="i-lucide-hop"
+              class="min-w-0 flex-1"
+              @update:model-value="updateDefault"
+            />
             <UButton icon="i-lucide-grid-2x2" size="xs" color="neutral" variant="soft" square title="Выбрать из библиотеки" @click="iconMode = 'picker'" />
           </div>
 
           <div v-else class="flex min-w-0 items-center gap-1.5">
-            <Vue3IconPicker v-model="model.default" placeholder="Поиск иконки..." icon-library="lucide" class="min-w-0 flex-1" />
+            <Vue3IconPicker
+              :model-value="model.default"
+              placeholder="Поиск иконки..."
+              icon-library="lucide"
+              class="min-w-0 flex-1"
+              @update:model-value="updateDefault"
+            />
             <UButton icon="i-lucide-keyboard" size="xs" color="neutral" variant="soft" square title="Ввести вручную" @click="iconMode = 'manual'" />
           </div>
         </div>
@@ -358,29 +492,105 @@ function updateChild(index: number, updated: SettingItem) {
           </ImageWrapper>
         </div>
       </div>
+    </template>
 
-      <!-- СТИЛИ ГАЛЕРЕИ (только в админке) -->
-      <div v-if="mode === 'admin' && model.children?.length" class="mt-0.5 flex flex-col gap-1.5 rounded-lg border border-default bg-elevated p-2.5">
-        <div class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-muted">
-          <UIcon name="i-lucide-sliders-horizontal" class="size-3" />
-          <span>Стили галереи</span>
-        </div>
+    <!-- ============ STRING ============ -->
+    <template v-else-if="model.type === 'string'">
+      <div class="flex min-w-0 items-center gap-1.5 pl-px">
+        <span
+          v-if="mode === 'admin' && visibleChildren.length"
+          class="inline-flex size-3.5 cursor-pointer items-center justify-center text-muted transition-transform duration-200 hover:text-highlighted"
+          @click.stop="toggleExpanded"
+        >
+          <UIcon name="i-lucide-chevron-right" class="size-3.5 transition-transform duration-200" :class="{ 'rotate-90': isExpanded }" />
+        </span>
+        <UIcon :name="typeIcon" class="size-3 shrink-0 text-muted" />
+        <span class="truncate text-[11.5px] font-semibold text-highlighted">{{ model.label }}</span>
+        <span class="rounded-full border border-default bg-default px-1.5 py-px font-mono text-[9.5px] text-muted">{{ model.key }}</span>
 
-        <BlocksSettingField
-          v-for="(child, index) in model.children" :key="child.key" :model-value="child"
-          :block-id="blockId" :model-name="modelName" :mode="mode" :settings="settings"
-          @update:model-value="updateChild(index, $event)"
+        <UButton
+          v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
+          class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
+          :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
         />
+      </div>
+
+      <textarea
+        ref="textareaRef" v-model="stringModel" rows="1" spellcheck="false"
+        class="w-full min-h-8 max-h-[260px] resize-none overflow-y-auto rounded-md border border-default bg-default px-2.5 py-2 font-[inherit] text-[12.5px] leading-normal text-highlighted shadow-sm outline-none transition placeholder:text-muted hover:border-default focus:border-primary focus:ring-2 focus:ring-primary/20"
+        @input="autoResize" @focus="onStringFocus" @blur="onStringBlur"
+      />
+    </template>
+
+    <!-- ============ GRID TYPES ============ -->
+    <template v-else-if="['select', 'content-type', 'layout', 'color', 'int', 'bool'].includes(model.type)">
+      <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-2.5 rounded-md py-0.5 transition hover:bg-muted/40">
+        <span class="flex min-w-0 items-center gap-1.5 pl-0.5">
+          <span
+            v-if="mode === 'admin' && visibleChildren.length"
+            class="inline-flex size-3.5 cursor-pointer items-center justify-center text-muted transition-transform duration-200 hover:text-highlighted"
+            @click.stop="toggleExpanded"
+          >
+            <UIcon name="i-lucide-chevron-right" class="size-3.5 transition-transform duration-200" :class="{ 'rotate-90': isExpanded }" />
+          </span>
+          <UIcon :name="typeIcon" class="size-3.5 shrink-0 text-muted" />
+          <span class="truncate text-[12px] font-medium text-highlighted" :title="model.key">{{ model.label }}</span>
+
+          <UButton
+            v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
+            class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
+            :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
+          />
+        </span>
+
+        <div class="min-w-0">
+          <USelect
+            v-if="['select', 'content-type', 'layout'].includes(model.type)"
+            :model-value="model.default"
+            :items="model.allowed"
+            size="xs"
+            class="w-full min-w-0 [&_button]:py-0.5 [&_button]:text-[12.5px]"
+            @update:model-value="updateDefault"
+          />
+          <ColorPicker
+            v-else-if="model.type === 'color'"
+            :model-value="model.default"
+            :items="model.allowed ?? []"
+            :columns="6"
+            class="min-w-0"
+            @update:model-value="updateDefault"
+          />
+          <UInputNumber
+            v-else-if="model.type === 'int'"
+            :model-value="model.default"
+            size="xs"
+            class="min-w-0"
+            @update:model-value="updateDefault"
+          />
+          <USwitch
+            v-else-if="model.type === 'bool'"
+            :model-value="model.default"
+            size="xs"
+            class="min-w-0"
+            @update:model-value="updateDefault"
+          />
+        </div>
       </div>
     </template>
 
-    <!-- ============ ГРУППА ============ -->
-    <template v-else-if="model.children?.length">
-      <span class="pointer-events-none absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-r-sm bg-gradient-to-b from-primary/55 to-primary/5" />
+    <!-- ============ GROUP (fallback) ============ -->
+    <template v-else>
+      <span
+        v-if="mode === 'admin' && visibleChildren.length && isExpanded"
+        class="pointer-events-none absolute left-0 top-2.5 bottom-2.5 w-0.5 rounded-r-sm bg-gradient-to-b from-primary/55 to-primary/5"
+      />
 
       <div class="flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-widest text-highlighted">
-        <span class="inline-flex size-3.5 items-center justify-center text-muted transition-transform duration-200">
-          <UIcon name="i-lucide-chevron-right" class="size-3.5" />
+        <span
+          class="inline-flex size-3.5 cursor-pointer items-center justify-center text-muted transition-transform duration-200 hover:text-highlighted"
+          @click.stop="toggleExpanded"
+        >
+          <UIcon name="i-lucide-chevron-right" class="size-3.5 transition-transform duration-200" :class="{ 'rotate-90': isExpanded }" />
         </span>
         <UIcon name="i-lucide-folder-tree" class="size-3.5 text-primary/85" />
         <span class="flex-1 truncate">{{ model.label }}</span>
@@ -394,57 +604,32 @@ function updateChild(index: number, updated: SettingItem) {
           :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
         />
       </div>
-
-      <div class="flex flex-col gap-1.5">
-        <BlocksSettingField
-          v-for="(child, index) in model.children" :key="child.key" :model-value="child"
-          :block-id="blockId" :model-name="modelName" :mode="mode" :settings="settings" :max-images="props.maxImages"
-          @update:model-value="updateChild(index, $event)"
-        />
-      </div>
     </template>
 
-    <!-- ============ ЛИСТОВЫЕ ============ -->
-    <template v-else>
-      <template v-if="model.type === 'string'">
-        <div class="flex min-w-0 items-center gap-1.5 pl-px">
-          <UIcon :name="typeIcon" class="size-3 shrink-0 text-muted" />
-          <span class="truncate text-[11.5px] font-semibold text-highlighted">{{ model.label }}</span>
-          <span class="rounded-full border border-default bg-default px-1.5 py-px font-mono text-[9.5px] text-muted">{{ model.key }}</span>
+    <!-- ============ CHILDREN ============ -->
+    <div v-if="mode === 'admin' && visibleChildren.length && isExpanded" class="mt-1 flex flex-col gap-1.5">
+      <BlocksSettingField
+        v-for="child in visibleChildren" :key="child.key" :model-value="child"
+        :block-id="blockId" :model-name="modelName" :mode="mode" :settings="settings" :max-images="props.maxImages"
+        :path="getChildPath(child.key)"
+        @update:model-value="updateChild(model.children!.indexOf(child), $event)"
+      />
+    </div>
 
-          <UButton
-            v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
-            class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
-            :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
-          />
-        </div>
-
-        <textarea
-          ref="textareaRef" v-model="stringModel" rows="1" spellcheck="false"
-          class="w-full min-h-8 max-h-[260px] resize-none overflow-y-auto rounded-md border border-default bg-default px-2.5 py-2 font-[inherit] text-[12.5px] leading-normal text-highlighted shadow-sm outline-none transition placeholder:text-muted hover:border-default focus:border-primary focus:ring-2 focus:ring-primary/20"
-          @input="autoResize" @focus="onStringFocus" @blur="onStringBlur"
-        />
-      </template>
-
-      <div v-else class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-2.5 rounded-md py-0.5 transition hover:bg-muted/40">
-        <span class="flex min-w-0 items-center gap-1.5 pl-0.5">
-          <UIcon :name="typeIcon" class="size-3.5 shrink-0 text-muted" />
-          <span class="truncate text-[12px] font-medium text-highlighted" :title="model.key">{{ model.label }}</span>
-
-          <UButton
-            v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
-            class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
-            :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
-          />
-        </span>
-
-        <div class="min-w-0">
-          <USelect v-if="model.type === 'select'" v-model="model.default" :items="model.allowed" size="xs" class="w-full min-w-0 [&_button]:py-0.5 [&_button]:text-[12.5px]" />
-          <ColorPicker v-else-if="model.type === 'color'" v-model="model.default" :items="model.allowed ?? []" :columns="6" class="min-w-0" />
-          <UInputNumber v-else-if="model.type === 'int'" v-model="model.default" size="xs" class="min-w-0" />
-          <USwitch v-else-if="model.type === 'bool'" v-model="model.default" size="xs" class="min-w-0" />
-        </div>
-      </div>
-    </template>
+    <!-- ============ PARAMS ============ -->
+    <div v-if="mode === 'admin' && model.type === 'layout' && visibleParams.length && isExpanded" class="mt-1 flex flex-col gap-1.5">
+      <div class="text-[10px] font-bold uppercase tracking-widest text-muted mb-0.5">Параметры</div>
+      <BlocksSettingField
+        v-for="(paramItem, index) in visibleParams"
+        :key="paramItem.key"
+        :model-value="paramItem"
+        :block-id="blockId"
+        :model-name="modelName"
+        :mode="mode"
+        :settings="settings"
+        :path="getChildPath(paramItem.key)"
+        @update:model-value="updateParam(index, $event)"
+      />
+    </div>
   </div>
 </template>

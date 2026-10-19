@@ -30,13 +30,8 @@ const publicSettings = computed<PublicSettingRef[]>(() =>
   collectPublicSettingsWithPaths(settings.value),
 )
 
-/**
- * Резолв пути в дереве настроек.
- * Работает как с массивом SettingNode, так и с плоским объектом.
- */
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
-
   if (Array.isArray(root)) {
     const [head, ...rest] = path.split('.')
     const found = root.find((it: any) => it?.key === head)
@@ -44,35 +39,29 @@ function resolvePath(root: any, path: string): any {
     if (rest.length === 0) return found.default
     return resolvePath(found.children ?? found.default ?? found, rest.join('.'))
   }
-
   return path
     .split('.')
     .reduce((acc, part) => (acc == null ? undefined : acc[part]), root)
 }
 
-/**
- * Резолвит maxImages для одного image-узла.
- * `count` может быть числом или строкой-путём в дереве settings.
- * Возвращает:
- *   • число ≥ 0 — лимит,
- *   • null — без лимита (не задан или < 0).
- */
 function computeMaxImages(item: SettingNode): number | null {
   const raw = (item as any)?.params?.count
   if (raw == null) return null
 
-  let n: number | null = null
-
   if (typeof raw === 'number') {
-    n = Number.isFinite(raw) ? raw : null
+    return Number.isFinite(raw) ? raw : null
   } else if (typeof raw === 'string') {
+    // Если это динамический резолвер (например, parent.count),
+    // возвращаем null — BlocksSettingField сам его вычислит.
+    if (raw === 'parent.count') {
+      return null
+    }
     const val = resolvePath(settings.value, raw)
     const num = Number(val)
-    n = Number.isFinite(num) ? num : null
+    return Number.isFinite(num) ? num : null
   }
 
-  if (n == null) return null
-  return n < 0 ? null : n
+  return null
 }
 
 function updateItem(index: number, updated: SettingNode) {

@@ -1,10 +1,7 @@
+<!-- components/Constructor/Components/text_image.vue -->
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useFormula } from '~/composables/useFormula'
-import type { InlineEditBinding } from '~/directives/inlineEdit'
-import ImageGallery from '../ImageGallery.vue'
-
-// ==================== Модель ====================
+import { computed, type Component } from 'vue'
+import type { SettingNode } from '~/utils/constructors'
 
 const value = defineModel<any[]>({ default: () => [] })
 
@@ -22,192 +19,112 @@ const props = withDefaults(defineProps<{
   modelName: 'blocks',
 })
 
-// ==================== Утилиты ====================
+// ==================== Динамический рендеринг компонентов ====================
 
-const { renderFormulas } = useFormula()
+const contentModules = import.meta.glob('../ContentTypes/*.vue', { eager: true })
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
-}
+function getContentComponent(name: string): Component | null {
+  if (!name) return null
+  const normalized = name.toLowerCase().trim()
 
-function clampInt(value: unknown, min: number, max: number, fallback: number = min): number {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(Math.max(Math.round(n), min), max)
-}
-
-function getDefault(blocks: any[] | undefined, path: string): any {
-  let list: any[] | undefined = blocks
-  let found: any | undefined
-  for (const key of path.split('.')) {
-    found = list?.find((b: any) => b.key === key)
-    if (!found) return undefined
-    list = found.children
-  }
-  return found?.default
-}
-
-function setDefault(blocks: any[] | undefined, path: string, newValue: unknown): boolean {
-  if (!blocks) return false
-  const keys = path.split('.')
-  const last = keys.pop()
-  if (!last) return false
-
-  let current: any[] | undefined = blocks
-  let parent: any | undefined
-  for (const key of keys) {
-    parent = current?.find((b: any) => b.key === key)
-    if (!parent) return false
-    current = parent.children
+  // 1. Пытаемся найти точное совпадение файла
+  const exactPath = `../ContentTypes/${normalized}.vue`
+  if (contentModules[exactPath]) {
+    return (contentModules[exactPath] as any).default
   }
 
-  const target = current?.find((b: any) => b.key === last)
-  if (!target) return false
-
-  target.default = newValue
-  return true
-}
-
-function toPx(v: unknown): string | undefined {
-  if (v === null || v === undefined || v === '') return undefined
-  const n = Number(v)
-  if (Number.isNaN(n)) return undefined
-  return `${n * 4}px`
-}
-
-function toPxBorder(v: unknown): string | undefined {
-  if (v === null || v === undefined || v === '') return undefined
-  const n = Number(v)
-  if (Number.isNaN(n)) return undefined
-  return `${n}px`
-}
-
-function toPxRadius(v: unknown): string | undefined {
-  if (v === null || v === undefined || v === '') return undefined
-  const n = Number(v)
-  if (Number.isNaN(n)) return undefined
-  return `${n * 4}px`
-}
-
-function paddingStyle(settings: Record<string, any>): Record<string, string> {
-  const s: Record<string, string> = {}
-  const map = { 'padding-top': 'paddingTop', 'padding-right': 'paddingRight', 'padding-bottom': 'paddingBottom', 'padding-left': 'paddingLeft' } as const
-  for (const [jsonKey, cssKey] of Object.entries(map)) {
-    const px = toPx(settings[jsonKey])
-    if (px) s[cssKey] = px
+  // 2. Если точного нет, ищем по префиксу (например, 'text' найдет 'text3.vue')
+  for (const key of Object.keys(contentModules)) {
+    const basename = key.split('/').pop()?.replace('.vue', '')
+    if (basename && basename.startsWith(normalized)) {
+      return (contentModules[key] as any).default
+    }
   }
-  return s
-}
 
-function marginStyle(settings: Record<string, any>): Record<string, string> {
-  const s: Record<string, string> = {}
-  const map = { 'margin-top': 'marginTop', 'margin-right': 'marginRight', 'margin-bottom': 'marginBottom', 'margin-left': 'marginLeft' } as const
-  for (const [jsonKey, cssKey] of Object.entries(map)) {
-    const px = toPx(settings[jsonKey])
-    if (px) s[cssKey] = px
-  }
-  return s
-}
-
-function resolveBgVar(settingPath: string): string | null {
-  const v = getDefault(value.value, settingPath)
-  const name = typeof v === 'string' ? v.replace(/^bg-/, '') : ''
-  return name ? `--bg-${name}` : null
-}
-
-function resolveBorderColor(colorRaw: string, bgVar: string | null): string | undefined {
-  if (typeof colorRaw !== 'string' || !colorRaw) return undefined
-  const name = colorRaw.replace(/^border-/, '')
-  if (name === 'inherit') return bgVar ? `var(${bgVar})` : 'transparent'
-  if (!name) return undefined
-  return `var(--border-${name})`
-}
-
-function borderStyle(settings: Record<string, any>, bgVar: string | null = null): Record<string, string> {
-  const s: Record<string, string> = {}
-  const color = resolveBorderColor(settings['color'], bgVar)
-  if (color) {
-    s.borderColor = color
-    s.borderStyle = 'solid'
-  }
-  const map = { top: 'borderTopWidth', right: 'borderRightWidth', bottom: 'borderBottomWidth', left: 'borderLeftWidth' } as const
-  for (const [jsonKey, cssKey] of Object.entries(map)) {
-    const px = toPxBorder(settings[jsonKey])
-    if (px) s[cssKey] = px
-  }
-  return s
-}
-
-function radiusStyle(settings: Record<string, any> | undefined): Record<string, string> {
-  if (!settings) return {}
-  const s: Record<string, string> = {}
-  const map = { 'top-left': 'borderTopLeftRadius', 'top-right': 'borderTopRightRadius', 'bottom-right': 'borderBottomRightRadius', 'bottom-left': 'borderBottomLeftRadius' } as const
-  for (const [jsonKey, cssKey] of Object.entries(map)) {
-    const px = toPxRadius(settings[jsonKey])
-    if (px) s[cssKey] = px
-  }
-  return s
-}
-
-function collectBorderStyle(borderPath: string, radiusPath: string, bgVar: string | null = null): Record<string, string> {
-  const border: Record<string, any> = {
-    color: getDefault(value.value, `${borderPath}.color`),
-    top: getDefault(value.value, `${borderPath}.top`),
-    right: getDefault(value.value, `${borderPath}.right`),
-    bottom: getDefault(value.value, `${borderPath}.bottom`),
-    left: getDefault(value.value, `${borderPath}.left`),
-  }
-  const radius: Record<string, any> = {
-    'top-left': getDefault(value.value, `${radiusPath}.top-left`),
-    'top-right': getDefault(value.value, `${radiusPath}.top-right`),
-    'bottom-right': getDefault(value.value, `${radiusPath}.bottom-right`),
-    'bottom-left': getDefault(value.value, `${radiusPath}.bottom-left`),
-  }
-  return { ...borderStyle(border, bgVar), ...radiusStyle(radius) }
-}
-
-function collectPaddingStyle(basePath: string): Record<string, string> {
-  return paddingStyle({
-    'padding-top': getDefault(value.value, `${basePath}.top`),
-    'padding-right': getDefault(value.value, `${basePath}.right`),
-    'padding-bottom': getDefault(value.value, `${basePath}.bottom`),
-    'padding-left': getDefault(value.value, `${basePath}.left`),
-  })
-}
-
-function collectMarginStyle(basePath: string): Record<string, string> {
-  return marginStyle({
-    'margin-top': getDefault(value.value, `${basePath}.top`),
-    'margin-right': getDefault(value.value, `${basePath}.right`),
-    'margin-bottom': getDefault(value.value, `${basePath}.bottom`),
-    'margin-left': getDefault(value.value, `${basePath}.left`),
-  })
+  return null
 }
 
 // ==================== Layout ====================
 
-const layout = computed(() => getDefault(value.value, 'layout'))
-const needDisplayImage = computed(() => layout.value !== 'text')
-const needDisplayText = computed(() => layout.value !== 'image')
+const layoutNode = computed(() => {
+  const arr = value.value as any[] | undefined
+  if (!Array.isArray(arr)) return null
+  return arr.find((b: any) => b.type === 'layout' || b.key === 'type') ?? null
+})
 
-const layoutClass = computed(
-  () => ({ 'text': ' ', 'image': ' ', 'text-right': 'flex-row', 'text-left': 'flex-row-reverse', 'text-top': 'flex-col-reverse', 'text-bottom': 'flex-col' }[layout.value ?? 'text-left'])
-)
+const layoutChildren = computed(() => layoutNode.value?.children || [])
+
+function getLayoutProp(key: string): any {
+  return layoutChildren.value.find((c: any) => c.key === key)?.default
+}
+
+const layoutType = computed(() => layoutNode.value?.default ?? 'single')
+
+const contentBlocksNode = computed(() => {
+  return layoutChildren.value.find((c: any) => c.key === 'content-blocks')
+})
+
+const visibleBlocks = computed(() => {
+  if (!contentBlocksNode.value?.children || !Array.isArray(contentBlocksNode.value.children)) return []
+  if (layoutType.value === 'single') {
+    return contentBlocksNode.value.children.slice(0, 1)
+  }
+  return contentBlocksNode.value.children.slice(0, 2)
+})
+
+const firstBlockPercent = computed(() => {
+  const cols = Number(getLayoutProp('first-block-cols') ?? 12)
+  return Math.min(Math.max(cols / 24, 0), 1)
+})
+
+const secondBlockPercent = computed(() => 1 - firstBlockPercent.value)
+
+const singlePosition = computed(() => {
+  const pos = getLayoutProp('first-block-position')
+  if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') return pos
+  return 'center'
+})
+
+const layoutClass = computed(() => {
+  if (layoutType.value === 'row') return 'flex flex-row items-start gap-4 w-full'
+  if (layoutType.value === 'col') return 'flex flex-col items-start gap-4 w-full'
+  return 'flex flex-row w-full'
+})
+
+const layoutContainerStyle = computed(() => {
+  if (layoutType.value === 'single') {
+    return { justifyContent: singlePosition.value }
+  }
+  return {}
+})
+
+function getBlockStyle(blockIndex: number) {
+  if (layoutType.value === 'single') {
+    return { width: `${firstBlockPercent.value * 100}%` }
+  }
+  if (layoutType.value === 'row') {
+    const percent = blockIndex === 0 ? firstBlockPercent.value : secondBlockPercent.value
+    return { flex: `0 0 calc(${percent * 100}% - 0.5rem)` }
+  }
+  return { width: '100%' }
+}
+
+// ==================== Стили корневого контейнера ====================
 
 const layoutBcgStyle = computed(() => {
   const style: Record<string, string> = {}
-  const v = getDefault(value.value, 'background-color')
-  const name = typeof v === 'string' ? v.replace(/^bg-/, '') : ''
+  const bgColor = getLayoutProp('background-color')
+  const name = typeof bgColor === 'string' ? bgColor.replace(/^bg-/, '') : ''
   if (name) style.backgroundColor = `var(--bg-${name})`
 
-  const bgImageNode = (value.value as any[] | undefined)?.find((b: any) => b.key === 'background-image')
+  const bgImageNode = layoutChildren.value.find((c: any) => c.key === 'background-image')
   const bgImage = Array.isArray(bgImageNode?.default) ? bgImageNode.default[0] : null
   const bgUrl = bgImage?.url ?? null
 
   if (bgUrl) {
     style.backgroundImage = `url(${bgUrl})`
-    const bgSize = getDefault(value.value, 'background-size')
-    const bgPosition = getDefault(value.value, 'background-position')
+    const bgSize = getLayoutProp('background-size')
+    const bgPosition = getLayoutProp('background-position')
     if (bgSize) style.backgroundSize = bgSize
     if (bgPosition) style.backgroundPosition = bgPosition
     style.backgroundRepeat = 'no-repeat'
@@ -215,109 +132,138 @@ const layoutBcgStyle = computed(() => {
   return style
 })
 
-const layoutBorderStyle = computed(() => collectBorderStyle('border', 'border.radius', resolveBgVar('background-color')))
-const layoutMarginStyle = computed(() => collectMarginStyle('margin'))
-const layoutPaddingStyle = computed(() => collectPaddingStyle('padding'))
+const layoutBorderStyle = computed(() => {
+  const border = layoutChildren.value.find((c: any) => c.key === 'border')?.children
+  if (!border) return {}
 
-// ==================== Пропорции ====================
+  const s: Record<string, string> = {}
+  const colorNode = border.find((b: any) => b.key === 'color')
+  const bgColor = getLayoutProp('background-color')
+  const bgVarName = typeof bgColor === 'string' ? bgColor.replace(/^bg-/, '') : ''
+  const bgVar = bgVarName ? `--bg-${bgVarName}` : null
 
-const cols = 24
-const textPercent = computed(() => Number(getDefault(value.value, 'text.cols')) / cols)
-const imagesPercent = computed(() => clamp(1 - textPercent.value, 0, 1))
+  if (colorNode?.default) {
+    const name = colorNode.default.replace(/^border-/, '')
+    if (name === 'inherit') {
+      s.borderColor = bgVar ? `var(${bgVar})` : 'transparent'
+    } else if (name) {
+      s.borderColor = `var(--border-${name})`
+    }
+    if (s.borderColor) s.borderStyle = 'solid'
+  }
 
-// ==================== Text ====================
+  const map = { left: 'borderLeftWidth', right: 'borderRightWidth', top: 'borderTopWidth', bottom: 'borderBottomWidth' } as const
+  for (const [side, cssKey] of Object.entries(map)) {
+    const px = border.find((b: any) => b.key === side)?.default
+    if (px) s[cssKey] = `${px}px`
+  }
 
-type TextFieldKey = 'title' | 'summary' | 'text'
-const textFieldKeys: TextFieldKey[] = ['title', 'summary', 'text']
-
-const previewTitle = computed(() => getDefault(value.value, 'text.title') ?? '')
-const previewSummary = computed(() => getDefault(value.value, 'text.summary') ?? '')
-const previewText = computed(() => getDefault(value.value, 'text.text') ?? '')
-
-const textBcgStyle = computed(() => {
-  const v = getDefault(value.value, 'text.background-color')
-  const name = typeof v === 'string' ? v.replace(/^bg-/, '') : ''
-  return name ? { backgroundColor: `var(--bg-${name})` } : {}
+  const radius = border.find((b: any) => b.key === 'radius')?.children
+  if (radius) {
+    const rMap = { 'top-left': 'borderTopLeftRadius', 'top-right': 'borderTopRightRadius', 'bottom-right': 'borderBottomRightRadius', 'bottom-left': 'borderBottomLeftRadius' } as const
+    for (const [corner, cssKey] of Object.entries(rMap)) {
+      const px = radius.find((b: any) => b.key === corner)?.default
+      if (px) s[cssKey] = `${px * 4}px`
+    }
+  }
+  return s
 })
 
-const textPaddingStyle = computed(() => collectPaddingStyle('text.padding'))
-const textMarginStyle = computed(() => collectMarginStyle('text.margin'))
-const textBorderStyle = computed(() => collectBorderStyle('text.border', 'text.border.radius', resolveBgVar('text.background-color')))
-
-const textBlockStyle = computed(() => ({
-  flex: `0 0 ${textPercent.value * 100}%`,
-  ...textPaddingStyle.value,
-  ...textMarginStyle.value,
-}))
-
-const textOnlyAlignStyle = computed(() => {
-  if (needDisplayImage.value) return {}
-  const pos = getDefault(value.value, 'text.text-block-position')
-  if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') return { justifyContent: pos }
-  return { justifyContent: 'center' }
+const layoutMarginStyle = computed(() => {
+  const margin = layoutChildren.value.find((c: any) => c.key === 'margin')?.children
+  if (!margin) return {}
+  const s: Record<string, string> = {}
+  const map = { left: 'marginLeft', right: 'marginRight', top: 'marginTop', bottom: 'marginBottom' } as const
+  for (const [side, cssKey] of Object.entries(map)) {
+    const px = margin.find((b: any) => b.key === side)?.default
+    if (px) s[cssKey] = `${px * 4}px`
+  }
+  return s
 })
 
-const imagesOnlyAlignStyle = computed(() => {
-  if (needDisplayText.value) return {}
-  const pos = getDefault(value.value, 'images.images-block-position')
-  if (pos === 'flex-start' || pos === 'center' || pos === 'flex-end') return { justifyContent: pos }
-  return { justifyContent: 'center' }
+const layoutPaddingStyle = computed(() => {
+  const padding = layoutChildren.value.find((c: any) => c.key === 'padding')?.children
+  if (!padding) return {}
+  const s: Record<string, string> = {}
+  const map = { left: 'paddingLeft', right: 'paddingRight', top: 'paddingTop', bottom: 'paddingBottom' } as const
+  for (const [side, cssKey] of Object.entries(map)) {
+    const px = padding.find((b: any) => b.key === side)?.default
+    if (px) s[cssKey] = `${px * 4}px`
+  }
+  return s
 })
 
-function textFieldMeta(field: TextFieldKey) {
-  const settingsPath = `text.${field}-settings`
-  const containerRaw = getDefault(value.value, `${settingsPath}.container`)
-  const container = containerRaw || 'ProseP'
-  const sizeRaw = getDefault(value.value, `${settingsPath}.text-size`)
-  const sizeClass = sizeRaw ? ` ${sizeRaw} ` : ' '
-  const alignRaw = getDefault(value.value, `${settingsPath}.text-block-align`)
-  const alignClass = alignRaw ? `text-${alignRaw}` : ''
-  const colsValue = clampInt(getDefault(value.value, `${settingsPath}.text-cols`), 1, 4, 1)
-  return { container, sizeClass, alignClass, colsValue }
+// ==================== Работа с контентом блоков ====================
+
+function getActiveChild(block: any): SettingNode | null {
+  if (!block.children) return null
+  return block.children.find((c: any) => c.key === block.default || c.key.startsWith(block.default)) ?? null
 }
 
-const titleMeta = computed(() => textFieldMeta('title'))
-const summaryMeta = computed(() => textFieldMeta('summary'))
-const textMeta = computed(() => textFieldMeta('text'))
-
-const visibleTextFields = computed(() => {
-  const map: Record<TextFieldKey, boolean> = { title: !!previewTitle.value, summary: !!previewSummary.value, text: !!previewText.value }
-  return textFieldKeys.filter((k) => map[k]).map((k) => ({
-    key: k, meta: k === 'title' ? titleMeta.value : k === 'summary' ? summaryMeta.value : textMeta.value
-  }))
-})
-
-const inlineBindings = computed<Record<TextFieldKey, InlineEditBinding>>(() => ({
-  title: { get: () => previewTitle.value, set: (v: string) => commitField('title', v), renderFormulas },
-  summary: { get: () => previewSummary.value, set: (v: string) => commitField('summary', v), renderFormulas },
-  text: { get: () => previewText.value, set: (v: string) => commitField('text', v), renderFormulas },
-}))
-
-function commitText(path: string, v: string) {
-  const arr = value.value as any[] | undefined
-  if (!arr) return
-  const prev = getDefault(arr, path)
-  if (prev === v) return
-  setDefault(arr, path, v)
+function getGalleryNode(block: any): SettingNode | null {
+  const galleryWrapper = block.children?.find((c: any) => c.key === 'gallery')
+  return galleryWrapper?.children?.find((c: any) => c.type === 'image') ?? null
 }
 
-function commitField(field: TextFieldKey, v: string) {
-  commitText(`text.${field}`, v)
+function getChildPath(block: any, blockIndex: number) {
+  if (block.default === 'gallery') {
+    const galleryNode = getGalleryNode(block)
+    return `type.content-blocks.${block.key}.gallery.${galleryNode?.key}`
+  }
+  const activeChild = getActiveChild(block)
+  return `type.content-blocks.${block.key}.${activeChild?.key}`
 }
 
-// ==================== Galleries ====================
+function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
+  const arr = [...value.value]
+  const layoutIdx = arr.findIndex(b => b.type === 'layout' || b.key === 'type')
+  if (layoutIdx === -1) return
 
-function getGalleryByKey(key: string): any | null {
-  const arr = value.value as any[] | undefined
-  if (!Array.isArray(arr)) return null
-  const imagesNode = arr.find((b: any) => b.key === 'images')
-  if (!Array.isArray(imagesNode?.children)) return null
-  return imagesNode.children.find((c: any) => c.key === key && c.type === 'image') ?? null
+  const newLayout = { ...arr[layoutIdx] }
+  if (!newLayout.children) return
+
+  const cbIdx = newLayout.children.findIndex((c: any) => c.key === 'content-blocks')
+  if (cbIdx === -1) return
+
+  const newContentBlocks = { ...newLayout.children[cbIdx] }
+  if (!newContentBlocks.children) return
+
+  const newBlocks = [...newContentBlocks.children]
+  const block = { ...newBlocks[blockIndex] }
+
+  if (block.children) {
+    if (block.default === 'gallery') {
+      const wrapperIdx = block.children.findIndex((c: any) => c.key === 'gallery')
+      if (wrapperIdx !== -1) {
+        const newWrapper = { ...block.children[wrapperIdx] }
+        if (newWrapper.children) {
+          const imgIdx = newWrapper.children.findIndex((c: any) => c.key === updatedNode.key || c.key.startsWith(block.default))
+          if (imgIdx !== -1) {
+            newWrapper.children = [...newWrapper.children]
+            newWrapper.children[imgIdx] = updatedNode
+            block.children = [...block.children]
+            block.children[wrapperIdx] = newWrapper
+          }
+        }
+      }
+    } else {
+      const childIdx = block.children.findIndex((c: any) => c.key === updatedNode.key || c.key.startsWith(block.default))
+      if (childIdx !== -1) {
+        block.children = [...block.children]
+        block.children[childIdx] = updatedNode
+      }
+    }
+  }
+
+  newBlocks[blockIndex] = block
+  newContentBlocks.children = newBlocks
+
+  newLayout.children = [...newLayout.children]
+  newLayout.children[cbIdx] = newContentBlocks
+
+  arr[layoutIdx] = newLayout
+  value.value = arr
 }
-
-const gallery1 = computed(() => getGalleryByKey('gallery1'))
-const gallery2 = computed(() => getGalleryByKey('gallery2'))
-// const gallery3 = computed(() => getGalleryByKey('gallery3'))
 </script>
 
 <template>
@@ -330,52 +276,28 @@ const gallery2 = computed(() => getGalleryByKey('gallery2'))
       <div class="text-image-root">
         <div :style="[layoutMarginStyle]">
           <div
-            :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, textOnlyAlignStyle, imagesOnlyAlignStyle]"
-            :class="['flex', 'items-start', layoutClass]"
+            :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, layoutContainerStyle]"
+            :class="layoutClass"
           >
-            <!-- ==================== IMAGE AREA ==================== -->
-            <div
-              v-if="needDisplayImage"
-              :style="{ flex: `0 0 ${imagesPercent * 100}%` }"
-              class="flex flex-col gap-4"
-            >
-              <!-- Галерея 1 -->
-              <ImageGallery
-                v-if="gallery1"
-                :gallery="gallery1"
-                :settings="value"
-                style-path="images.gallery1"
-                fallback-style-path="images"
-                :allow-drag-and-drop="allowDragAndDrop"
-                :show-to-delete-images="showToDeleteImages"
-              />
-
-              <!-- Галерея 2 -->
-              <ImageGallery
-                v-if="gallery2"
-                :gallery="gallery2"
-                :settings="value"
-                style-path="images.gallery2"
-                fallback-style-path="images"
-                :allow-drag-and-drop="allowDragAndDrop"
-                :show-to-delete-images="showToDeleteImages"
-              />
-            </div>
-
-            <!-- ==================== TEXT AREA ==================== -->
-            <div
-              v-if="needDisplayText"
-              :style="[textBlockStyle, textBcgStyle, textBorderStyle]"
-            >
-              <component
-                v-for="field in visibleTextFields"
-                :key="field.key"
-                :is="field.meta.container"
-                :style="{ columnCount: field.meta.colsValue }"
-                :class="[field.meta.sizeClass, field.meta.alignClass, 'block-title-break']"
-                v-inline-edit="inlineBindings[field.key]"
-              ></component>
-            </div>
+            <template v-for="(block, index) in visibleBlocks" :key="block.key">
+              <!-- ДИНАМИЧЕСКИЙ РЕНДЕРИНГ КОМПОНЕНТА -->
+              <div
+                v-if="getContentComponent(block.default) && getActiveChild(block)"
+                :style="getBlockStyle(index)"
+                class="min-w-0"
+              >
+                <component
+                  :is="getContentComponent(block.default)!"
+                  :node="getActiveChild(block)!"
+                  :gallery="getGalleryNode(block)!"
+                  :settings="value"
+                  :style-path="getChildPath(block, index)"
+                  :allow-drag-and-drop="allowDragAndDrop"
+                  :show-to-delete-images="showToDeleteImages"
+                  @update="onUpdateChild(index, $event)"
+                />
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -384,25 +306,6 @@ const gallery2 = computed(() => getGalleryByKey('gallery2'))
 </template>
 
 <style scoped>
-.block-title-break,
-.block-title-break :deep(*) {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  hyphens: auto;
-  min-width: 0;
-}
-
-.block-title-break.text-justify-all,
-.block-title-break.text-justify-all :deep(*) {
-  text-align: justify;
-  text-align-last: justify;
-}
-
-.block-title-break.text-match-parent,
-.block-title-break.text-match-parent :deep(*) {
-  text-align: match-parent;
-}
-
 .text-image-root {
   position: relative;
 }

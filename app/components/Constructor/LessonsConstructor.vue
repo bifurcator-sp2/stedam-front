@@ -6,8 +6,7 @@ import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 import Lesson from '~/components/Constructor/Lesson.vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
-import FileContainer from '~/components/FileContainer.vue'
-import { mergeFlat, unmergeFlat, isPlainObject } from '~/utils/constructors'
+import { mergeFlat, isPlainObject } from '~/utils/constructors'
 import { useAutosave } from '~/composables/useAutosave'
 import type {
   LessonModel,
@@ -37,6 +36,26 @@ const {
 
 const structItems = computed<BlockStructItem[]>(() => struct.value?.data ?? [])
 
+// ==================== Состояние raw ====================
+//
+// NEW: рядом с lesson.blocks[i] (где settings — view для рендера/панели)
+// храним raw-объект от сервера. Именно он уходит в save payload.
+//
+// rawStates[localId] = {
+//   raw:             глубокий клон settings из ответа сервера,
+//   lastSyncedView:  снимок view на момент последней синхронизации raw.
+// }
+//
+// При save делаем patchRawFromViewDiff(raw, lastSyncedView, currentView),
+// затем lastSyncedView = clone(currentView). Только изменённые листья.
+
+interface RawState {
+  raw: Record<string, any>
+  lastSyncedView: any[]
+}
+
+const rawStates = ref<Record<string, RawState>>({})
+
 // ==================== Модель урока ====================
 
 const lesson = ref<LessonModel>(createEmptyLesson())
@@ -49,18 +68,6 @@ const activeBlock = computed<LessonBlockModel | null>(() => {
   if (!activeBlockLocalId.value) return null
   return lesson.value.blocks.find((b) => b.localId === activeBlockLocalId.value) ?? null
 })
-
-// ==================== FileContainer-ы ====================
-
-const fileContainers = ref<Record<string, InstanceType<typeof FileContainer> | null>>({})
-
-function onRegisterFiles(blockLocalId: string, inst: any) {
-  if (inst) {
-    fileContainers.value[blockLocalId] = inst
-  } else {
-    delete fileContainers.value[blockLocalId]
-  }
-}
 
 // ==================== Заголовок ====================
 
@@ -87,11 +94,95 @@ function iconOf(type: Pick<BlockStructItem, 'default_settings'>): string {
   return (iconField?.default as string | undefined) ?? 'i-lucide-square'
 }
 
-function iconOfBlock(block: { settings?: Record<string, any> | null }): string {
-  if (isPlainObject(block.settings) && block.settings.icon) {
-    return block.settings.icon
+function iconOfBlock(block: { settings?: any }): string {
+  // settings — view SettingNode[], ищем icon
+  if (Array.isArray(block.settings)) {
+    const icon = block.settings.find((n: any) => n?.key === 'icon')?.default
+    if (typeof icon === 'string' && icon) return icon
   }
   return 'i-lucide-file-text'
+}
+
+// ==================== Утилиты diff / patch ====================
+// NEW: точечный патч raw по diff двух view-деревьев.
+
+import { toRaw } from 'vue'
+
+function unwrapProxy(v: any): any {
+  if (v === null || typeof v !== 'object') return v
+  v = toRaw(v)
+  if (Array.isArray(v)) {
+    return v.map(unwrapProxy)
+  }
+  const out: any = {}
+  for (const k in v) {
+    if (Object.prototype.hasOwnProperty.call(v, k)) {
+      out[k] = unwrapProxy(v[k])
+    }
+  }
+  return out
+}
+
+function deepClone<T>(v: T): T {
+  return structuredClone(unwrapProxy(v)) as T
+}
+
+function deepEqual(a: any, b: any): boolean {
+  if (a === b) return true
+  if (a == null || b == null) return a === b
+  if (typeof a !== typeof b) return false
+  if (Array.isArray(a)) {
+    return Array.isArray(b)
+      && a.length === b.length
+      && a.every((x, i) => deepEqual(x, b[i]))
+  }
+  if (typeof a === 'object') {
+    const ka = Object.keys(a)
+    const kb = Object.keys(b)
+    return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]))
+  }
+  return false
+}
+
+function setValueByPath(obj: Record<string, any>, path: string[], value: any) {
+  let cur: any = obj
+  for (let i = 0; i < path.length - 1; i++) {
+    const k = path[i]
+    if (cur[k] == null || typeof cur[k] !== 'object') cur[k] = {}
+    cur = cur[k]
+  }
+  cur[path[path.length - 1]] = value
+}
+
+function patchRawFromViewDiff(
+  raw: Record<string, any>,
+  prevView: any[],
+  nextView: any[],
+  basePath: string[],
+) {
+  const prevByKey = new Map<string, any>(prevView.map((n: any) => [n.key, n]))
+
+  for (const nextNode of nextView) {
+    const prevNode = prevByKey.get(nextNode.key)
+    const nodePath = [...basePath, nextNode.key]
+    const hasChildren = Array.isArray(nextNode.children) && nextNode.children.length > 0
+
+    if (hasChildren) {
+      if (!prevNode || !deepEqual(prevNode.default, nextNode.default)) {
+        setValueByPath(raw, [...nodePath, 'default'], nextNode.default)
+      }
+      patchRawFromViewDiff(
+        raw,
+        prevNode?.children ?? [],
+        nextNode.children!,
+        nodePath,
+      )
+    } else {
+      if (!prevNode || !deepEqual(prevNode.default, nextNode.default)) {
+        setValueByPath(raw, nodePath, nextNode.default)
+      }
+    }
+  }
 }
 
 // ==================== Тултип ====================
@@ -185,6 +276,7 @@ function onBlockDragEnd() {
 const loading = ref(false)
 const creating = ref(false)
 const loadError = ref<string | null>(null)
+const isProgrammatic = ref(false)
 
 async function loadLesson(id: number) {
   loading.value = true
@@ -194,28 +286,40 @@ async function loadLesson(id: number) {
     const res = await api.get<{ data: LessonResponse } | LessonResponse>(`/lessons/${id}`)
     const data = (res as any).data ?? res
 
+    // NEW: сбрасываем raw-состояния
+    const nextRawStates: Record<string, RawState> = {}
+
     const blocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
       const type = structItems.value.find((t) => t.code === b.block_type_code)
-      const sourceBlock = type?.blocks.find((sb) => sb.id === b.block_id)
 
-      const fullSettings = mergeFlat(
+      // view строим ТОЛЬКО из серверного settings + схема.
+      // sourceBlock.settings (прототип) сюда не подмешиваем — сервер уже
+      // финализировал settings (syncFileSetsFromSettings + cloneFileSetsFromModel).
+      const view = mergeFlat(
         type?.default_settings ?? [],
-        sourceBlock?.settings ?? undefined,
         b.settings ?? undefined,
+        undefined,
       )
 
+      const localId = crypto.randomUUID()
+      nextRawStates[localId] = {
+        raw: deepClone(b.settings ?? {}),
+        lastSyncedView: deepClone(view),
+      }
+
       return {
-        localId: crypto.randomUUID(),
+        localId,
         id: b.id,
         blockId: b.block_id ?? null,
         blockTypeCode: b.block_type_code ?? '',
-        settings: fullSettings,
-        images: b.images ?? [],
-        files: b.files ?? [],
+        settings: view,
+        images: [],
+        files: [],
       }
     })
 
     isProgrammatic.value = true
+    rawStates.value = nextRawStates
     lesson.value = {
       id: data.id,
       title: data.title ?? '',
@@ -252,13 +356,66 @@ async function createAndRedirect() {
   }
 }
 
+// ==================== NEW: syncMissingRaw ====================
+//
+// Когда Lesson.vue через DnD/duplicate добавляет блок, он сам POST'ит
+// на сервер и кладёт новый блок в lesson.blocks (только с view — raw
+// у нас нет). Этот watcher видит новый localId без rawStates и подтягивает
+// raw через GET /lessons/{id}.
+
+async function syncMissingRaw() {
+  if (!lesson.value.id) return
+
+  const missing = lesson.value.blocks.filter((b) => !rawStates.value[b.localId] && b.id > 0)
+  if (missing.length === 0) return
+
+  try {
+    const res = await api.get<{ data: LessonResponse } | LessonResponse>(
+      `/lessons/${lesson.value.id}`,
+    )
+    const data = (res as any).data ?? res
+
+    const byId = new Map<number, any>()
+    for (const sb of data.blocks ?? []) {
+      byId.set(sb.id, sb)
+    }
+
+    for (const block of missing) {
+      const sb = byId.get(block.id)
+      if (!sb) continue
+
+      rawStates.value[block.localId] = {
+        raw: deepClone(sb.settings ?? {}),
+        lastSyncedView: deepClone(block.settings ?? []),
+      }
+    }
+  } catch (e) {
+    console.error('[syncMissingRaw] failed', e)
+  }
+}
+
+watch(
+  () => lesson.value.blocks.map((b) => b.localId).join(','),
+  async () => {
+    if (!lesson.value.id) return
+
+    // Подчищаем rawStates для удалённых блоков
+    const currentIds = new Set(lesson.value.blocks.map((b) => b.localId))
+    for (const id of Object.keys(rawStates.value)) {
+      if (!currentIds.has(id)) delete rawStates.value[id]
+    }
+
+    // Подтягиваем raw для новых
+    await syncMissingRaw()
+  },
+)
+
 // ==================== Сохранение ====================
 
 const saving = ref(false)
-const isProgrammatic = ref(false)
 
 const busy = computed(() =>
-  loading.value || creating.value || saving.value
+  loading.value || creating.value || saving.value,
 )
 
 async function save() {
@@ -266,40 +423,41 @@ async function save() {
 
   saving.value = true
   try {
-    // Синхронизируем images/files из FileContainer-ов в модель
+    // 0. Гарантируем, что у каждого блока есть raw
+    await syncMissingRaw()
+
+    // 1. Патчим raw по diff: lastSyncedView → текущий view.
+    //    Ключи, которых нет в view (не описаны схемой), в raw не трогаются.
     for (const block of lesson.value.blocks) {
-      const container = fileContainers.value[block.localId]
-      if (!container) continue
+      const state = rawStates.value[block.localId]
+      if (!state) continue
 
-      const files = container.getFiles?.()
-      if (!files) continue
-
-      block.images = (files.images ?? []).filter((i: any) => !i.toDelete)
-      block.files  = (files.files  ?? []).filter((f: any) => !f.toDelete)
+      patchRawFromViewDiff(
+        state.raw,
+        state.lastSyncedView,
+        block.settings,
+        [],
+      )
+      state.lastSyncedView = deepClone(block.settings)
     }
 
+    // 2. Payload: settings = raw как есть. Никаких unmergeFlat.
+    //    images/files не отправляем — сервер их не читает.
     const payload: LessonSavePayload = {
-      title:       lesson.value.title,
+      title: lesson.value.title,
       description: lesson.value.description,
-      locale:      lesson.value.locale,
-      saved:       true,
-      published:   lesson.value.published,
-      blocks: lesson.value.blocks.map((block) => {
-        const type = structItems.value.find((t) => t.code === block.blockTypeCode)
-        const sourceBlock = type?.blocks.find((sb) => sb.id === block.blockId)
-
-        return {
-          id: block.id,
-          settings: unmergeFlat(
-            block.settings,
-            type?.default_settings ?? [],
-            sourceBlock?.settings ?? undefined,
-          ),
-          images: block.images,
-          files:  block.files,
-        }
-      }),
+      locale: lesson.value.locale,
+      saved: true,
+      published: lesson.value.published,
+      blocks: lesson.value.blocks.map((block) => ({
+        id: block.id,
+        settings: rawStates.value[block.localId]?.raw ?? {},
+        images: [],
+        files: [],
+      })),
     }
+
+    const prevActiveId = activeBlock.value?.id ?? null
 
     const res = await api.put<{ data: LessonResponse } | LessonResponse>(
       `/lessons/${lesson.value.id}`,
@@ -308,38 +466,47 @@ async function save() {
 
     const data = (res as any).data ?? res
 
-    const updatedBlocks = lesson.value.blocks.map((block, idx) => {
-      const savedBlock = data.blocks?.[idx]
-      if (!savedBlock) return block
+    // 3. Сервер — истина: пересобираем view и raw из ответа.
+    const nextRawStates: Record<string, RawState> = {}
 
-      const type = structItems.value.find((t) => t.code === savedBlock.block_type_code)
-      const sourceBlock = type?.blocks.find((sb) => sb.id === savedBlock.block_id)
+    const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
+      const type = structItems.value.find((t) => t.code === b.block_type_code)
 
-      // ВАЖНО: Разворачиваем обновленные настройки от сервера обратно в дерево
-      const fullSettings = mergeFlat(
+      const view = mergeFlat(
         type?.default_settings ?? [],
-        sourceBlock?.settings ?? undefined,
-        savedBlock.settings ?? undefined,
+        b.settings ?? undefined,
+        undefined,
       )
 
+      const localId = crypto.randomUUID()
+      nextRawStates[localId] = {
+        raw: deepClone(b.settings ?? {}),
+        lastSyncedView: deepClone(view),
+      }
+
       return {
-        ...block,
-        id: savedBlock.id,
-        blockId: savedBlock.block_id,
-        blockTypeCode: savedBlock.block_type_code,
-        settings: fullSettings, // <-- Обновляем настройки ответом сервера
-        images: savedBlock.images ?? block.images, // (на всякий случай)
-        files:  savedBlock.files  ?? block.files,
+        localId,
+        id: b.id,
+        blockId: b.block_id ?? null,
+        blockTypeCode: b.block_type_code ?? '',
+        settings: view,
+        images: [],
+        files: [],
       }
     })
 
     isProgrammatic.value = true
+    rawStates.value = nextRawStates
     lesson.value = {
       ...lesson.value,
-      saved:     data.saved ?? true,
+      saved: data.saved ?? true,
       published: data.published ?? lesson.value.published,
-      blocks:    updatedBlocks,
+      blocks: updatedBlocks,
     }
+
+    // 4. Восстанавливаем активный блок по серверному id (localId сменился)
+    activeBlockLocalId.value =
+      updatedBlocks.find((b) => b.id === prevActiveId)?.localId ?? null
   } catch (e) {
     console.error('[save] failed', e)
   } finally {
@@ -360,11 +527,9 @@ const { remaining: autosaveRemaining, cancel: cancelAutosave } = useAutosave({
   save,
   watchSource: () => lesson.value,
   isProgrammatic: () => isProgrammatic.value,
-  // Селектор лайтбокса кропа из FileContainer
   extraPopupSelectors: ['.crop-modal-backdrop'],
 })
 
-// Пока идёт сохранение — отменяем запланированное автосохранение
 watch(saving, (val) => {
   if (val) cancelAutosave()
 })
@@ -399,7 +564,6 @@ watch(
     if (items.length === 0) return
 
     const id = route.query.id
-
     if (!id || typeof id !== 'string') {
       await createAndRedirect()
       return
@@ -427,6 +591,8 @@ const activeBlockIdModel = computed({
   },
 })
 
+// Панель работает с view (SettingNode[]). Правки панели пишутся в view,
+// а raw патчится при save через diff.
 const activeBlockSettingsModel = computed({
   get: () => activeBlock.value?.settings ?? [],
   set: (v) => {
