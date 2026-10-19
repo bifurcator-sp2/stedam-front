@@ -93,7 +93,7 @@ function onActivate(e: MouseEvent) {
 
 <template>
   <div
-    class="block-wrapper relative rounded-lg border-2 border-transparent p-1.5 transition-[border-color,background,box-shadow] duration-150 hover:border-default"
+    class="block-wrapper relative rounded-lg border-2 border-transparent transition-[border-color,background,box-shadow] duration-150 hover:border-default"
     :class="{
       'border-primary shadow-[0_0_0_3px_var(--ui-primary-muted,rgba(59,130,246,0.12))]': props.active,
     }"

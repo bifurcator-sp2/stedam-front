@@ -6,6 +6,7 @@ import { VueDraggable } from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
 import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
 import { mergeFlat } from '~/utils/constructors'
+import { useContentStats } from '~/composables/useContentStats'
 import type {
   LessonModel,
   LessonBlockModel,
@@ -236,102 +237,17 @@ function updateDescription(v: string) {
   lesson.value = { ...lesson.value, description: v }
 }
 
-// ==================== Статистика ====================
+// ==================== Статистика (через composable) ====================
 
-function extractText(input: unknown): { plain: string; formulaChars: number } {
-  if (input == null) return { plain: '', formulaChars: 0 }
-  let text: string
+const contentRef = ref<HTMLElement | null>(null)
 
-  if (typeof input === 'object') {
-    const parts = Object.values(input as Record<string, unknown>)
-      .map((v) => {
-        const r = extractText(v)
-        return r.plain
-      })
-      .join(' ')
-    text = parts
-  } else if (typeof input === 'string') {
-    text = input
-  } else {
-    return { plain: '', formulaChars: 0 }
-  }
-
-  let formulaChars = 0
-  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
-    formulaChars += latex.replace(/\s+/g, '').length
-    return ' '
-  })
-  text = text.replace(/\$([^\$\n]+?)\$/g, (_, latex) => {
-    formulaChars += latex.replace(/\s+/g, '').length
-    return ' '
-  })
-
-  const plain = text
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&[a-z#0-9]+;/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-  return { plain, formulaChars }
-}
-
-function collectTextFromSettings(settings: any[] | undefined): string {
-  if (!Array.isArray(settings)) return ''
-  const parts: string[] = []
-
-  for (const node of settings) {
-    if (node?.children?.length) {
-      parts.push(collectTextFromSettings(node.children))
-      continue
-    }
-    if (node?.type === 'string' && typeof node.default === 'string') {
-      parts.push(node.default)
-    }
-  }
-
-  return parts.join(' ')
-}
-
-const stats = computed(() => {
-  let plainText = lesson.value.title + ' ' + lesson.value.description
-  let formulaChars = 0
-
-  for (const block of lesson.value.blocks) {
-    const textFromBlock = collectTextFromSettings(block.settings)
-    const { plain, formulaChars: fc } = extractText(textFromBlock)
-    plainText += ' ' + plain
-    formulaChars += fc
-  }
-
-  const { plain, formulaChars: fc2 } = extractText(plainText)
-  const totalPlain = plain
-  const totalFormula = formulaChars + fc2
-
-  const plainChars = totalPlain.replace(/\s+/g, '').length
-  const words = totalPlain.split(/\s+/).filter(Boolean).length
-
-  return { plainChars, formulaChars: totalFormula, words }
-})
-
-const totalChars = computed(
-  () => stats.value.plainChars + stats.value.formulaChars,
-)
-
-const CHARS_PER_MINUTE = 1000
-const FORMULA_WEIGHT = 2
-
-const readingTimeText = computed(() => {
-  const effectiveChars =
-    stats.value.plainChars + stats.value.formulaChars * FORMULA_WEIGHT
-  if (effectiveChars === 0) return '0 сек'
-
-  const minutes = effectiveChars / CHARS_PER_MINUTE
-  if (minutes < 1) return `${Math.round(minutes * 60)} сек`
-
-  const wholeMinutes = Math.floor(minutes)
-  const seconds = Math.round((minutes - wholeMinutes) * 60)
-  if (seconds === 0) return `${wholeMinutes} мин`
-  return `${wholeMinutes} мин ${seconds} сек`
+const { totalChars, readingTimeText } = useContentStats({
+  container: contentRef,
+  headText: () => `${lesson.value.title ?? ''} ${lesson.value.description ?? ''}`,
+  charsPerMinute: 1000,
+  formulaWeight: 2,
+  contentSelector: '[data-lesson-content-body]',
+  watchSource: () => lesson.value,
 })
 
 // ==================== Глобальная деактивация ====================
@@ -374,7 +290,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="flex flex-col gap-4 min-h-full">
+  <div ref="contentRef" class="flex flex-col gap-4 min-h-full">
     <!-- === Шапка урока === -->
     <div class="flex flex-col gap-2">
       <input
@@ -464,16 +380,18 @@ defineExpose({
             @move-up="moveBlockUp(block.localId)"
             @move-down="moveBlockDown(block.localId)"
           >
-            <BlockRenderer
-              :code="block.blockTypeCode"
-              :id="block.id"
-              mode="body"
-              model-name="lesson_blocks"
-              :initial-images="block.images ?? []"
-              :show-to-delete-images="true"
-              v-model:settings="block.settings"
-              @register-files="onRegisterFiles(block, $event)"
-            />
+            <div data-lesson-content-body>
+              <BlockRenderer
+                :code="block.blockTypeCode"
+                :id="block.id"
+                mode="body"
+                model-name="lesson_blocks"
+                :initial-images="block.images ?? []"
+                :show-to-delete-images="true"
+                v-model:settings="block.settings"
+                @register-files="onRegisterFiles(block, $event)"
+              />
+            </div>
           </LessonBlockWrapper>
 
           <!-- Drop-zone ПОСЛЕ блока -->

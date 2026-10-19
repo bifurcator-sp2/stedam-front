@@ -612,12 +612,14 @@ onBeforeUnmount(() => {
     <!-- ==================== LEFT ==================== -->
     <template #left>
       <LoadingOverlay :loading="busy">
-        <div class="struct-panel">
-          <div v-if="structPending" class="empty-state">Загрузка…</div>
-          <div v-else-if="structError" class="empty-state">
+        <div class="flex flex-col gap-1.5 p-2.5">
+          <div v-if="structPending" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
+            Загрузка…
+          </div>
+          <div v-else-if="structError" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
             Не удалось загрузить структуру
           </div>
-          <div v-else-if="structItems.length === 0" class="empty-state">
+          <div v-else-if="structItems.length === 0" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
             Пока ничего нет
           </div>
 
@@ -625,32 +627,41 @@ onBeforeUnmount(() => {
             <div
               v-for="type in structItems"
               :key="type.id"
-              class="struct-item"
-              :class="{ 'struct-item--open': openTypeId === type.id }"
+              class="rounded-lg border bg-(--ui-bg) transition-[border-color,box-shadow] hover:border-(--ui-primary)"
+              :class="openTypeId === type.id
+                ? 'border-(--ui-primary) shadow-[0_1px_3px_rgba(59,130,246,0.08)]'
+                : 'border-(--ui-border)'"
             >
               <button
                 type="button"
-                class="struct-head"
+                class="relative flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-(--ui-text) transition-colors hover:bg-(--ui-bg-muted)"
+                :class="openTypeId === type.id
+                  ? 'rounded-b-none border-b border-(--ui-border)'
+                  : ''"
                 @click="toggleType(type.id)"
                 @mouseenter="showTooltip($event, type.description)"
                 @mouseleave="hideTooltip"
               >
                 <span
-                  class="struct-chevron"
-                  :class="{ 'struct-chevron--open': openTypeId === type.id }"
+                  class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-(--ui-text-muted) transition-[transform,color] duration-200"
+                  :class="openTypeId === type.id ? 'rotate-90 text-(--ui-primary)' : ''"
                 >
-                  <UIcon name="i-lucide-chevron-right" class="w-4 h-4" />
+                  <UIcon name="i-lucide-chevron-right" class="h-4 w-4" />
                 </span>
 
-                <UIcon :name="iconOf(type)" class="struct-icon" />
+                <UIcon
+                  :name="iconOf(type)"
+                  class="h-4 w-4 shrink-0 text-(--ui-text-muted)"
+                  :class="openTypeId === type.id ? '!text-(--ui-primary)' : ''"
+                />
 
                 <span
-                  class="struct-name"
+                  class="relative min-w-0 flex-1 overflow-hidden font-medium whitespace-nowrap"
                   @mouseenter="onNameEnter(type.id, $event)"
                   @mouseleave="onNameLeave"
                 >
                   <span
-                    class="struct-name__inner"
+                    class="struct-name__inner inline-block whitespace-nowrap transition-transform duration-300 ease-out will-change-transform"
                     :style="{
                       transform: scrollingNameId === type.id
                         ? `translateX(-${nameShift}px)`
@@ -662,16 +673,29 @@ onBeforeUnmount(() => {
                 </span>
 
                 <span
-                  class="struct-count"
-                  :class="{ 'struct-count--empty': type.blocks_count === 0 }"
+                  class="inline-flex h-[18px] min-w-[22px] shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums"
+                  :class="type.blocks_count === 0
+                    ? 'text-(--ui-text-muted)'
+                    : 'text-(--ui-primary)'"
+                  :style="{
+                    background: type.blocks_count === 0
+                      ? 'var(--ui-bg-muted)'
+                      : 'color-mix(in srgb, var(--ui-primary) 10%, transparent)',
+                  }"
                 >
                   {{ type.blocks_count }}
                 </span>
               </button>
 
               <Transition name="struct-expand">
-                <div v-if="openTypeId === type.id" class="struct-body">
-                  <div v-if="type.blocks.length === 0" class="struct-empty">
+                <div
+                  v-if="openTypeId === type.id"
+                  class="flex flex-col gap-0.5 rounded-b-lg bg-(--ui-bg-elevated) p-1.5"
+                >
+                  <div
+                    v-if="type.blocks.length === 0"
+                    class="px-2 py-2.5 text-center text-xs text-(--ui-text-muted)"
+                  >
                     Блоков этого типа пока нет
                   </div>
 
@@ -679,7 +703,7 @@ onBeforeUnmount(() => {
                     <div
                       v-for="block in type.blocks"
                       :key="block.id"
-                      class="struct-block"
+                      class="group flex w-full cursor-grab items-center gap-2 rounded-[5px] bg-transparent px-2 py-1.5 text-left text-xs text-(--ui-text) transition-[background,color,box-shadow] select-none hover:bg-(--ui-bg) hover:text-(--ui-primary) hover:shadow-[0_1px_2px_rgba(15,23,42,0.05)] active:cursor-grabbing"
                       draggable="true"
                       @dragstart="onBlockDragStart($event, type, block)"
                       @dragend="onBlockDragEnd"
@@ -688,12 +712,14 @@ onBeforeUnmount(() => {
                     >
                       <UIcon
                         :name="iconOfBlock(block)"
-                        class="struct-block__icon"
+                        class="h-3.5 w-3.5 shrink-0 text-(--ui-text-muted) group-hover:text-(--ui-primary)"
                       />
-                      <span class="struct-block__title">
+                      <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                         {{ block.title || `Блок №${block.id}` }}
                       </span>
-                      <span class="struct-block__id">#{{ block.id }}</span>
+                      <span class="shrink-0 font-mono text-[10px] text-(--ui-text-muted)">
+                        #{{ block.id }}
+                      </span>
                     </div>
                   </template>
                 </div>
@@ -706,7 +732,7 @@ onBeforeUnmount(() => {
 
     <!-- ==================== MAIN HEADER ==================== -->
     <template #main-header>
-      <div class="main-header-inner">
+      <div class="flex min-w-0 items-center gap-2">
         <span>{{ centerTitle }}</span>
       </div>
     </template>
@@ -726,15 +752,15 @@ onBeforeUnmount(() => {
     <template #right-header>
       <span>Свойства</span>
 
-      <div class="right-actions">
+      <div class="flex min-w-0 items-center gap-2">
         <Transition name="autosave-fade">
           <span
             v-if="autosaveRemaining !== null"
-            class="autosave-chip"
+            class="inline-flex items-center gap-[5px] rounded-full border border-(--ui-border) bg-(--ui-bg-elevated) px-2 py-[3px] text-[11px] font-semibold tabular-nums text-(--ui-text-muted)"
             :title="`Автосохранение произойдет через ${autosaveRemaining} с`"
           >
-            <UIcon name="i-lucide-save" class="autosave-chip__icon" />
-            <span class="autosave-chip__text">
+            <UIcon name="i-lucide-save" class="h-3 w-3 text-(--ui-primary)" />
+            <span class="min-w-[10px] text-center">
               {{ autosaveRemaining }}
             </span>
           </span>
@@ -757,7 +783,7 @@ onBeforeUnmount(() => {
     <!-- ==================== RIGHT ==================== -->
     <template #right>
       <LoadingOverlay :loading="busy">
-        <div v-if="!activeBlock" class="empty-state">
+        <div v-if="!activeBlock" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
           Выберите блок в центре.
         </div>
 
@@ -777,62 +803,21 @@ onBeforeUnmount(() => {
     <Transition name="struct-tooltip-fade">
       <div
         v-if="tooltip.visible"
-        class="struct-tooltip-floating"
+        class="pointer-events-none fixed z-[9999] max-w-[260px] min-w-[80px] -translate-x-1/2 -translate-y-full rounded-md bg-gray-900/95 px-2.5 py-1.5 text-center text-[11px] leading-snug font-normal text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
         :style="{
           left: `${tooltip.x}px`,
           top: `${tooltip.y}px`,
         }"
       >
         {{ tooltip.text }}
-        <span class="struct-tooltip-floating__arrow" />
+        <span class="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-gray-900/95" />
       </div>
     </Transition>
   </Teleport>
 </template>
 
 <style scoped>
-/* ==================== Хедер центра ==================== */
-
-.main-header-inner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* ==================== Хедер правой панели ==================== */
-
-.right-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.autosave-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: var(--ui-bg-elevated, #f8fafc);
-  border: 1px solid var(--ui-border, #e5e7eb);
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--ui-text-muted, #64748b);
-}
-
-.autosave-chip__icon {
-  width: 12px;
-  height: 12px;
-  color: var(--ui-primary, #3b82f6);
-}
-
-.autosave-chip__text {
-  min-width: 10px;
-  text-align: center;
-}
+/* ==================== Transition-хуки Vue ==================== */
 
 .autosave-fade-enter-active,
 .autosave-fade-leave-active {
@@ -843,189 +828,6 @@ onBeforeUnmount(() => {
 .autosave-fade-leave-to {
   opacity: 0;
   transform: translateX(4px);
-}
-
-/* ==================== Аккордеон ==================== */
-
-.struct-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-}
-
-.struct-item {
-  border: 1px solid var(--ui-border, #e5e7eb);
-  border-radius: 8px;
-  background: var(--ui-bg, #ffffff);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.struct-item:hover {
-  border-color: var(--ui-primary, #3b82f6);
-}
-
-.struct-item--open {
-  border-color: var(--ui-primary, #3b82f6);
-  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.08);
-}
-
-.struct-head {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: none;
-  background: transparent;
-  text-align: left;
-  font-size: 13px;
-  color: var(--ui-text, #111827);
-  cursor: pointer;
-  border-radius: 8px;
-  transition: background 0.15s;
-}
-
-.struct-head:hover {
-  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.04));
-}
-
-.struct-item--open .struct-head {
-  border-bottom: 1px solid var(--ui-border, #e5e7eb);
-  border-radius: 8px 8px 0 0;
-}
-
-.struct-chevron {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  color: var(--ui-text-muted, #9ca3af);
-  transition: transform 0.2s ease, color 0.15s;
-}
-
-.struct-chevron--open {
-  transform: rotate(90deg);
-  color: var(--ui-primary, #3b82f6);
-}
-
-.struct-icon {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  color: var(--ui-text-muted, #6b7280);
-}
-
-.struct-item--open .struct-icon {
-  color: var(--ui-primary, #3b82f6);
-}
-
-.struct-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  position: relative;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.struct-name__inner {
-  display: inline-block;
-  white-space: nowrap;
-  transition: transform 0.4s ease;
-  will-change: transform;
-}
-
-.struct-count {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.1));
-  color: var(--ui-primary, #3b82f6);
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.struct-count--empty {
-  background: var(--ui-bg-muted, rgba(107, 114, 128, 0.1));
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.struct-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  background: var(--ui-bg-elevated, #f9fafb);
-  border-radius: 0 0 8px 8px;
-}
-
-.struct-empty {
-  padding: 10px 8px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.struct-block {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 5px;
-  background: transparent;
-  text-align: left;
-  font-size: 12px;
-  color: var(--ui-text, #111827);
-  cursor: grab;
-  user-select: none;
-  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-}
-
-.struct-block:hover {
-  background: var(--ui-bg, #ffffff);
-  color: var(--ui-primary, #3b82f6);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
-}
-
-.struct-block:active {
-  cursor: grabbing;
-}
-
-.struct-block__icon {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.struct-block:hover .struct-block__icon {
-  color: var(--ui-primary, #3b82f6);
-}
-
-.struct-block__title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.struct-block__id {
-  flex-shrink: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
-  color: var(--ui-text-muted, #9ca3af);
 }
 
 .struct-expand-enter-active,
@@ -1046,53 +848,14 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-/* ==================== Тултип ==================== */
-
-:global(.struct-tooltip-floating) {
-  position: fixed;
-  z-index: 9999;
-  transform: translate(-50%, -100%);
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: rgba(17, 24, 39, 0.95);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.4;
-  white-space: normal;
-  max-width: 260px;
-  min-width: 80px;
-  text-align: center;
-  pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-:global(.struct-tooltip-floating__arrow) {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: rgba(17, 24, 39, 0.95);
-}
-
-:global(.struct-tooltip-fade-enter-active),
-:global(.struct-tooltip-fade-leave-active) {
+.struct-tooltip-fade-enter-active,
+.struct-tooltip-fade-leave-active {
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
-:global(.struct-tooltip-fade-enter-from),
-:global(.struct-tooltip-fade-leave-to) {
+.struct-tooltip-fade-enter-from,
+.struct-tooltip-fade-leave-to {
   opacity: 0;
   transform: translate(-50%, calc(-100% + 4px));
-}
-
-/* ==================== Пустое состояние ==================== */
-
-.empty-state {
-  padding: 32px 16px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--ui-text-muted, #9ca3af);
 }
 </style>
