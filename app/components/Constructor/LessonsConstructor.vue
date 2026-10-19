@@ -313,8 +313,6 @@ async function loadLesson(id: number) {
         blockId: b.block_id ?? null,
         blockTypeCode: b.block_type_code ?? '',
         settings: view,
-        images: [],
-        files: [],
       }
     })
 
@@ -490,8 +488,6 @@ async function save() {
         blockId: b.block_id ?? null,
         blockTypeCode: b.block_type_code ?? '',
         settings: view,
-        images: [],
-        files: [],
       }
     })
 
@@ -582,14 +578,7 @@ watch(
 
 // ==================== Модели для right panel ====================
 
-const activeBlockIdModel = computed({
-  get: () => activeBlock.value?.id ?? null,
-  set: (v) => {
-    if (activeBlock.value) {
-      activeBlock.value.id = v ?? 0
-    }
-  },
-})
+const activeBlockIdModel = computed(() => activeBlock.value?.id ?? null)
 
 // Панель работает с view (SettingNode[]). Правки панели пишутся в view,
 // а raw патчится при save через diff.
@@ -729,7 +718,6 @@ onBeforeUnmount(() => {
           v-model="lesson"
           v-model:active-block-local-id="activeBlockLocalId"
           :struct-items="structItems"
-          @register-files="onRegisterFiles"
         />
       </LoadingOverlay>
     </template>
@@ -777,7 +765,7 @@ onBeforeUnmount(() => {
           v-else
           model-name="lesson_blocks"
           mode="public"
-          v-model:id="activeBlockIdModel"
+          :id="activeBlockIdModel"
           v-model:settings="activeBlockSettingsModel"
         />
       </LoadingOverlay>

@@ -175,6 +175,7 @@ function updatePublicItem(path: number[], updated: SettingNode) {
             :mode="mode"
             :settings="settings"
             :max-images="computeMaxImages(item)"
+            :path="item.key"
             @update:model-value="updateItem(index, $event)"
           />
         </div>
@@ -207,6 +208,7 @@ function updatePublicItem(path: number[], updated: SettingNode) {
             :mode="mode"
             :settings="settings"
             :max-images="computeMaxImages(ref.item)"
+            :path="ref.keyPath"
             @update:model-value="updatePublicItem(ref.path, $event)"
           />
         </div>

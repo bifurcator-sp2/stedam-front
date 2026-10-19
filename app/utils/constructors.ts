@@ -31,6 +31,7 @@ export function mergeFlat(
   return schema.map((node) => {
     const blockRaw = block[node.key]
     const lessonRaw = lesson[node.key]
+    const overrideRaw = lessonRaw !== undefined ? lessonRaw : blockRaw
 
     if (Array.isArray(node.children) && node.children.length > 0) {
       const result: any = { ...node }
@@ -40,21 +41,37 @@ export function mergeFlat(
         isPlainObject(lessonRaw) ? lessonRaw : undefined,
       )
 
-      const overrideRaw = lessonRaw !== undefined ? lessonRaw : blockRaw
       if (overrideRaw !== undefined) {
         if (!isPlainObject(overrideRaw)) {
           result.default = overrideRaw
-        } else if (overrideRaw.default !== undefined) {
-          result.default = overrideRaw.default
+        } else {
+          if (overrideRaw.default !== undefined) {
+            result.default = overrideRaw.default
+          }
+          if (overrideRaw.public !== undefined) {
+            result.public = overrideRaw.public
+          }
         }
       }
       return result
     }
 
-    const overrideRaw = lessonRaw !== undefined ? lessonRaw : blockRaw
+    let defaultVal = node.default
+    let publicVal = node.public
+
+    if (overrideRaw !== undefined) {
+      if (!isPlainObject(overrideRaw)) {
+        defaultVal = overrideRaw
+      } else {
+        if (overrideRaw.default !== undefined) defaultVal = overrideRaw.default
+        if (overrideRaw.public !== undefined) publicVal = overrideRaw.public
+      }
+    }
+
     return {
       ...node,
-      default: overrideRaw !== undefined ? overrideRaw : node.default,
+      default: defaultVal,
+      public: publicVal,
     }
   })
 }
@@ -99,13 +116,31 @@ export function unmergeFlat(
         hasChanges = true
       }
 
+      if (node.public !== typeNode.public) {
+        resultNode.public = node.public
+        hasChanges = true
+      }
+
       if (hasChanges) {
         result[node.key] = resultNode
       }
     } else {
-      const parentEffective = parentRaw !== undefined ? parentRaw : typeNode.default
-      if (node.default !== parentEffective) {
-        result[node.key] = node.default
+      const parentDefault = isPlainObject(parentRaw)
+        ? (parentRaw.default !== undefined ? parentRaw.default : typeNode.default)
+        : (parentRaw !== undefined ? parentRaw : typeNode.default)
+
+      const isDefaultChanged = node.default !== parentDefault
+      const isPublicChanged = node.public !== typeNode.public
+
+      if (isDefaultChanged || isPublicChanged) {
+        if (isDefaultChanged && !isPublicChanged) {
+          result[node.key] = node.default
+        } else {
+          result[node.key] = {
+            ...(isDefaultChanged ? { default: node.default } : {}),
+            ...(isPublicChanged ? { public: node.public } : {})
+          }
+        }
       }
     }
   }
@@ -118,11 +153,13 @@ export function unmergeFlat(
 export interface PublicSettingRef {
   item: SettingNode
   path: number[]
+  keyPath: string
 }
 
 export function collectPublicSettingsWithPaths(
   nodes: SettingNode[] | null | undefined,
   basePath: number[] = [],
+  baseKeyPath: string = '',
 ): PublicSettingRef[] {
   if (!Array.isArray(nodes)) return []
 
@@ -130,13 +167,14 @@ export function collectPublicSettingsWithPaths(
 
   nodes.forEach((node, index) => {
     const path = [...basePath, index]
+    const keyPath = baseKeyPath ? `${baseKeyPath}.${node.key}` : node.key
 
     if (node.public === true) {
-      result.push({ item: node, path })
+      result.push({ item: node, path, keyPath })
     }
 
     if (Array.isArray(node.children) && node.children.length > 0) {
-      result.push(...collectPublicSettingsWithPaths(node.children, path))
+      result.push(...collectPublicSettingsWithPaths(node.children, path, keyPath))
     }
   })
 

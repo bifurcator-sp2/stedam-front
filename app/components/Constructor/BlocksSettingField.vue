@@ -150,6 +150,10 @@ function updateDefault(val: any) {
   model.value = { ...model.value, default: val }
 }
 
+function togglePublic() {
+  model.value = { ...model.value, public: !model.value.public }
+}
+
 // ============================================================
 // string
 // ============================================================
@@ -417,6 +421,7 @@ function updateParam(index: number, updated: SettingItem) {
               v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
               class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
               :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
+              @click.stop="togglePublic"
             />
           </div>
 
@@ -466,6 +471,7 @@ function updateParam(index: number, updated: SettingItem) {
               v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
               class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
               :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
+              @click.stop="togglePublic"
             />
           </div>
         </div>
@@ -512,6 +518,7 @@ function updateParam(index: number, updated: SettingItem) {
           v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
           class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
           :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
+          @click.stop="togglePublic"
         />
       </div>
 
@@ -540,6 +547,7 @@ function updateParam(index: number, updated: SettingItem) {
             v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
             class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
             :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
+            @click.stop="togglePublic"
           />
         </span>
 
@@ -602,6 +610,7 @@ function updateParam(index: number, updated: SettingItem) {
           v-if="mode==='admin'" :icon="publicIcon" size="xs" color="neutral" variant="ghost" square
           class="size-5 shrink-0 p-0 opacity-60 transition hover:opacity-100"
           :class="model.public ? '!bg-primary/15 !text-primary opacity-100' : ''"
+          @click.stop="togglePublic"
         />
       </div>
     </template>

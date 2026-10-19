@@ -336,15 +336,6 @@ const readingTimeText = computed(() => {
 
 // ==================== Глобальная деактивация ====================
 
-/**
- * Клик где угодно — снимаем активацию, кроме случаев:
- *   • клик по блоку (.block-wrapper) — там своя обработка activate;
- *   • клик по правой панели свойств (.block-settings-panel);
- *   • клик по drop-зоне или hover-панели действий блока;
- *   • клик по модалке кропа FileContainer (.crop-modal-backdrop)
- *     — иначе при нажатии «Обрезать и загрузить» активный блок
- *     сбрасывается до того, как FileContainer отправит файл в settings.
- */
 function onGlobalPointerDown(e: PointerEvent) {
   const target = e.target as HTMLElement | null
   if (!target) return
@@ -446,14 +437,15 @@ defineExpose({
       chosen-class="block-chosen"
       drag-class="block-drag"
       class="flex flex-col gap-1 min-h-[100px]"
+      :filter="'[data-drop-zone]'"
     >
       <template #default>
-        <!-- Drop-zone ПЕРЕД первым -->
+        <!-- Drop-zone ПЕРЕД первым (увеличенная и без отрицательного отступа) -->
         <div
           data-drop-zone
-          class="relative h-2 -my-0.5 rounded transition-all pointer-events-auto"
+          class="relative h-6 -my-2 rounded transition-all pointer-events-auto"
           :class="dragOverIndex === 0
-            ? 'h-5 bg-[var(--ui-primary-muted,rgba(59,130,246,0.15))] border-2 border-dashed border-[var(--ui-primary,#3b82f6)]'
+            ? 'h-8 bg-[var(--ui-primary-muted,rgba(59,130,246,0.15))] border-2 border-dashed border-[var(--ui-primary,#3b82f6)]'
             : ''"
           @dragover="onDragOver(0, $event)"
           @dragleave="onDragLeave"
