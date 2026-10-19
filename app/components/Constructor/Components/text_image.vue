@@ -86,8 +86,8 @@ const singlePosition = computed(() => {
 })
 
 const layoutClass = computed(() => {
-  if (layoutType.value === 'row') return 'flex flex-row items-start gap-4 w-full'
-  if (layoutType.value === 'col') return 'flex flex-col items-start gap-4 w-full'
+  if (layoutType.value === 'row') return 'flex flex-row items-start w-full'
+  if (layoutType.value === 'col') return 'flex flex-col items-start w-full'
   return 'flex flex-row w-full'
 })
 
@@ -104,7 +104,8 @@ function getBlockStyle(blockIndex: number) {
   }
   if (layoutType.value === 'row') {
     const percent = blockIndex === 0 ? firstBlockPercent.value : secondBlockPercent.value
-    return { flex: `0 0 calc(${percent * 100}% - 0.5rem)` }
+    return { flex: `0 0 calc(${percent * 100}%)` }
+    //return { flex: `0 0 calc(${percent * 100}% - 0.5rem)` }
   }
   return { width: '100%' }
 }
