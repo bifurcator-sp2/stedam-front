@@ -4,15 +4,10 @@ import type { ImageItem } from '~/types/files'
 
 const props = withDefaults(defineProps<{
   item: ImageItem
-  /** Полный список картинок, по которым можно листать стрелками. */
   siblings?: ImageItem[]
-  /** Показывать ли бейдж «Черновик» для source === 'temp'. */
   showDraft?: boolean
-  /** Разрешить перетаскивание за иконку. */
   allowDragAndDrop?: boolean
-  /** Если true — помеченные toDelete показываются с оверлеем и кнопкой «Восстановить». */
   showToDelete?: boolean
-  /** Индекс перетаскиваемого элемента — общий для всего списка. */
   draggingIndex?: number | null
 }>(), {
   siblings: () => [],
@@ -25,35 +20,21 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'remove', item: ImageItem): void
   (e: 'restore', item: ImageItem): void
-  /** Начало перетаскивания: сообщаем индекс. */
   (e: 'drag-start', index: number): void
-  /** Конец перетаскивания (drop или отмена). */
   (e: 'drag-end'): void
-  /** Вставить перетаскиваемый элемент ПЕРЕД этим. */
   (e: 'drop-before', from: number, to: number): void
-  /** Вставить перетаскиваемый элемент ПОСЛЕ этого. */
   (e: 'drop-after', from: number, to: number): void
 }>()
 
 // ============================================================
-// Помечен на удаление
+// Состояния
 // ============================================================
 
 const isToDelete = computed(
   () => props.showToDelete === true && props.item.toDelete === true,
 )
 
-/**
- * Показывать ли крестик удаления.
- *
- * Если родитель не запросил showToDelete — крестик не рендерим,
- * потому что обработчик remove всё равно не навешен.
- */
 const canRemove = computed(() => props.showToDelete === true)
-
-// ============================================================
-// Черновик
-// ============================================================
 
 const isDraft = computed(
   () => !isToDelete.value && props.showDraft && props.item.source === 'temp',
@@ -63,11 +44,6 @@ const isDraft = computed(
 // Drag & drop
 // ============================================================
 
-/**
- * Какая половина элемента под курсором.
- * 'before' — верхняя/левая, 'after' — нижняя/правая.
- * null — курсор не над элементом.
- */
 const dropSide = ref<'before' | 'after' | null>(null)
 
 const myIndex = computed(() => {
@@ -75,10 +51,6 @@ const myIndex = computed(() => {
   return list.findIndex((i) => i.url === props.item.url)
 })
 
-/**
- * true, если сейчас над этим элементом тащат «другой» элемент
- * (from !== myIndex). Только тогда показываем индикатор вставки.
- */
 const isDropTarget = computed(() => {
   if (dropSide.value === null) return false
   if (props.draggingIndex === null) return false
@@ -86,10 +58,6 @@ const isDropTarget = computed(() => {
   return true
 })
 
-/**
- * Источник перетаскивания — этот же элемент.
- * Используется для полупрозрачности.
- */
 const isDragSource = computed(
   () => props.draggingIndex !== null && props.draggingIndex === myIndex.value,
 )
@@ -98,6 +66,8 @@ function onDragStart(e: DragEvent) {
   if (!props.allowDragAndDrop) return
   if (isToDelete.value) return
   if (myIndex.value < 0) return
+
+  e.stopPropagation() // <-- Останавливаем всплытие
 
   emit('drag-start', myIndex.value)
 
@@ -113,6 +83,8 @@ function onDragOver(e: DragEvent) {
   if (myIndex.value < 0) return
 
   e.preventDefault()
+  e.stopPropagation() // <-- Останавливаем всплытие
+
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
 
   const el = e.currentTarget as HTMLElement | null
@@ -122,11 +94,7 @@ function onDragOver(e: DragEvent) {
   }
 
   const rect = el.getBoundingClientRect()
-
-  // Если элемент шире, чем выше — считаем раскладку горизонтальной
-  // и решаем по clientX. Иначе — по clientY.
   const horizontal = rect.width > rect.height
-
   const isBefore = horizontal
     ? e.clientX < rect.left + rect.width / 2
     : e.clientY < rect.top + rect.height / 2
@@ -142,15 +110,12 @@ function onDrop(e: DragEvent) {
   if (!props.allowDragAndDrop) return
 
   e.preventDefault()
+  e.stopPropagation() // <-- Останавливаем всплытие
 
   const side = dropSide.value
   dropSide.value = null
 
-  if (!side) {
-    emit('drag-end')
-    return
-  }
-  if (myIndex.value < 0) {
+  if (!side || myIndex.value < 0) {
     emit('drag-end')
     return
   }
@@ -196,12 +161,10 @@ const current = computed<ImageItem | null>(() => {
 
 const hasPrev = computed(() => lightboxIndex.value > 0)
 const hasNext = computed(() => lightboxIndex.value < gallery.value.length - 1)
-
 const canNavigate = computed(() => gallery.value.length > 1)
 
 function openLightbox() {
   if (isToDelete.value) return
-
   const idx = gallery.value.findIndex((i) => i.url === props.item.url)
   lightboxIndex.value = idx >= 0 ? idx : 0
   lightboxOpen.value = true
@@ -220,7 +183,7 @@ function next() {
 }
 
 // ============================================================
-// Esc + блокировка скролла
+// Lifecycle & Events
 // ============================================================
 
 function onKeydown(e: KeyboardEvent) {
@@ -229,14 +192,10 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     e.preventDefault()
     closeLightbox()
-    return
-  }
-  if (e.key === 'ArrowLeft') {
+  } else if (e.key === 'ArrowLeft') {
     e.preventDefault()
     prev()
-    return
-  }
-  if (e.key === 'ArrowRight') {
+  } else if (e.key === 'ArrowRight') {
     e.preventDefault()
     next()
   }
@@ -276,14 +235,12 @@ function onRestoreClick(e: MouseEvent) {
 </script>
 
 <template>
-
   <div
-    class="image-wrapper"
+    class="group relative inline-block leading-none self-start flex-none align-top transition-all duration-150"
     :class="{
-      'image-wrapper--to-delete': isToDelete,
-      'image-wrapper--drop-before': isDropTarget && dropSide === 'before',
-      'image-wrapper--drop-after': isDropTarget && dropSide === 'after',
-      'image-wrapper--drag-source': isDragSource,
+      'opacity-40': isDragSource,
+      'pt-[10px]': isDropTarget && dropSide === 'before',
+      'pb-[10px]': isDropTarget && dropSide === 'after',
     }"
     v-bind="$attrs"
     @dragover="onDragOver"
@@ -292,53 +249,70 @@ function onRestoreClick(e: MouseEvent) {
     @drop="onDrop"
     @dragend="onDragEnd"
   >
+    <!-- Индикатор вставки (Верх/Лево) -->
+    <div
+      v-if="isDropTarget && dropSide === 'before'"
+      class="absolute left-0 right-0 top-[3px] h-[3px] rounded-sm pointer-events-none z-[4] shadow-[0_0_0_3px_rgba(59,130,246,0.15)] bg-[radial-gradient(circle_4px_at_4px_50%,var(--ui-primary,#3b82f6)_100%,transparent_101%),radial-gradient(circle_4px_at_calc(100%-4px)_50%,var(--ui-primary,#3b82f6)_100%,transparent_101%),var(--ui-primary,#3b82f6)]"
+    />
+
+    <!-- Индикатор вставки (Низ/Право) -->
+    <div
+      v-if="isDropTarget && dropSide === 'after'"
+      class="absolute left-0 right-0 bottom-[3px] h-[3px] rounded-sm pointer-events-none z-[4] shadow-[0_0_0_3px_rgba(59,130,246,0.15)] bg-[radial-gradient(circle_4px_at_4px_50%,var(--ui-primary,#3b82f6)_100%,transparent_101%),radial-gradient(circle_4px_at_calc(100%-4px)_50%,var(--ui-primary,#3b82f6)_100%,transparent_101%),var(--ui-primary,#3b82f6)]"
+    />
+
     <!-- Слот с картинкой -->
-    <div class="image-wrapper__content" @click="openLightbox">
+    <div
+      class="block cursor-zoom-in leading-none text-[0px]"
+      :class="{ 'cursor-default': isToDelete }"
+      @click="openLightbox"
+    >
       <slot />
     </div>
 
     <!-- Бейдж «Черновик» -->
     <div
       v-if="isDraft"
-      class="image-wrapper__draft"
+      class="absolute top-1.5 z-[2] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold leading-[1.6] pointer-events-none select-none opacity-90"
+      :class="allowDragAndDrop && !isToDelete ? 'left-[34px]' : 'left-1.5'"
       title="Черновик"
     >
-      <UIcon name="i-lucide-pencil-line" class="image-wrapper__draft-icon" />
-      <span class="image-wrapper__draft-text">Черновик</span>
+      <UIcon name="i-lucide-pencil-line" class="w-3 h-3" />
+      <span class="tracking-[0.02em]">Черновик</span>
     </div>
 
     <!-- Drag handle -->
     <div
       v-if="allowDragAndDrop && !isToDelete"
-      class="image-wrapper__drag"
+      class="absolute top-1.5 left-1.5 z-[3] inline-flex items-center justify-center w-[22px] h-[22px] rounded bg-gray-900/65 text-white cursor-grab opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150 hover:bg-gray-900/85 active:cursor-grabbing"
       draggable="true"
       title="Перетащить"
       @dragstart="onDragStart"
       @click.stop
     >
-      <UIcon name="i-lucide-grip-vertical" />
+      <UIcon name="i-lucide-grip-vertical" class="w-3.5 h-3.5" />
     </div>
 
     <!-- Крестик удаления -->
     <button
       v-if="canRemove && !isToDelete"
       type="button"
-      class="image-wrapper__remove"
+      class="absolute top-1.5 right-1.5 z-[2] inline-flex items-center justify-center w-6 h-6 p-0 border-none rounded-full bg-gray-900/70 text-white cursor-pointer opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all duration-150 hover:bg-red-600 hover:scale-105"
       aria-label="Удалить"
       @click="onRemoveClick"
     >
-      <UIcon name="i-lucide-x" />
+      <UIcon name="i-lucide-x" class="w-3.5 h-3.5" />
     </button>
 
     <!-- Оверлей «на удаление» -->
-    <div v-if="isToDelete" class="image-wrapper__overlay">
+    <div v-if="isToDelete" class="absolute inset-0 z-[3] flex items-center justify-center bg-gray-500/60 backdrop-grayscale">
       <button
         type="button"
-        class="image-wrapper__restore"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-white/40 rounded-full bg-white/15 text-white text-[13px] font-medium leading-none cursor-pointer transition-all duration-150 hover:bg-white/25 hover:border-white/60 hover:scale-105 whitespace-nowrap"
         aria-label="Восстановить"
         @click="onRestoreClick"
       >
-        <UIcon name="i-lucide-rotate-ccw" />
+        <UIcon name="i-lucide-rotate-ccw" class="w-3.5 h-3.5" />
         <span>Восстановить</span>
       </button>
     </div>
@@ -347,44 +321,51 @@ function onRestoreClick(e: MouseEvent) {
   <!-- Лайтбокс -->
   <ClientOnly>
     <Teleport to="body">
-      <Transition name="iw-lightbox-fade">
+      <Transition
+        enter-active-class="transition-opacity duration-200"
+        leave-active-class="transition-opacity duration-200"
+        enter-from-class="opacity-0"
+        leave-to-class="opacity-0"
+      >
         <div
           v-if="lightboxOpen && current"
-          class="iw-lightbox"
+          class="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85 p-8"
           @click.self="closeLightbox"
         >
-          <div class="iw-lightbox__inner" @click.self="closeLightbox">
-            <div v-if="canNavigate" class="iw-lightbox__counter">
+          <div class="relative flex items-center justify-center w-full h-full min-w-0 min-h-0" @click.self="closeLightbox">
+
+            <div v-if="canNavigate" class="absolute top-0 left-0 px-2.5 py-1 rounded-full bg-white/10 text-white text-xs font-medium leading-[1.6] pointer-events-none">
               {{ lightboxIndex + 1 }} / {{ gallery.length }}
             </div>
 
             <button
               type="button"
-              class="iw-lightbox__close"
+              class="absolute top-0 right-0 inline-flex items-center justify-center w-9 h-9 p-0 border-none rounded-full bg-white/10 text-white cursor-pointer transition-all duration-150 hover:bg-white/20 hover:scale-105"
               aria-label="Закрыть"
               @click="closeLightbox"
             >
-              <UIcon name="i-lucide-x" />
+              <UIcon name="i-lucide-x" class="w-5 h-5" />
             </button>
 
             <button
               v-if="hasPrev"
               type="button"
-              class="iw-lightbox__nav iw-lightbox__nav--prev"
+              class="absolute top-1/2 -translate-y-1/2 left-0 inline-flex items-center justify-center w-12 h-12 p-0 border-none rounded-full bg-white/10 text-white cursor-pointer transition-all duration-150 hover:bg-white/20"
               aria-label="Предыдущая"
               @click.stop="prev"
             >
-              <UIcon name="i-lucide-chevron-left" />
+              <UIcon name="i-lucide-chevron-left" class="w-6 h-6" />
             </button>
 
-            <div class="iw-lightbox__media" @click.stop>
+            <div class="flex flex-col items-center justify-center gap-3 w-full h-full max-w-full max-h-full min-w-0 min-h-0" @click.stop>
+              <!-- flex-1 и min-h-0 заставляют картинку занимать всё доступное место и масштабироваться -->
               <img
                 :src="current.url"
                 :alt="current.title ?? ''"
-                class="iw-lightbox__img"
+                class="block flex-1 min-h-0 w-full object-contain select-none cursor-zoom-out"
                 @click="closeLightbox"
               />
-              <div v-if="current.title" class="iw-lightbox__caption">
+              <div v-if="current.title" class="shrink-0 max-w-[720px] px-4 text-white text-[13px] leading-snug text-center opacity-85 break-words">
                 {{ current.title }}
               </div>
             </div>
@@ -392,375 +373,16 @@ function onRestoreClick(e: MouseEvent) {
             <button
               v-if="hasNext"
               type="button"
-              class="iw-lightbox__nav iw-lightbox__nav--next"
+              class="absolute top-1/2 -translate-y-1/2 right-0 inline-flex items-center justify-center w-12 h-12 p-0 border-none rounded-full bg-white/10 text-white cursor-pointer transition-all duration-150 hover:bg-white/20"
               aria-label="Следующая"
               @click.stop="next"
             >
-              <UIcon name="i-lucide-chevron-right" />
+              <UIcon name="i-lucide-chevron-right" class="w-6 h-6" />
             </button>
+
           </div>
         </div>
       </Transition>
     </Teleport>
   </ClientOnly>
 </template>
-
-<style scoped>
-/* ==================== Обёртка ==================== */
-
-.image-wrapper {
-  position: relative;
-  display: inline-block;
-  line-height: 0;
-  align-self: flex-start;
-  flex: 0 0 auto;
-  vertical-align: top;
-  transition: padding 0.12s ease, opacity 0.12s ease;
-}
-
-.image-wrapper--drag-source {
-  opacity: 0.4;
-}
-
-/* ==================== Индикация вставки ==================== */
-
-.image-wrapper--drop-before {
-  padding-top: 10px;
-}
-
-.image-wrapper--drop-after {
-  padding-bottom: 10px;
-}
-
-.image-wrapper--drop-before::before,
-.image-wrapper--drop-after::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 3px;
-  border-radius: 2px;
-  pointer-events: none;
-  z-index: 4;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-  background:
-    radial-gradient(circle 4px at 4px 50%, var(--ui-primary, #3b82f6) 100%, transparent 101%),
-    radial-gradient(circle 4px at calc(100% - 4px) 50%, var(--ui-primary, #3b82f6) 100%, transparent 101%),
-    var(--ui-primary, #3b82f6);
-}
-
-.image-wrapper--drop-before::before {
-  top: 3px;
-}
-
-.image-wrapper--drop-after::after {
-  bottom: 3px;
-}
-
-/* ==================== Контент ==================== */
-
-.image-wrapper__content {
-  display: block;
-  cursor: zoom-in;
-  line-height: 0;
-  font-size: 0;
-}
-
-.image-wrapper--to-delete .image-wrapper__content {
-  cursor: default;
-}
-
-/* Крестик и бейдж — поверх картинки */
-
-.image-wrapper__draft {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(245, 158, 11, 0.92);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.6;
-  pointer-events: none;
-  user-select: none;
-  opacity: 0.9;
-}
-
-.image-wrapper__draft-icon {
-  width: 12px;
-  height: 12px;
-}
-
-.image-wrapper__draft-text {
-  letter-spacing: 0.02em;
-}
-
-/* Drag handle */
-
-.image-wrapper__drag {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 3;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  background: rgba(17, 24, 39, 0.65);
-  color: #fff;
-  cursor: grab;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease;
-}
-
-.image-wrapper__drag:active {
-  cursor: grabbing;
-}
-
-.image-wrapper:hover .image-wrapper__drag,
-.image-wrapper:focus-within .image-wrapper__drag {
-  opacity: 1;
-}
-
-.image-wrapper__drag:hover {
-  background: rgba(17, 24, 39, 0.85);
-}
-
-.image-wrapper__drag :deep(svg) {
-  width: 14px;
-  height: 14px;
-}
-
-.image-wrapper__drag ~ .image-wrapper__draft {
-  left: 34px;
-}
-
-.image-wrapper__remove {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: rgba(17, 24, 39, 0.7);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
-}
-
-.image-wrapper:hover .image-wrapper__remove,
-.image-wrapper:focus-within .image-wrapper__remove {
-  opacity: 1;
-}
-
-.image-wrapper__remove:hover {
-  background: #dc2626;
-  transform: scale(1.06);
-}
-
-.image-wrapper__remove :deep(svg) {
-  width: 14px;
-  height: 14px;
-}
-
-/* Оверлей «на удаление» */
-
-.image-wrapper__overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(107, 114, 128, 0.6);
-  backdrop-filter: grayscale(1);
-}
-
-.image-wrapper__restore {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-  white-space: nowrap;
-}
-
-.image-wrapper__restore:hover {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: rgba(255, 255, 255, 0.6);
-  transform: scale(1.03);
-}
-
-.image-wrapper__restore :deep(svg) {
-  width: 14px;
-  height: 14px;
-}
-
-/* ==================== Лайтбокс ==================== */
-
-.iw-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.85);
-  padding: 32px;
-}
-
-.iw-lightbox__inner {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-.iw-lightbox__counter {
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.6;
-  pointer-events: none;
-}
-
-.iw-lightbox__close {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
-
-.iw-lightbox__close:hover {
-  background: rgba(255, 255, 255, 0.22);
-  transform: scale(1.06);
-}
-
-.iw-lightbox__close :deep(svg) {
-  width: 20px;
-  height: 20px;
-}
-
-.iw-lightbox__nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
-
-.iw-lightbox__nav:hover {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-.iw-lightbox__nav--prev {
-  left: 0;
-}
-
-.iw-lightbox__nav--next {
-  right: 0;
-}
-
-.iw-lightbox__nav :deep(svg) {
-  width: 26px;
-  height: 26px;
-}
-
-.iw-lightbox__media {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  max-width: 100%;
-  max-height: 100%;
-  min-width: 0;
-  min-height: 0;
-}
-
-.iw-lightbox__img {
-  display: block;
-  max-width: 100%;
-  max-height: calc(100vh - 120px);
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  user-select: none;
-}
-
-.iw-lightbox__caption {
-  max-width: 720px;
-  padding: 0 16px;
-  color: #fff;
-  font-size: 13px;
-  line-height: 1.4;
-  text-align: center;
-  opacity: 0.85;
-  overflow-wrap: anywhere;
-}
-
-/* ==================== Transition ==================== */
-
-.iw-lightbox-fade-enter-active,
-.iw-lightbox-fade-leave-active {
-  transition: opacity 0.18s ease;
-}
-
-.iw-lightbox-fade-enter-from,
-.iw-lightbox-fade-leave-to {
-  opacity: 0;
-}
-</style>

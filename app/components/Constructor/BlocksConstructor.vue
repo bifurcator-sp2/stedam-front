@@ -45,6 +45,8 @@ interface BlockItem {
   schema: SettingNode[]
   default_settings: SettingNode[]
   settings: SettingNode[]
+  parent_block_index_ids: number[] | null
+  published: boolean
 }
 
 interface BlockResource {
@@ -125,6 +127,8 @@ function createBlockFromType(type: BlockType): BlockItem {
     schema,
     default_settings: type.default_settings,
     settings: structuredClone(schema),
+    parent_block_index_ids: [],
+    published: false,
   }
 }
 
@@ -254,6 +258,8 @@ watch(
         title: block.title ?? item.title,
         description: block.description ?? item.description,
         settings: fullSettings,
+        parent_block_index_ids: block.parent_block_index_ids ?? [],
+        published: block.published ?? false,
       }
     } catch (e) {
       console.error('[load block by id] failed', e)
@@ -341,6 +347,8 @@ async function save() {
       title:         block.title,
       description:   block.description,
       settings:      compactSettings,
+      parent_block_index_ids: block.parent_block_index_ids ?? [],
+      published:     block.published,
     }
 
     const res = isUpdate
@@ -584,6 +592,8 @@ function reset() {
           v-model:title="editingBlock.title"
           v-model:description="editingBlock.description"
           v-model:settings="editingBlock.settings"
+          v-model:parent_block_index_ids="editingBlock.parent_block_index_ids"
+          v-model:published="editingBlock.published"
         />
       </LoadingOverlay>
     </template>

@@ -1,8 +1,4 @@
 <script setup lang="ts">
-import UserDataForm from '~/components/UserDataForm.vue'
-import AppLogoImage from '~/components/AppLogoImage.vue'
-import UserAvatarMenu from '~/components/UserAvatarMenu.vue'
-import RoleNavMenue from '~/components/RoleNavMenue.vue';
 
 
 const route = useRoute()

@@ -1,5 +1,6 @@
 // app/directives/inlineEdit.ts
 import { watch, nextTick, type Directive, type WatchStopHandle } from 'vue'
+import { restoreVideos } from '~/composables/useVideoEmbed'
 
 export interface InlineEditBinding {
   get: () => string
@@ -36,10 +37,6 @@ function stripTags(s: string): string {
 function restoreLatexFromKatex(html: string): string {
   if (!html || !/class="katex/.test(html)) return html
 
-  // display-mode: <span class="katex-display">...<annotation>...</annotation>...</span>
-  // inline:       <span class="katex">...<annotation>...</annotation>...</span>
-  // Идём от внешнего .katex-display, если он есть, иначе от .katex.
-
   let out = html
 
   // Сначала — display-формулы ($$...$$)
@@ -59,7 +56,8 @@ function restoreLatexFromKatex(html: string): string {
 
 /**
  * Нормализовать HTML из contenteditable в «чистый» текст:
- *  - KaTeX → $...$ (через restoreLatexFromKatex)
+ *  - KaTeX → $...$
+ *  - Видео iframe → ссылка
  *  - <br>, </div>, </p>, </li> → \n
  *  - убрать zero-width и NBSP
  *  - схлопнуть множественные \n
@@ -71,19 +69,22 @@ function normalizeHtml(html: string): string {
   // 1. Восстановить формулы
   let out = restoreLatexFromKatex(html)
 
-  // 2. Блочные элементы → \n
+  // 2. Восстановить ссылки из видео-блоков (iframe → url)
+  out = restoreVideos(out)
+
+  // 3. Блочные элементы → \n
   out = out.replace(/<br\s*\/?>/gi, '\n')
   out = out.replace(/<\/(div|p|li|h[1-6])>/gi, '\n')
   out = out.replace(/<(div|p|li|h[1-6])[^>]*>/gi, '')
 
-  // 3. Остальные теги снять (если хотим plain-text)
+  // 4. Остальные теги снять (если хотим plain-text)
   out = stripTags(out)
 
-  // 4. Невидимые символы и NBSP
+  // 5. Невидимые символы и NBSP
   out = out.replace(/[\u200B-\u200D\uFEFF]/g, '')
   out = out.replace(/\u00A0/g, ' ')
 
-  // 5. Схлопнуть множественные \n
+  // 6. Схлопнуть множественные \n
   out = out.replace(/\n{3,}/g, '\n\n')
 
   return out
@@ -110,7 +111,7 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
     let rawValue = current.get() ?? ''
     let selfUpdate = false
 
-    // Стартовый рендер: если узел не в фокусе — показываем формулы
+    // Стартовый рендер: если узел не в фокусе — показываем формулы и видео
     if (document.activeElement === el) {
       if (el.innerHTML !== rawValue) el.innerHTML = rawValue
     } else {
@@ -134,7 +135,6 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
         const restored = restoreLatexFromKatex(html)
         // Если после восстановления что-то поменялось — используем HTML-ветку
         if (restored !== html) {
-          // Уберём оставшиеся теги, оставим текст с $...$ и переносами
           let cleaned = restored
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/<\/(div|p|li|h[1-6])>/gi, '\n')
@@ -160,7 +160,7 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
     }
 
     const onFocus = () => {
-      // Показываем сырой источник (LaTeX с $...$, чистый текст)
+      // Показываем сырой источник (LaTeX с $...$, чистый текст, URL видео)
       if (el.innerHTML !== rawValue) {
         el.innerHTML = rawValue
         const range = document.createRange()

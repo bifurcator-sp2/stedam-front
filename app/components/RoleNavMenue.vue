@@ -17,6 +17,7 @@ const navItems: NavItem[] = [
   { label: 'Профиль', icon: 'i-lucide-user', to: '/profile' },
   { label: 'Конструктор блоков', icon: 'i-lucide-layout-dashboard', to: '/construct' },
   { label: 'Уроки', icon: 'i-lucide-pencil-ruler', to: '/lessons' },
+  { label: 'Обучение', icon: 'i-lucide-book-open', to: '/edu' },
 ]
 
 </script>

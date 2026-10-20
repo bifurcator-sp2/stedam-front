@@ -1,6 +1,4 @@
 <script setup lang="ts">
-// app/components/Constructor/Lesson.vue
-
 import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
@@ -11,6 +9,7 @@ import type {
   LessonModel,
   LessonBlockModel,
   BlockStructItem,
+  BlockStructBlock,
   DraggedBlockSource,
 } from '~/types/lesson'
 
@@ -37,6 +36,21 @@ const emit = defineEmits<{
   (e: 'update:activeBlockLocalId', value: string | null): void
   (e: 'register-files', blockLocalId: string, inst: any): void
 }>()
+
+// ==================== Утилита поиска блока в дереве ====================
+
+function findBlockInTree(nodes: BlockStructItem[], blockId: number | null): BlockStructBlock | null {
+  if (!blockId) return null
+  for (const node of nodes) {
+    const found = node.blocks?.find(b => b.id === blockId)
+    if (found) return found
+    if (node.children?.length) {
+      const inChildren = findBlockInTree(node.children, blockId)
+      if (inChildren) return inChildren
+    }
+  }
+  return null
+}
 
 // ==================== Активный блок ====================
 
@@ -85,11 +99,10 @@ async function duplicateBlock(localId: string) {
     )
     const data = (res as any).data ?? res
 
-    const type = props.structItems.find((t) => t.code === data.block_type_code)
-    const sourceBlock = type?.blocks.find((sb) => sb.id === data.block_id)
+    const sourceBlock = findBlockInTree(props.structItems, data.block_id)
 
     const fullSettings = mergeFlat(
-      type?.default_settings ?? [],
+      sourceBlock?.default_settings ?? [],
       sourceBlock?.settings ?? undefined,
       data.settings ?? undefined,
     )
@@ -152,11 +165,10 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
     )
     const data = (res as any).data ?? res
 
-    const type = props.structItems.find((t) => t.code === data.block_type_code)
-    const sourceBlock = type?.blocks.find((sb) => sb.id === data.block_id)
+    const sourceBlock = findBlockInTree(props.structItems, data.block_id)
 
     const fullSettings = mergeFlat(
-      type?.default_settings ?? [],
+      sourceBlock?.default_settings ?? [],
       sourceBlock?.settings ?? undefined,
       data.settings ?? undefined,
     )
@@ -182,30 +194,54 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
   }
 }
 
-function onDropZone(index: number, e: DragEvent) {
+/**
+ * Единый обработчик сброса.
+ * Использует актуальный dragOverIndex, который уже обновился при наведении
+ * на блок или дроп-зону.
+ */
+function handleDrop(e: DragEvent) {
+  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
   e.preventDefault()
+  if (dragOverIndex.value === null) return
+
   const source = getDraggedSource()
-  handleDropAtIndex(index, source)
+  if (source) {
+    handleDropAtIndex(dragOverIndex.value, source)
+  }
   dragOverIndex.value = null
 }
 
-function onDropEnd(e: DragEvent) {
+// Обновление индекса при наведении на дроп-зону
+function onDragOver(index: number, e: DragEvent) {
+  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
   e.preventDefault()
-  const source = getDraggedSource()
-  handleDropAtIndex(lesson.value.blocks.length, source)
-  dragOverIndex.value = null
+  dragOverIndex.value = index
+}
+
+// Обновление индекса при наведении на сам блок
+function onBlockDragOver(index: number, e: DragEvent) {
+  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
+  e.preventDefault()
+  const target = e.currentTarget as HTMLElement
+  if (!target) return
+
+  const rect = target.getBoundingClientRect()
+  const midpoint = rect.top + rect.height / 2
+
+  // Если курсор в верхней половине — зона над блоком (index), иначе под (index + 1)
+  if (e.clientY < midpoint) {
+    dragOverIndex.value = index
+  } else {
+    dragOverIndex.value = index + 1
+  }
 }
 
 function onDropEmpty(e: DragEvent) {
+  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
   e.preventDefault()
   const source = getDraggedSource()
   handleDropAtIndex(0, source)
   dragOverIndex.value = null
-}
-
-function onDragOver(index: number, e: DragEvent) {
-  e.preventDefault()
-  dragOverIndex.value = index
 }
 
 function onDragLeave() {
@@ -287,6 +323,12 @@ defineExpose({
   removeBlock,
   duplicateBlock,
 })
+
+// ==================== Статус публикации ====================
+
+function togglePublished() {
+  lesson.value = { ...lesson.value, published: !lesson.value.published }
+}
 </script>
 
 <template>
@@ -308,22 +350,49 @@ defineExpose({
       />
     </div>
 
-    <!-- === Статистика === -->
+    <!-- === Статистика и статус === -->
     <div
-      class="flex items-center gap-3.5 py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
+      class="flex items-center justify-between py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
     >
-      <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
-        <UIcon name="i-lucide-type" />
-        {{ totalChars }}
-      </span>
-      <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
-        <UIcon name="i-lucide-clock" />
-        {{ readingTimeText }}
-      </span>
-      <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
-        <UIcon name="i-lucide-layers" />
-        {{ lesson.blocks.length }}
-      </span>
+      <!-- Левая часть: статистика -->
+      <div class="flex items-center gap-3.5">
+        <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
+          <UIcon name="i-lucide-type" />
+          {{ totalChars }}
+        </span>
+        <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
+          <UIcon name="i-lucide-clock" />
+          {{ readingTimeText }}
+        </span>
+        <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
+          <UIcon name="i-lucide-layers" />
+          {{ lesson.blocks.length }}
+        </span>
+      </div>
+
+      <!-- Правая часть: раздел + свитч публикации -->
+      <div class="flex items-center gap-4">
+        <!-- КОМПОНЕНТ ВЫБОРА РАЗДЕЛА -->
+        <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" />
+
+        <!-- Свитч публикации -->
+        <div
+          class="flex items-center gap-2 cursor-pointer select-none"
+          @click="togglePublished"
+        >
+          <USwitch
+            v-model="lesson.published"
+            color="success"
+            size="xs"
+          />
+          <span
+            class="text-[10px] font-bold uppercase tracking-widest transition-colors"
+            :class="lesson.published ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'"
+          >
+            {{ lesson.published ? 'Опубликован' : 'Черновик' }}
+          </span>
+        </div>
+      </div>
     </div>
 
     <!-- === Пустой урок === -->
@@ -352,58 +421,77 @@ defineExpose({
       ghost-class="block-ghost"
       chosen-class="block-chosen"
       drag-class="block-drag"
-      class="flex flex-col gap-1 min-h-[100px]"
+      class="flex flex-col min-h-[100px]"
       :filter="'[data-drop-zone]'"
+      @dragleave="onDragLeave"
     >
       <template #default>
-        <!-- Drop-zone ПЕРЕД первым (увеличенная и без отрицательного отступа) -->
+        <!-- Drop-zone ПЕРЕД первым -->
         <div
           data-drop-zone
-          class="relative h-6 -my-2 rounded transition-all pointer-events-auto"
+          class="relative rounded transition-all duration-150 pointer-events-auto"
           :class="dragOverIndex === 0
-            ? 'h-8 bg-[var(--ui-primary-muted,rgba(59,130,246,0.15))] border-2 border-dashed border-[var(--ui-primary,#3b82f6)]'
-            : ''"
+            ? 'h-8 my-1 bg-[var(--ui-primary-muted,rgba(59,130,246,0.15))] border-2 border-dashed border-[var(--ui-primary,#3b82f6)]'
+            : 'h-0 overflow-hidden'"
           @dragover="onDragOver(0, $event)"
           @dragleave="onDragLeave"
-          @drop="onDropZone(0, $event)"
+          @drop="handleDrop"
         />
 
         <template v-for="(block, index) in lesson.blocks" :key="block.localId">
-          <LessonBlockWrapper
-            :active="props.activeBlockLocalId === block.localId"
-            :draggable="true"
-            :can-move-up="index > 0"
-            :can-move-down="index < lesson.blocks.length - 1"
-            @activate="activateBlock(block.localId)"
-            @remove="removeBlock(block.localId)"
-            @duplicate="duplicateBlock(block.localId)"
-            @move-up="moveBlockUp(block.localId)"
-            @move-down="moveBlockDown(block.localId)"
+
+          <!-- Обертка для позиционирования плашки вне LessonBlockWrapper -->
+          <div
+            class="relative"
+            @dragover="onBlockDragOver(index, $event)"
+            @drop="handleDrop"
           >
-            <div data-lesson-content-body>
-              <BlockRenderer
-                :code="block.blockTypeCode"
-                :id="block.id"
-                mode="body"
-                model-name="lesson_blocks"
-                :initial-images="block.images ?? []"
-                :show-to-delete-images="true"
-                v-model:settings="block.settings"
-                @register-files="onRegisterFiles(block, $event)"
-              />
-            </div>
-          </LessonBlockWrapper>
+            <LessonBlockWrapper
+              :active="props.activeBlockLocalId === block.localId"
+              :draggable="true"
+              :can-move-up="index > 0"
+              :can-move-down="index < lesson.blocks.length - 1"
+              @activate="activateBlock(block.localId)"
+              @remove="removeBlock(block.localId)"
+              @duplicate="duplicateBlock(block.localId)"
+              @move-up="moveBlockUp(block.localId)"
+              @move-down="moveBlockDown(block.localId)"
+            >
+              <div data-lesson-content-body>
+                <BlockRenderer
+                  :code="block.blockTypeCode"
+                  :id="block.id"
+                  mode="body"
+                  model-name="lesson_blocks"
+                  :initial-images="block.images ?? []"
+                  :show-to-delete-images="true"
+                  v-model:settings="block.settings"
+                  @register-files="onRegisterFiles(block, $event)"
+                />
+              </div>
+            </LessonBlockWrapper>
+
+            <!-- Плашка 75px на всю высоту (минус 50px), со сдвигом вправо на 5px и градиентом -->
+            <div
+              class="absolute top-0 left-full ml-[5px] h-[calc(100%-50px)] w-[75px] rounded-r-md cursor-pointer transition-colors z-0 bg-gradient-to-r from-transparent"
+              :class="props.activeBlockLocalId === block.localId
+                ? 'to-blue-200/40 dark:to-blue-800/40'
+                : 'to-gray-200/60 dark:to-gray-700/60 hover:to-blue-200/60 dark:hover:to-blue-800/60'"
+              title="Выбрать блок"
+              @click.stop="activateBlock(block.localId)"
+            />
+          </div>
 
           <!-- Drop-zone ПОСЛЕ блока -->
           <div
             data-drop-zone
-            class="relative h-2 -my-0.5 rounded transition-all pointer-events-auto"
+            class="relative rounded transition-all duration-150 pointer-events-auto"
             :class="dragOverIndex === index + 1
-              ? 'h-5 bg-[var(--ui-primary-muted,rgba(59,130,246,0.15))] border-2 border-dashed border-[var(--ui-primary,#3b82f6)]'
-              : ''"
+              ? 'h-8 my-1 bg-[var(--ui-primary-muted,rgba(59,130,246,0.15))] border-2 border-dashed border-[var(--ui-primary,#3b82f6)]'
+              : 'h-0 overflow-hidden'"
             @dragover="onDragOver(index + 1, $event)"
             @dragleave="onDragLeave"
-            @drop="onDropZone(index + 1, $event)"
+            @drop="handleDrop"
           />
         </template>
       </template>
@@ -412,8 +500,6 @@ defineExpose({
 </template>
 
 <style>
-/* Классы, добавляемые VueDraggable снаружи элемента —
-   не могут быть scoped, иначе не применятся. */
 .block-ghost {
   opacity: 0.4;
   background: var(--ui-bg-elevated, #f8fafc);

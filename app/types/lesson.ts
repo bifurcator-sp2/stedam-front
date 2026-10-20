@@ -11,6 +11,7 @@ export interface LessonModel {
   locale: string
   saved: boolean
   published: boolean
+  taxonomy_ids: number[] | null
   blocks: LessonBlockModel[]
 }
 
@@ -38,6 +39,10 @@ export interface DraggedBlockSource {
 export interface BlockStructBlock {
   id: number
   block_type_id: number
+  /** Код типа блока (добавлено для быстрого доступа без поиска по дереву) */
+  block_type_code: string | null
+  /** Дефолтные настройки типа блока (добавлено для рендера и drag&drop) */
+  default_settings: SettingNode[]
   title: string | null
   description: string | null
   settings: Record<string, any>
@@ -47,13 +52,19 @@ export interface BlockStructBlock {
 
 export interface BlockStructItem {
   id: number
+  /** ID родительского узла (для корневых узлов может быть -1 или null) */
+  parent_id?: number | null
+  /** Уникальный код узла (например, 'block_index_1' или 'misc') */
   code: string
-  type: 'info' | 'task'
+  /** Тип узла (теперь может быть 'info' для узлов дерева) */
+  type: string
   name: string
   description: string | null
   default_settings: SettingNode[]
   blocks_count: number
   blocks: BlockStructBlock[]
+  /** Вложенные дочерние узлы (добавлено для поддержки дерева) */
+  children?: BlockStructItem[]
 }
 
 // ==================== API: ответ ====================
@@ -65,6 +76,7 @@ export interface LessonResponse {
   locale: string
   saved: boolean
   published: boolean
+  taxonomy_ids: number[] | null
   blocks: LessonBlockResponse[]
 }
 
@@ -86,6 +98,7 @@ export interface LessonSavePayload {
   locale: string
   saved: boolean
   published: boolean
+  taxonomy_ids: number[] | null
   blocks: LessonBlockSavePayload[]
 }
 
@@ -106,6 +119,7 @@ export function createEmptyLesson(id: number | null = null): LessonModel {
     locale: 'ru',
     saved: false,
     published: false,
+    taxonomy_ids: null,
     blocks: [],
   }
 }

@@ -10,20 +10,8 @@ export default defineNuxtConfig({
     'nuxt-auth-sanctum',
     '@nuxtjs/i18n',
     '@nuxt/icon',
-    // ✅ legacy-сборка для старых Safari / iPad
-    '@teages/nuxt-legacy',
-  ],
 
-  // ✅ Настройки legacy-сборки
-  legacy: {
-    vite: {
-      targets: ['chrome 49', 'safari 11'],
-      renderLegacyChunks: true,
-    },
-    customPolyfills: {
-      scanDirs: ['polyfills'],
-    },
-  },
+  ],
 
   icon: {
     mode: 'svg',
@@ -50,7 +38,9 @@ export default defineNuxtConfig({
 
   content: {
     experimental: {
-      sqliteConnector: 'native'
+      sqliteConnector: 'native',
+      // 'automatic-immediate' заставляет Nuxt немедленно перезагрузить страницу при ошибке
+      emitRouteChunkError: 'automatic-immediate'
     }
   },
 
@@ -70,10 +60,8 @@ export default defineNuxtConfig({
   },
 
   vite: {
-    // ❗ terser обязателен для plugin-legacy 8.x при Chrome < 80
     build: {
-      minify: 'terser',
-      target: ['es2015', 'safari11'],
+      target: ['safari16', 'ios16'],
     },
     define: {
       __VUE_PROD_DEVTOOLS__: 'true'

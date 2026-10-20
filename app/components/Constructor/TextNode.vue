@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useFormula } from '~/composables/useFormula'
+import { useVideoEmbed } from '~/composables/useVideoEmbed' // <-- ИМПОРТ
 import type { InlineEditBinding } from '~/directives/inlineEdit'
 import type { SettingNode } from '~/utils/constructors'
 
@@ -21,6 +22,7 @@ const emit = defineEmits<{
 }>()
 
 const { renderFormulas } = useFormula()
+const { renderVideos } = useVideoEmbed() // <-- ИНИЦИАЛИЗАЦИЯ
 
 // ==================== Резолв пути ====================
 
@@ -89,7 +91,8 @@ const binding = computed<InlineEditBinding>(() => ({
     if (v === textValue.value) return
     emit('update', { ...props.node, default: v })
   },
-  renderFormulas,
+  // Сначала рендерим формулы, затем видео
+  renderFormulas: (html: string) => renderVideos(renderFormulas(html)),
 }))
 
 const isEmpty = computed(() => !textValue.value.trim())

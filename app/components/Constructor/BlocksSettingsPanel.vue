@@ -11,6 +11,9 @@ const id = defineModel<number | null>('id')
 const title = defineModel<string | null>('title')
 const description = defineModel<string | null>('description')
 const settings = defineModel<SettingNode[]>('settings', { default: () => [] })
+const parentBlockIndexIds = defineModel<number[] | null>('parent_block_index_ids', {
+  default: null,
+})
 
 const props = withDefaults(
   defineProps<{
@@ -73,27 +76,53 @@ function updateItem(index: number, updated: SettingNode) {
 function updatePublicItem(path: number[], updated: SettingNode) {
   settings.value = replaceNodeAtPath(settings.value, path, () => updated)
 }
+
+const published = defineModel<boolean>('published', { default: false })
+
 </script>
 
 <template>
   <div class="flex flex-col gap-4 px-3.5 pb-6 pt-3.5 block-settings-panel">
     <template v-if="mode === 'admin'">
-      <!-- Шапка с ID -->
+      <!-- Шапка с ID и статусом -->
       <div
         class="relative flex items-center justify-between gap-2.5 overflow-hidden rounded-lg border border-default bg-elevated py-2 pl-3 pr-2.5"
       >
-      <span
-        class="absolute inset-y-0 left-0 w-[3px] rounded-r-sm bg-gradient-to-b from-blue-400 to-blue-500"
-      />
-        <span class="text-[10px] font-bold uppercase tracking-widest text-muted">
-        Блок
-      </span>
         <span
-          class="inline-flex items-center gap-1 rounded-full border border-default bg-default px-2.5 py-[3px] font-mono text-[11.5px] font-semibold text-highlighted shadow-sm"
-        >
-        <UIcon name="i-lucide-hash" class="size-3 text-primary"/>
-        {{ id ?? '—' }}
-      </span>
+          class="absolute inset-y-0 left-0 w-[3px] rounded-r-sm bg-gradient-to-b from-blue-400 to-blue-500"
+        />
+
+        <span class="text-[10px] font-bold uppercase tracking-widest text-muted">
+          Блок
+        </span>
+
+        <div class="flex items-center gap-3">
+          <!-- Свитч статуса -->
+          <div
+            class="flex items-center gap-2 cursor-pointer select-none"
+            @click="published = !published"
+          >
+            <USwitch
+              v-model="published"
+              color="success"
+              size="xs"
+            />
+            <span
+              class="text-[10px] font-bold uppercase tracking-widest transition-colors"
+              :class="published ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'"
+            >
+              {{ published ? 'Опубликован' : 'Черновик' }}
+            </span>
+          </div>
+
+          <!-- ID блока -->
+          <span
+            class="inline-flex items-center gap-1 rounded-full border border-default bg-default px-2.5 py-[3px] font-mono text-[11.5px] font-semibold text-highlighted shadow-sm"
+          >
+            <UIcon name="i-lucide-hash" class="size-3 text-primary"/>
+            {{ id ?? '—' }}
+          </span>
+        </div>
       </div>
 
       <!-- Основные поля -->
@@ -110,6 +139,12 @@ function updatePublicItem(path: number[], updated: SettingNode) {
           Основное
         </span>
         </header>
+        <div class="flex flex-col gap-1.5">
+          <label for="block-index-ids" class="pl-0.5 text-[11px] font-semibold text-muted">
+            Положение в меню
+          </label>
+          <ConstructorBlockIndexSelector  id="block-index-ids" v-model="parentBlockIndexIds" />
+        </div>
 
         <div class="flex flex-col gap-1.5">
           <label for="block-name" class="pl-0.5 text-[11px] font-semibold text-muted">
@@ -123,6 +158,7 @@ function updatePublicItem(path: number[], updated: SettingNode) {
             class="w-full"
           />
         </div>
+
 
         <div class="flex flex-col gap-1.5">
           <label for="block-description" class="pl-0.5 text-[11px] font-semibold text-muted">

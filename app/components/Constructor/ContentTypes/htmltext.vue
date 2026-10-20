@@ -11,6 +11,7 @@ import {
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { SettingNode } from '~/utils/constructors'
 import { useFormula } from '~/composables/useFormula'
+import { useVideoEmbed } from '~/composables/useVideoEmbed' // <-- ИМПОРТ
 
 const props = withDefaults(defineProps<{
   node: SettingNode
@@ -28,6 +29,7 @@ const emit = defineEmits<{
 }>()
 
 const { renderFormulas } = useFormula()
+const { renderVideos } = useVideoEmbed() // <-- ИНИЦИАЛИЗАЦИЯ
 
 // ==================== Данные ====================
 
@@ -43,7 +45,8 @@ const htmlValue = computed({
   },
 })
 
-const renderedHtml = computed(() => renderFormulas(htmlValue.value))
+// Сначала рендерим формулы, затем видео
+const renderedHtml = computed(() => renderVideos(renderFormulas(htmlValue.value)))
 
 // ==================== Активный редактор (один на страницу) ====================
 
@@ -320,7 +323,7 @@ const toolbarItems: EditorToolbarItem[][] = [
         </Teleport>
       </UEditor>
 
-      <!-- Просмотр: v-html + KaTeX-формулы, когда редактор не активен -->
+      <!-- Просмотр: v-html + KaTeX-формулы + видео, когда редактор не активен -->
       <div
         v-else
         v-html="renderedHtml"
