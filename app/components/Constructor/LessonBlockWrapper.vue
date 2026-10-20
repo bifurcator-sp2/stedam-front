@@ -42,18 +42,6 @@ const emit = defineEmits<{
 
 // ==================== Ховер ====================
 
-/**
- * Локальный флаг ховера.
- * Полностью управляет видимостью панели действий — независимо от props.active.
- * Это устраняет «залипание» панели после дублирования/перемещения,
- * когда блок остаётся активным, а мышь уже ушла.
- *
- * Панель находится ЗА пределами обёртки (left-full), поэтому простой
- * mouseleave на обёртке сбрасывает hovered ещё до того, как мышь дойдёт
- * до панели — и панель гаснет на полпути. Чтобы этого не было, в
- * mouseleave/mouseenter проверяем relatedTarget: если мышь переходит
- * между обёрткой и панелью — hovered не сбрасываем.
- */
 const hovered = ref(false)
 
 function onWrapperEnter() {
@@ -62,7 +50,7 @@ function onWrapperEnter() {
 
 function onWrapperLeave(e: MouseEvent) {
   const next = e.relatedTarget
-  // Уходим в панель действий — не сбрасываем
+  // Уходим в панель действий (или на её невидимый мост) — не сбрасываем
   if (next instanceof Element && next.closest('[data-block-action]')) return
   hovered.value = false
 }
@@ -93,7 +81,7 @@ function onActivate(e: MouseEvent) {
 
 <template>
   <div
-    class="block-wrapper relative rounded-lg  transition-[border-color,background,box-shadow] duration-150 hover:border-default"
+    class="block-wrapper relative rounded-lg transition-[border-color,background,box-shadow] duration-150 hover:border-default"
     :class="{
       'border-primary shadow-[0_0_0_3px_var(--ui-primary-muted,rgba(59,130,246,0.12))]': props.active,
     }"
@@ -109,7 +97,7 @@ function onActivate(e: MouseEvent) {
 
     <!-- === Hover-панель действий (справа, вертикально) === -->
     <div
-      class="absolute left-full top-0 z-20 flex -translate-x-0.5 flex-col items-center gap-1 rounded-lg border border-default bg-default p-1.5 shadow-md transition-[opacity,transform] duration-150"
+      class="absolute top-0 left-[calc(100%+5px)] z-20 flex flex-col items-center gap-1 rounded-lg border border-default bg-default p-1.5 shadow-md transition-[opacity,transform] duration-150 before:absolute before:inset-y-0 before:-left-[5px] before:w-[5px] before:content-['']"
       :class="hovered
         ? 'translate-x-0 opacity-100'
         : 'pointer-events-none opacity-0'"
@@ -117,8 +105,6 @@ function onActivate(e: MouseEvent) {
       @mouseenter="onPanelEnter"
       @mouseleave="onPanelLeave"
     >
-
-
       <!-- Вверх -->
       <button
         type="button"

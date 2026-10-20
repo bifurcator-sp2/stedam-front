@@ -394,7 +394,7 @@ function updateParam(index: number, updated: SettingItem) {
   <div
     class="flex min-w-0 flex-col gap-1.5"
     :class="mode === 'admin' && visibleChildren.length && isExpanded
-      ? 'relative gap-2 overflow-hidden rounded-[10px] border border-default bg-elevated px-3 pb-3 pl-3.5 pt-2.5 shadow-sm'
+      ? 'relative gap-2 overflow-hidden rounded-[10px] border border-default bg-elevated px-0 pb-3 pl-3.5 pt-2.5 shadow-sm'
       : ''"
   >
     <!-- ============ ICON ============ -->

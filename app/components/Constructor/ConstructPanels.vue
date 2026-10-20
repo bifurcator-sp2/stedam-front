@@ -10,26 +10,37 @@ interface Props {
   defaultViewportWidth?: number | null
   viewportStorageKey?: string
   showViewportPicker?: boolean
+  displayRight?: boolean
+  displayViewportSelector?: boolean
+  minLeftWidth?: number
+  maxLeftWidth?: number
+  minRightWidth?: number
+  maxRightWidth?: number
+  defaultLeftWidth?: number
+  defaultRightWidth?: number
 }
 
 const props = withDefaults(defineProps<Props>(), {
   leftTitle: '',
   mainTitle: '',
   rightTitle: '',
-  defaultViewportWidth: 834, // iPad Pro 11"
+  defaultViewportWidth: 834,
   viewportStorageKey: 'constructor:viewport-width',
   showViewportPicker: true,
+  displayRight: true,
+  displayViewportSelector: true,
+  minLeftWidth: 180,
+  maxLeftWidth: 500,
+  minRightWidth: 200,
+  maxRightWidth: 600,
+  defaultLeftWidth: 260,
+  defaultRightWidth: 500,
 })
 
 // ==================== Ресайз панелей ====================
 
-const MIN_LEFT = 180
-const MAX_LEFT = 500
-const MIN_RIGHT = 200
-const MAX_RIGHT = 600
-
-const leftWidth = ref(260)
-const rightWidth = ref(500)
+const leftWidth = ref(props.defaultLeftWidth)
+const rightWidth = ref(props.defaultRightWidth)
 
 type Side = 'left' | 'right' | null
 const resizing = ref<Side>(null)
@@ -62,15 +73,15 @@ function onPointerMove(e: PointerEvent) {
   const winW = window.innerWidth
 
   if (resizing.value === 'left') {
-    const maxByWindow = winW - rightWidth.value - 4 - 4 - MIN_RIGHT - 200
-    const max = Math.max(MIN_LEFT, Math.min(MAX_LEFT, maxByWindow))
+    const maxByWindow = winW - rightWidth.value - 4 - 4 - props.minRightWidth - 200
+    const max = Math.max(props.minLeftWidth, Math.min(props.maxLeftWidth, maxByWindow))
 
-    leftWidth.value = clamp(e.clientX - startOffset, MIN_LEFT, max)
+    leftWidth.value = clamp(e.clientX - startOffset, props.minLeftWidth, max)
   } else {
-    const maxByWindow = winW - leftWidth.value - 4 - 4 - MIN_LEFT - 200
-    const max = Math.max(MIN_RIGHT, Math.min(MAX_RIGHT, maxByWindow))
+    const maxByWindow = winW - leftWidth.value - 4 - 4 - props.minLeftWidth - 200
+    const max = Math.max(props.minRightWidth, Math.min(props.maxRightWidth, maxByWindow))
 
-    rightWidth.value = clamp(winW - e.clientX - startOffset, MIN_RIGHT, max)
+    rightWidth.value = clamp(winW - e.clientX - startOffset, props.minRightWidth, max)
   }
 }
 
@@ -98,9 +109,16 @@ onBeforeUnmount(() => {
   window.removeEventListener('blur', endResize)
 })
 
-const gridStyle = computed(() => ({
-  gridTemplateColumns: `${leftWidth.value}px 4px 1fr 4px ${rightWidth.value}px`,
-}))
+const gridStyle = computed(() => {
+  if (!props.displayRight) {
+    return {
+      gridTemplateColumns: `${leftWidth.value}px 4px 1fr`,
+    }
+  }
+  return {
+    gridTemplateColumns: `${leftWidth.value}px 4px 1fr 4px ${rightWidth.value}px`,
+  }
+})
 
 // ==================== Вьюпорт (эмуляция устройств) ====================
 
@@ -198,7 +216,8 @@ function applyCustomWidth() {
 }
 
 const viewportStyle = computed(() => {
-  if (viewportWidth.value === null) {
+  // Если управление вьюпортом отключено, всегда растягиваем на 100%
+  if (!props.displayViewportSelector || viewportWidth.value === null) {
     return { width: '100%', maxWidth: '100%' }
   }
   return {
@@ -207,7 +226,16 @@ const viewportStyle = computed(() => {
   }
 })
 
-const isViewportBounded = computed(() => viewportWidth.value !== null)
+const isViewportBounded = computed(() => {
+  // Если управление вьюпортом отключено, ограничений нет
+  if (!props.displayViewportSelector) return false
+  return viewportWidth.value !== null
+})
+
+// Классы для пунктирных границ эмуляции вьюпорта (используются условно).
+// Строка должна присутствовать в файле целиком, чтобы Tailwind её обнаружил.
+const boundedScreenClasses =
+  "before:absolute before:inset-y-0 before:left-0 before:w-0 before:border-l-2 before:border-dashed before:border-[var(--ui-border,#a5acb5)] before:pointer-events-none before:content-[''] after:absolute after:inset-y-0 after:right-0 after:w-0 after:border-l-2 after:border-dashed after:border-[var(--ui-border,#a5acb5)] after:pointer-events-none after:content-['']"
 
 // ==================== Публичный API ====================
 
@@ -222,120 +250,141 @@ defineExpose({
 </script>
 
 <template>
-  <div class="constructor-root">
-    <div class="constructor-grid" :style="gridStyle">
+  <div class="w-full h-dvh overflow-hidden bg-[var(--ui-bg,#ffffff)]">
+    <div class="grid h-full w-full" :style="gridStyle">
       <!-- === ЛЕВАЯ ПАНЕЛЬ === -->
-      <aside class="panel panel-left">
-        <header class="panel-header">
-          <div class="panel-header-row">
+      <aside class="flex flex-col min-w-0 min-h-0 overflow-hidden border-r border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)]">
+        <header class="shrink-0 h-12 px-4 flex items-center text-xs font-semibold text-[var(--ui-text-muted,#6b7280)] uppercase tracking-wider border-b border-[var(--ui-border,#e5e7eb)]">
+          <div class="flex items-center justify-between w-full gap-2">
             <slot name="left-header">
               <span>{{ props.leftTitle }}</span>
             </slot>
           </div>
         </header>
-        <div class="panel-body">
+        <div class="flex-auto min-h-0 overflow-y-auto overflow-x-hidden">
           <slot name="left" />
         </div>
       </aside>
 
       <!-- === ЛЕВЫЙ РЕСАЙЗЕР === -->
       <div
-        class="resizer"
-        :class="{ 'resizer-active': resizing === 'left' }"
+        class="group relative w-1 cursor-col-resize bg-transparent flex items-center justify-center transition-colors select-none touch-none hover:bg-[var(--ui-primary,#3b82f6)] before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:cursor-col-resize before:z-[1] before:content-['']"
+        :class="{ 'bg-[var(--ui-primary,#3b82f6)]': resizing === 'left' }"
         @pointerdown="startResize('left', $event)"
       >
-        <div class="resizer-bar" />
+        <div
+          class="w-0.5 h-8 rounded-sm transition-colors pointer-events-none"
+          :class="resizing === 'left' ? 'bg-white' : 'bg-[var(--ui-border,#d1d5db)] group-hover:bg-white'"
+        />
       </div>
 
       <!-- === ЦЕНТР === -->
-      <main class="panel panel-center">
-        <header class="panel-header panel-header--center">
+      <main class="flex flex-col min-w-0 min-h-0 overflow-hidden">
+        <header class="shrink-0 h-12 px-4 grid grid-cols-[1fr_auto_1fr] items-center text-xs font-semibold text-[var(--ui-text-muted,#6b7280)] uppercase tracking-wider border-b border-[var(--ui-border,#e5e7eb)] gap-3">
           <!-- Слева: заголовок (или слот) -->
-          <div class="panel-header__left">
+          <div class="flex items-center justify-start min-w-0">
             <slot name="main-header">
               <span>{{ props.mainTitle }}</span>
             </slot>
           </div>
 
-          <!-- По центру: управление вьюпортом — всегда видно -->
-          <div class="panel-header__center">
-            <div class="viewport-picker">
+          <!-- По центру: управление вьюпортом (скрывается пропсом) -->
+          <div v-if="displayViewportSelector" class="flex items-center justify-center">
+            <div class="relative">
               <button
                 type="button"
-                class="viewport-picker__button"
+                class="inline-flex items-center gap-1 h-[26px] px-2 rounded-md border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] text-[var(--ui-text,#111827)] text-[11px] font-mono cursor-pointer transition-colors duration-150 hover:border-[var(--ui-primary,#3b82f6)] hover:bg-[var(--ui-bg-elevated,#f9fafb)]"
                 :title="activePreset?.label ?? 'Авто'"
                 @click="viewportMenuOpen = !viewportMenuOpen"
               >
                 <UIcon
                   :name="activePreset?.icon ?? 'i-lucide-maximize'"
-                  class="viewport-picker__icon"
+                  class="w-[13px] h-[13px] text-[var(--ui-text-muted,#6b7280)]"
                 />
-                <span class="viewport-picker__value">{{ viewportLabel }}</span>
-                <UIcon name="i-lucide-chevron-down" class="viewport-picker__chevron" />
+                <span class="min-w-7 text-right">{{ viewportLabel }}</span>
+                <UIcon name="i-lucide-chevron-down" class="w-3 h-3 text-[var(--ui-text-muted,#9ca3af)]" />
               </button>
 
               <Transition name="viewport-menu-fade">
                 <div
                   v-if="viewportMenuOpen"
-                  class="viewport-menu"
+                  class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 z-[100] min-w-[260px] max-h-[70vh] overflow-y-auto p-1 rounded-lg border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
                   @click.stop
                 >
                   <!-- Авто -->
                   <button
                     type="button"
-                    class="viewport-menu__item"
-                    :class="{ 'viewport-menu__item--active': viewportWidth === null }"
+                    class="flex items-center gap-2 w-full px-2 py-1.5 border-none rounded-[5px] bg-transparent text-left text-xs cursor-pointer transition-colors duration-100"
+                    :class="viewportWidth === null
+                      ? 'bg-[var(--ui-primary,#3b82f6)] text-white'
+                      : 'text-[var(--ui-text,#111827)] hover:bg-[var(--ui-bg-muted,rgba(59,130,246,0.08))]'"
                     @click="selectAuto"
                   >
-                    <UIcon name="i-lucide-maximize" class="viewport-menu__icon" />
-                    <span class="viewport-menu__label">Без ограничения</span>
-                    <span class="viewport-menu__width">авто</span>
+                    <UIcon
+                      name="i-lucide-maximize"
+                      class="shrink-0 w-3.5 h-3.5"
+                      :class="viewportWidth === null ? 'text-white' : 'text-[var(--ui-text-muted,#6b7280)]'"
+                    />
+                    <span class="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">Без ограничения</span>
+                    <span
+                      class="shrink-0 text-[11px] font-mono"
+                      :class="viewportWidth === null ? 'text-white' : 'text-[var(--ui-text-muted,#6b7280)]'"
+                    >авто</span>
                   </button>
 
-                  <div class="viewport-menu__divider" />
+                  <div class="h-px my-1 bg-[var(--ui-border,#e5e7eb)]" />
 
                   <!-- Пресеты по группам -->
                   <template
                     v-for="(group, groupName) in groupedPresets"
                     :key="groupName"
                   >
-                    <div class="viewport-menu__group">{{ groupName }}</div>
+                    <div class="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--ui-text-muted,#9ca3af)]">{{ groupName }}</div>
 
                     <button
                       v-for="preset in group"
                       :key="preset.key"
                       type="button"
-                      class="viewport-menu__item"
-                      :class="{ 'viewport-menu__item--active': activePreset?.key === preset.key }"
+                      class="flex items-center gap-2 w-full px-2 py-1.5 border-none rounded-[5px] bg-transparent text-left text-xs cursor-pointer transition-colors duration-100"
+                      :class="activePreset?.key === preset.key
+                        ? 'bg-[var(--ui-primary,#3b82f6)] text-white'
+                        : 'text-[var(--ui-text,#111827)] hover:bg-[var(--ui-bg-muted,rgba(59,130,246,0.08))]'"
                       @click="selectPreset(preset)"
                     >
-                      <UIcon :name="preset.icon" class="viewport-menu__icon" />
-                      <span class="viewport-menu__label">{{ preset.label }}</span>
-                      <span class="viewport-menu__width">{{ preset.width }}</span>
+                      <UIcon
+                        :name="preset.icon"
+                        class="shrink-0 w-3.5 h-3.5"
+                        :class="activePreset?.key === preset.key ? 'text-white' : 'text-[var(--ui-text-muted,#6b7280)]'"
+                      />
+                      <span class="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{{ preset.label }}</span>
+                      <span
+                        class="shrink-0 text-[11px] font-mono"
+                        :class="activePreset?.key === preset.key ? 'text-white' : 'text-[var(--ui-text-muted,#6b7280)]'"
+                      >{{ preset.width }}</span>
                     </button>
                   </template>
 
-                  <div class="viewport-menu__divider" />
+                  <div class="h-px my-1 bg-[var(--ui-border,#e5e7eb)]" />
 
                   <!-- Произвольная ширина -->
-                  <div class="viewport-menu__custom">
-                    <UIcon name="i-lucide-pencil-ruler" class="viewport-menu__icon" />
-                    <span class="viewport-menu__label">Своя ширина</span>
-                    <div class="viewport-menu__input-wrap">
+                  <div class="flex items-center gap-2 px-2 py-1.5">
+                    <UIcon name="i-lucide-pencil-ruler" class="shrink-0 w-3.5 h-3.5 text-[var(--ui-text-muted,#6b7280)]" />
+                    <span class="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[var(--ui-text,#111827)]">Своя ширина</span>
+                    <div class="relative inline-flex items-center flex-auto">
                       <input
                         v-model="customWidth"
                         type="number"
                         min="320"
                         max="3840"
                         placeholder="px"
-                        class="viewport-menu__input"
+                        class="w-full h-6 pl-1.5 pr-[22px] rounded-[5px] border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] text-[11px] font-mono text-[var(--ui-text,#111827)] text-right focus:outline-none focus:border-[var(--ui-primary,#3b82f6)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-inner-spin-button]:m-0"
                         @keydown.enter="applyCustomWidth"
                       />
-                      <span class="viewport-menu__input-suffix">px</span>
+                      <span class="absolute right-1.5 text-[10px] text-[var(--ui-text-muted,#9ca3af)] pointer-events-none">px</span>
                     </div>
                     <button
                       type="button"
-                      class="viewport-menu__apply"
+                      class="inline-flex items-center justify-center w-6 h-6 p-0 border-none rounded-[5px] bg-[var(--ui-primary,#3b82f6)] text-white cursor-pointer transition-colors duration-150 hover:bg-[#2563eb] [&_svg]:w-3.5 [&_svg]:h-3.5"
                       title="Применить"
                       @click="applyCustomWidth"
                     >
@@ -347,471 +396,72 @@ defineExpose({
 
               <div
                 v-if="viewportMenuOpen"
-                class="viewport-backdrop"
+                class="fixed inset-0 z-[99]"
                 @click="viewportMenuOpen = false"
               />
             </div>
           </div>
 
-          <!-- Справа: пустая зона-балансир (можно положить что-то через слот) -->
-          <div class="panel-header__right">
+          <!-- Справа: пустая зона-балансир -->
+          <div class="flex items-center justify-end min-w-0">
             <slot name="main-header-right" />
           </div>
         </header>
 
-        <div class="panel-body">
-          <!-- Рамка эмуляции вьюпорта — часть UI ConstructPanels -->
+        <div class="flex-auto min-h-0 overflow-y-auto overflow-x-hidden">
+          <!-- Рамка эмуляции вьюпорта -->
           <div
-            class="viewport-frame"
-            :class="{ 'viewport-frame--bounded': isViewportBounded }"
+            class="flex flex-col items-center gap-2 py-4 relative"
+            :class="{ 'py-6 px-4': isViewportBounded }"
           >
             <div
-              class="viewport-frame__screen bg-default mx-auto"
+              class="bg-default mx-auto transition-[width,max-width] duration-200 relative"
               :style="viewportStyle"
-              :class="{ 'viewport-frame__screen--bounded': isViewportBounded }"
+              :class="isViewportBounded ? boundedScreenClasses : ''"
             >
               <slot name="main" />
             </div>
 
-            <div v-if="isViewportBounded" class="viewport-frame__label">
-              <UIcon name="i-lucide-monitor" class="viewport-frame__label-icon" />
+            <div
+              v-if="isViewportBounded"
+              class="inline-flex items-center gap-1.5 px-2.5 py-[3px] rounded-full bg-[var(--ui-bg-elevated,#f9fafb)] border border-[var(--ui-border,#e5e7eb)] text-[11px] font-mono text-[var(--ui-text-muted,#6b7280)] pointer-events-none select-none"
+            >
+              <UIcon name="i-lucide-monitor" class="w-3 h-3 opacity-70" />
               <span>{{ viewportWidth }} px</span>
             </div>
           </div>
         </div>
       </main>
 
-      <!-- === ПРАВЫЙ РЕСАЙЗЕР === -->
+      <!-- === ПРАВЫЙ РЕСАЙЗЕР (только если displayRight) === -->
       <div
-        class="resizer"
-        :class="{ 'resizer-active': resizing === 'right' }"
+        v-if="displayRight"
+        class="group relative w-1 cursor-col-resize bg-transparent flex items-center justify-center transition-colors select-none touch-none hover:bg-[var(--ui-primary,#3b82f6)] before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:cursor-col-resize before:z-[1] before:content-['']"
+        :class="{ 'bg-[var(--ui-primary,#3b82f6)]': resizing === 'right' }"
         @pointerdown="startResize('right', $event)"
       >
-        <div class="resizer-bar" />
+        <div
+          class="w-0.5 h-8 rounded-sm transition-colors pointer-events-none"
+          :class="resizing === 'right' ? 'bg-white' : 'bg-[var(--ui-border,#d1d5db)] group-hover:bg-white'"
+        />
       </div>
 
-      <!-- === ПРАВАЯ ПАНЕЛЬ === -->
-      <aside class="panel panel-right">
-        <header class="panel-header">
-          <div class="panel-header-row">
+      <!-- === ПРАВАЯ ПАНЕЛЬ (только если displayRight) === -->
+      <aside
+        v-if="displayRight"
+        class="flex flex-col min-w-0 min-h-0 overflow-hidden border-l border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)]"
+      >
+        <header class="shrink-0 h-12 px-4 flex items-center text-xs font-semibold text-[var(--ui-text-muted,#6b7280)] uppercase tracking-wider border-b border-[var(--ui-border,#e5e7eb)]">
+          <div class="flex items-center justify-between w-full gap-2">
             <slot name="right-header">
               <span>{{ props.rightTitle }}</span>
             </slot>
           </div>
         </header>
-        <div class="panel-body">
+        <div class="flex-auto min-h-0 overflow-y-auto overflow-x-hidden">
           <slot name="right" />
         </div>
       </aside>
     </div>
   </div>
 </template>
-
-<style scoped>
-/* ==================== Общая структура ==================== */
-
-.constructor-root {
-  width: 100%;
-  height: 100dvh;
-  overflow: hidden;
-  background: var(--ui-bg, #ffffff);
-}
-
-.constructor-grid {
-  display: grid;
-  height: 100%;
-  width: 100%;
-}
-
-.panel {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.panel-left {
-  border-right: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-}
-
-.panel-right {
-  border-left: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-}
-
-.panel-center {
-}
-
-.panel-header {
-  flex-shrink: 0;
-  height: 48px;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ui-text-muted, #6b7280);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--ui-border, #e5e7eb);
-}
-
-.panel-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 8px;
-}
-
-.panel-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
-/* ==================== Центральный хедер: три зоны ==================== */
-
-.panel-header--center {
-  /* Перебиваем flex-раскладку базового .panel-header */
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 12px;
-}
-
-.panel-header--center .panel-header__left {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  min-width: 0;
-}
-
-.panel-header--center .panel-header__center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.panel-header--center .panel-header__right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-/* ==================== Ресайзеры ==================== */
-
-.resizer {
-  position: relative;
-  width: 4px;
-  cursor: col-resize;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease;
-  user-select: none;
-  touch-action: none;
-}
-
-.resizer::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  right: -4px;
-  cursor: col-resize;
-  z-index: 1;
-}
-
-.resizer:hover,
-.resizer-active {
-  background: var(--ui-primary, #3b82f6);
-}
-
-.resizer-bar {
-  width: 2px;
-  height: 32px;
-  border-radius: 2px;
-  background: var(--ui-border, #d1d5db);
-  transition: background 0.15s ease;
-  pointer-events: none;
-}
-
-.resizer:hover .resizer-bar,
-.resizer-active .resizer-bar {
-  background: #ffffff;
-}
-
-/* ==================== Управление шириной вьюпорта ==================== */
-
-.viewport-picker {
-  position: relative;
-}
-
-.viewport-picker__button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-  color: var(--ui-text, #111827);
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.viewport-picker__button:hover {
-  border-color: var(--ui-primary, #3b82f6);
-  background: var(--ui-bg-elevated, #f9fafb);
-}
-
-.viewport-picker__icon {
-  width: 13px;
-  height: 13px;
-  color: var(--ui-text-muted, #6b7280);
-}
-
-.viewport-picker__value {
-  min-width: 28px;
-  text-align: right;
-}
-
-.viewport-picker__chevron {
-  width: 12px;
-  height: 12px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.viewport-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 99;
-}
-
-.viewport-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 100;
-  min-width: 260px;
-  max-height: 70vh;
-  overflow-y: auto;
-  padding: 4px;
-  border-radius: 8px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-.viewport-menu__group {
-  padding: 6px 8px 2px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.viewport-menu__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  text-align: left;
-  font-size: 12px;
-  color: var(--ui-text, #111827);
-  cursor: pointer;
-  transition: background 0.1s;
-}
-
-.viewport-menu__item:hover {
-  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.08));
-}
-
-.viewport-menu__item--active {
-  background: var(--ui-primary, #3b82f6);
-  color: #ffffff;
-}
-
-.viewport-menu__item--active .viewport-menu__icon,
-.viewport-menu__item--active .viewport-menu__width {
-  color: #ffffff;
-}
-
-.viewport-menu__icon {
-  flex-shrink: 0;
-  width: 14px;
-  height: 14px;
-  color: var(--ui-text-muted, #6b7280);
-}
-
-.viewport-menu__label {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.viewport-menu__width {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--ui-text-muted, #6b7280);
-}
-
-.viewport-menu__divider {
-  height: 1px;
-  margin: 4px 0;
-  background: var(--ui-border, #e5e7eb);
-}
-
-.viewport-menu__custom {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-}
-
-.viewport-menu__input-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  flex: 1 1 auto;
-}
-
-.viewport-menu__input {
-  width: 100%;
-  height: 24px;
-  padding: 0 22px 0 6px;
-  border-radius: 5px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--ui-text, #111827);
-  text-align: right;
-}
-
-.viewport-menu__input:focus {
-  outline: none;
-  border-color: var(--ui-primary, #3b82f6);
-}
-
-.viewport-menu__input::-webkit-outer-spin-button,
-.viewport-menu__input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.viewport-menu__input[type='number'] {
-  -moz-appearance: textfield;
-}
-
-.viewport-menu__input-suffix {
-  position: absolute;
-  right: 6px;
-  font-size: 10px;
-  color: var(--ui-text-muted, #9ca3af);
-  pointer-events: none;
-}
-
-.viewport-menu__apply {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 5px;
-  background: var(--ui-primary, #3b82f6);
-  color: #ffffff;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.viewport-menu__apply:hover {
-  background: #2563eb;
-}
-
-.viewport-menu__apply :deep(svg) {
-  width: 14px;
-  height: 14px;
-}
-
-/* ==================== Рамка эмуляции ==================== */
-
-.viewport-frame {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 16px 0;
-  position: relative;
-}
-
-.viewport-frame--bounded {
-  padding: 24px 16px;
-}
-
-.viewport-frame__screen {
-  transition: width 0.2s ease, max-width 0.2s ease;
-  position: relative;
-}
-
-.viewport-frame__screen--bounded::before,
-.viewport-frame__screen--bounded::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-left: 2px dashed var(--ui-border, #a5acb5);
-  pointer-events: none;
-}
-
-.viewport-frame__screen--bounded::before {
-  left: 0;
-}
-
-.viewport-frame__screen--bounded::after {
-  right: 0;
-}
-
-.viewport-frame__label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: var(--ui-bg-elevated, #f9fafb);
-  border: 1px solid var(--ui-border, #e5e7eb);
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--ui-text-muted, #6b7280);
-  pointer-events: none;
-  user-select: none;
-}
-
-.viewport-frame__label-icon {
-  width: 12px;
-  height: 12px;
-  opacity: 0.7;
-}
-</style>

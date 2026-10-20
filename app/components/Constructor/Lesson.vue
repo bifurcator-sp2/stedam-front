@@ -14,16 +14,19 @@ import type {
 } from '~/types/lesson'
 
 const api = useApi()
+const toast = useToast()
 
 // ==================== Props ====================
 
 interface Props {
   structItems: BlockStructItem[]
   activeBlockLocalId?: string | null
+  isReadOnly?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   activeBlockLocalId: null,
+  isReadOnly: false,
 })
 
 // ==================== Модель ====================
@@ -286,6 +289,45 @@ const { totalChars, readingTimeText } = useContentStats({
   watchSource: () => lesson.value,
 })
 
+// ==================== Защита от редактирования ====================
+
+let isToastVisible = false
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+
+function showReadOnlyToast() {
+  if (isToastVisible) return
+  isToastVisible = true
+
+  toast.add({
+    title: 'Урок опубликован',
+    description: 'Снимите урок с публикации, чтобы редактировать его.',
+    color: 'warning',
+    icon: 'i-lucide-lock',
+    timeout: 3000,
+  })
+
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    isToastVisible = false
+    toastTimer = null
+  }, 3000)
+}
+
+function handleOverlayClick() {
+  if (props.isReadOnly) {
+    showReadOnlyToast()
+  }
+}
+
+function handleFocusIn(e: FocusEvent) {
+  if (!props.isReadOnly) return
+  const target = e.target as HTMLElement
+  if (target && typeof target.blur === 'function') {
+    target.blur()
+  }
+  showReadOnlyToast()
+}
+
 // ==================== Глобальная деактивация ====================
 
 function onGlobalPointerDown(e: PointerEvent) {
@@ -311,6 +353,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('dragend', clearDragOver)
   document.removeEventListener('pointerdown', onGlobalPointerDown, true)
+  if (toastTimer) clearTimeout(toastTimer)
 })
 
 function clearDragOver() {
@@ -323,22 +366,21 @@ defineExpose({
   removeBlock,
   duplicateBlock,
 })
-
-// ==================== Статус публикации ====================
-
-function togglePublished() {
-  lesson.value = { ...lesson.value, published: !lesson.value.published }
-}
 </script>
 
 <template>
-  <div ref="contentRef" class="flex flex-col gap-4 min-h-full">
+  <div
+    ref="contentRef"
+    class="relative flex flex-col gap-4 min-h-full"
+    @focusin="handleFocusIn"
+  >
     <!-- === Шапка урока === -->
     <div class="flex flex-col gap-2">
       <input
         class="w-full p-0 border-none bg-transparent text-[28px] font-bold leading-tight text-[var(--ui-text,#0f172a)] outline-none placeholder:text-[var(--ui-text-muted,#cbd5e1)]"
         :value="lesson.title"
         placeholder="Заголовок урока"
+        :readonly="isReadOnly"
         @input="updateTitle(($event.target as HTMLInputElement).value)"
       />
       <textarea
@@ -346,11 +388,12 @@ function togglePublished() {
         :value="lesson.description"
         placeholder="Краткое описание урока"
         rows="1"
+        :readonly="isReadOnly"
         @input="updateDescription(($event.target as HTMLTextAreaElement).value)"
       />
     </div>
 
-    <!-- === Статистика и статус === -->
+    <!-- === Статистика === -->
     <div
       class="flex items-center justify-between py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
     >
@@ -370,28 +413,9 @@ function togglePublished() {
         </span>
       </div>
 
-      <!-- Правая часть: раздел + свитч публикации -->
+      <!-- Правая часть: раздел -->
       <div class="flex items-center gap-4">
-        <!-- КОМПОНЕНТ ВЫБОРА РАЗДЕЛА -->
         <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" />
-
-        <!-- Свитч публикации -->
-        <div
-          class="flex items-center gap-2 cursor-pointer select-none"
-          @click="togglePublished"
-        >
-          <USwitch
-            v-model="lesson.published"
-            color="success"
-            size="xs"
-          />
-          <span
-            class="text-[10px] font-bold uppercase tracking-widest transition-colors"
-            :class="lesson.published ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'"
-          >
-            {{ lesson.published ? 'Опубликован' : 'Черновик' }}
-          </span>
-        </div>
       </div>
     </div>
 
@@ -423,6 +447,7 @@ function togglePublished() {
       drag-class="block-drag"
       class="flex flex-col min-h-[100px]"
       :filter="'[data-drop-zone]'"
+      :disabled="isReadOnly"
       @dragleave="onDragLeave"
     >
       <template #default>
@@ -496,6 +521,13 @@ function togglePublished() {
         </template>
       </template>
     </VueDraggable>
+
+    <!-- === ТОТАЛЬНЫЙ ОВЕРЛЕЙ (перехватывает все клики) === -->
+    <div
+      v-if="isReadOnly"
+      class="absolute inset-0 z-50 bg-transparent cursor-not-allowed"
+      @click="handleOverlayClick"
+    />
   </div>
 </template>
 

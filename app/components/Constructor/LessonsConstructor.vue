@@ -81,6 +81,14 @@ const centerTitle = computed(() => {
   return 'Новый урок'
 })
 
+// ==================== Статус публикации ====================
+
+const isReadOnly = computed(() => lesson.value.published)
+
+function togglePublished() {
+  lesson.value = { ...lesson.value, published: !lesson.value.published }
+}
+
 // ==================== Утилиты diff / patch ====================
 
 function unwrapProxy(v: any): any {
@@ -207,7 +215,6 @@ async function loadLesson(id: number) {
     const nextRawStates: Record<string, RawState> = {}
 
     const blocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-      // Ищем настройки по умолчанию в новом дереве
       const defaultSettings = findBlockSettingsInTree(structItems.value, b.block_id)
 
       const view = mergeFlat(
@@ -458,7 +465,8 @@ const { remaining: autosaveRemaining, cancel: cancelAutosave } = useAutosave({
   canRun: () =>
     !!lesson.value.id
     && lesson.value.blocks.length > 0
-    && !busy.value,
+    && !busy.value
+    && !isReadOnly.value, // Не запускаем автосохранение, если урок опубликован
   save,
   watchSource: () => lesson.value,
   isProgrammatic: () => isProgrammatic.value,
@@ -568,56 +576,95 @@ onBeforeUnmount(() => {
           v-model="lesson"
           v-model:active-block-local-id="activeBlockLocalId"
           :struct-items="structItems"
+          :is-read-only="isReadOnly"
         />
       </LoadingOverlay>
     </template>
 
     <!-- ==================== RIGHT HEADER ==================== -->
     <template #right-header>
-      <span>Свойства</span>
+      <div class="flex w-full items-center justify-between gap-2">
+        <span>Свойства</span>
 
-      <div class="flex min-w-0 items-center gap-2">
-        <Transition name="autosave-fade">
-          <span
-            v-if="autosaveRemaining !== null"
-            class="inline-flex items-center gap-[5px] rounded-full border border-(--ui-border) bg-(--ui-bg-elevated) px-2 py-[3px] text-[11px] font-semibold tabular-nums text-(--ui-text-muted)"
-            :title="`Автосохранение произойдет через ${autosaveRemaining} с`"
-          >
-            <UIcon name="i-lucide-save" class="h-3 w-3 text-(--ui-primary)" />
-            <span class="min-w-[10px] text-center">
-              {{ autosaveRemaining }}
+        <div class="flex items-center gap-3">
+          <Transition name="autosave-fade">
+            <span
+              v-if="autosaveRemaining !== null && !isReadOnly"
+              class="inline-flex items-center gap-[5px] rounded-full border border-(--ui-border) bg-(--ui-bg-elevated) px-2 py-[3px] text-[11px] font-semibold tabular-nums text-(--ui-text-muted)"
+              :title="`Автосохранение произойдет через ${autosaveRemaining} с`"
+            >
+              <UIcon name="i-lucide-save" class="h-3 w-3 text-(--ui-primary)" />
+              <span class="min-w-[10px] text-center">
+                {{ autosaveRemaining }}
+              </span>
             </span>
-          </span>
-        </Transition>
+          </Transition>
 
-        <UButton
-          icon="i-lucide-save"
-          size="xs"
-          color="primary"
-          variant="soft"
-          :loading="saving"
-          :disabled="busy || lesson.blocks.length === 0"
-          @click="save"
-        >
-          Сохранить
-        </UButton>
+          <!-- Свитч публикации -->
+          <div
+            class="flex items-center gap-2 cursor-pointer select-none"
+            @click="togglePublished"
+          >
+            <USwitch
+              v-model="lesson.published"
+              color="success"
+              size="xs"
+            />
+            <span
+              class="text-[10px] font-bold uppercase tracking-widest transition-colors"
+              :class="lesson.published ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'"
+            >
+              {{ lesson.published ? 'Опубликован' : 'Черновик' }}
+            </span>
+          </div>
+
+          <!-- Кнопка Сохранить (теперь доступна всегда) -->
+          <UButton
+            icon="i-lucide-save"
+            size="xs"
+            color="primary"
+            variant="soft"
+            :loading="saving"
+            :disabled="busy || lesson.blocks.length === 0"
+            @click="save"
+          >
+            Сохранить
+          </UButton>
+        </div>
       </div>
     </template>
 
     <!-- ==================== RIGHT ==================== -->
     <template #right>
       <LoadingOverlay :loading="busy">
-        <div v-if="!activeBlock" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
-          Выберите блок в центре.
+        <!-- Если урок опубликован, скрываем панель настроек -->
+        <div
+          v-if="isReadOnly"
+          class="flex h-full flex-col items-center justify-center p-6 text-center text-(--ui-text-muted)"
+        >
+          <div class="mb-3 flex size-12 items-center justify-center rounded-full bg-warning/10">
+            <UIcon name="i-lucide-lock" class="size-6 text-warning" />
+          </div>
+          <p class="text-sm font-medium text-(--ui-text-highlighted)">Урок опубликован</p>
+          <p class="mt-1 max-w-[200px] text-xs leading-snug">
+            Снимите урок с публикации с помощью переключателя сверху, чтобы вносить изменения.
+          </p>
         </div>
 
-        <BlocksSettingsPanel
-          v-else
-          model-name="lesson_blocks"
-          mode="public"
-          :id="activeBlockIdModel"
-          v-model:settings="activeBlockSettingsModel"
-        />
+        <!-- Если черновик, показываем панель -->
+        <template v-else>
+          <div v-if="!activeBlock" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
+            Выберите блок в центре.
+          </div>
+
+          <BlocksSettingsPanel
+            v-else
+            model-name="lesson_blocks"
+            mode="public"
+            :id="activeBlockIdModel"
+            v-model:settings="activeBlockSettingsModel"
+          />
+        </template>
       </LoadingOverlay>
     </template>
   </ConstructPanels>
