@@ -216,7 +216,6 @@ function applyCustomWidth() {
 }
 
 const viewportStyle = computed(() => {
-  // Если управление вьюпортом отключено, всегда растягиваем на 100%
   if (!props.displayViewportSelector || viewportWidth.value === null) {
     return { width: '100%', maxWidth: '100%' }
   }
@@ -227,15 +226,29 @@ const viewportStyle = computed(() => {
 })
 
 const isViewportBounded = computed(() => {
-  // Если управление вьюпортом отключено, ограничений нет
   if (!props.displayViewportSelector) return false
   return viewportWidth.value !== null
 })
 
-// Классы для пунктирных границ эмуляции вьюпорта (используются условно).
-// Строка должна присутствовать в файле целиком, чтобы Tailwind её обнаружил.
+// Классы для пунктирных границ эмуляции вьюпорта
 const boundedScreenClasses =
   "before:absolute before:inset-y-0 before:left-0 before:w-0 before:border-l-2 before:border-dashed before:border-[var(--ui-border,#a5acb5)] before:pointer-events-none before:content-[''] after:absolute after:inset-y-0 after:right-0 after:w-0 after:border-l-2 after:border-dashed after:border-[var(--ui-border,#a5acb5)] after:pointer-events-none after:content-['']"
+
+// ==================== Кастомный скроллбар ====================
+
+const panelScrollClasses =
+  "overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] " +
+  // Firefox
+  "[scrollbar-width:thin] [scrollbar-color:transparent_transparent] " +
+  "hover:[scrollbar-color:var(--ui-border,#e5e7eb)_transparent] " +
+  // WebKit (трек прозрачный)
+  "[&::-webkit-scrollbar]:w-1.5 " +
+  "[&::-webkit-scrollbar-track]:bg-transparent " +
+  // WebKit (ползунок)
+  "[&::-webkit-scrollbar-thumb]:bg-transparent " +
+  "[&::-webkit-scrollbar-thumb]:rounded-full " + // <- Закругление краев плашки
+  "hover:[&::-webkit-scrollbar-thumb]:bg-[var(--ui-border,#e5e7eb)] " +
+  "[&::-webkit-scrollbar-thumb:hover]:bg-[var(--ui-text-muted,#9ca3af)]"
 
 // ==================== Публичный API ====================
 
@@ -261,7 +274,7 @@ defineExpose({
             </slot>
           </div>
         </header>
-        <div class="flex-auto min-h-0 overflow-y-auto overflow-x-hidden">
+        <div class="flex-auto min-h-0" :class="panelScrollClasses">
           <slot name="left" />
         </div>
       </aside>
@@ -408,7 +421,7 @@ defineExpose({
           </div>
         </header>
 
-        <div class="flex-auto min-h-0 overflow-y-auto overflow-x-hidden">
+        <div class="flex-auto min-h-0" :class="panelScrollClasses">
           <!-- Рамка эмуляции вьюпорта -->
           <div
             class="flex flex-col items-center gap-2 py-4 relative"
@@ -458,7 +471,7 @@ defineExpose({
             </slot>
           </div>
         </header>
-        <div class="flex-auto min-h-0 overflow-y-auto overflow-x-hidden">
+        <div class="flex-auto min-h-0" :class="panelScrollClasses">
           <slot name="right" />
         </div>
       </aside>

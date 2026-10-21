@@ -1,19 +1,5 @@
 <script setup lang="ts">
-// app/components/Constructor/BlocksConstructor.vue
-//
-// Конструктор блоков (библиотека).
-// Задачи:
-//   1. Левая панель — типы блоков + список сохранённых блоков.
-//   2. Центр — режим списка ИЛИ редактор блока (TextBlock).
-//   3. Правая панель — BlocksSettingsPanel для активного блока.
-//
-// Изменения относительно предыдущей версии:
-//   • mergeSchemaWithSaved заменён на mergeFlat (из ~/utils/constructors).
-//   • При сохранении settings сжимается через unmergeFlat.
-//   • При загрузке settings разворачивается через mergeFlat.
-//   • Убран FileContainer и payload.files/payload.images — изображения
-//     теперь живут внутри settings (images.gallery.default) и сохраняются
-//     вместе с деревом настроек.
+
 
 import { ref, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
@@ -113,32 +99,48 @@ const editingBlock = ref<BlockItem | null>(null)
 const blockKey = ref(0)
 
 // ==================== Создание блока ====================
+async function createBlockFromType(type: BlockType): Promise<BlockItem> {
+  // Загружаем шаблон схемы с сервера по коду типа блока
+  const res = await api.get<BlockResource | { data: BlockResource }>(
+    `/block/template/${type.code}`,
+  )
 
-function createBlockFromType(type: BlockType): BlockItem {
-  const schema = Array.isArray(type.default_settings) ? type.default_settings : []
+  const template =
+    (res as { data?: BlockResource }).data ?? (res as BlockResource)
+
+  // Схема настроек из шаблона; fallback — дефолтные настройки типа
+  const schema = Array.isArray(template?.settings)
+    ? template.settings
+    : type.default_settings
 
   return {
     id: 0,
     code: type.code,
     block_type_id: type.id,
-    title: type.name,
-    description: type.description ?? '',
-    icon: iconOf(type),
+    title: template?.title ?? template?.name ?? type.name,
+    description: template?.description ?? type.description ?? '',
+    icon: iconOfSettings(template?.settings) || iconOf(type),
     schema,
-    default_settings: type.default_settings,
+    default_settings:
+      (template as any)?.default_settings ?? type.default_settings,
     settings: structuredClone(schema),
     parent_block_index_ids: [],
     published: false,
   }
 }
 
-function addBlock(type: BlockType) {
-  editingBlock.value = createBlockFromType(type)
+async function addBlock(type: BlockType) {
+  try {
+    editingBlock.value = await createBlockFromType(type)
 
-  router.replace({
-    query: { addBlock: type.code },
-  })
+    router.replace({
+      query: { addBlock: type.code },
+    })
+  } catch (e) {
+    console.error('[addBlock] failed', e)
+  }
 }
+
 
 // ==================== Режим списка ====================
 
@@ -243,21 +245,21 @@ watch(
         return
       }
 
-      const item = createBlockFromType(type)
+/*      const item = createBlockFromType(type)
 
       // Разворачиваем плоские переопределения в полное дерево
       const fullSettings = mergeFlat(
         type.default_settings,
         isPlainSettings(block.settings) ? block.settings : undefined,
         undefined,
-      )
+      )*/
 
       editingBlock.value = {
-        ...item,
+        ...block,
         id: block.id,
-        title: block.title ?? item.title,
-        description: block.description ?? item.description,
-        settings: fullSettings,
+        title: block.title??'',
+        description: block.description??'',
+        settings: block.settings ?? [],
         parent_block_index_ids: block.parent_block_index_ids ?? [],
         published: block.published ?? false,
       }
@@ -336,17 +338,17 @@ async function save() {
     const isUpdate = block.id > 0
 
     // Сжимаем полное дерево в плоские переопределения.
-    const compactSettings = unmergeFlat(
+    /*const compactSettings = unmergeFlat(
       block.settings,
       block.default_settings,
       undefined,
-    )
+    )*/
 
     const payload: Record<string, any> = {
       block_type_id: block.block_type_id,
       title:         block.title,
       description:   block.description,
-      settings:      compactSettings,
+      settings:      block.settings,
       parent_block_index_ids: block.parent_block_index_ids ?? [],
       published:     block.published,
     }
@@ -360,11 +362,13 @@ async function save() {
 
     // ВАЖНО: Берем обновленные настройки от сервера (где temp заменены на store)
     // и разворачиваем их обратно в полное дерево
-    const fullSettings = mergeFlat(
+   /* const fullSettings = mergeFlat(
       block.default_settings,
       isPlainSettings(saved.settings) ? saved.settings : undefined,
       undefined,
-    )
+    )*/
+
+    const fullSettings =  saved.settings;
 
     editingBlock.value = {
       ...block,
