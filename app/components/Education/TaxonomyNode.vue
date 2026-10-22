@@ -1,3 +1,4 @@
+<!-- app/components/Education/TaxonomyNode.vue -->
 <script setup lang="ts">
 interface TaxonomyNode {
   id: number
@@ -12,9 +13,15 @@ const props = defineProps<{
   depth: number
   expanded: Set<number>
   search: string
+  favorites: Set<number>
+  showFavoritesOnly: boolean
 }>()
 
-const emit = defineEmits<{ toggle: [id: number] }>()
+const emit = defineEmits<{
+  toggle: [id: number]
+  select: [id: number]
+  'toggle-favorite': [id: number]
+}>()
 
 function subtreeMatches(node: TaxonomyNode, ql: string): boolean {
   if ((node.title ?? '').toLowerCase().includes(ql)) return true
@@ -22,16 +29,33 @@ function subtreeMatches(node: TaxonomyNode, ql: string): boolean {
   return node.children.some(c => subtreeMatches(c, ql))
 }
 
+function hasFavoriteDescendant(node: TaxonomyNode): boolean {
+  if (props.favorites.has(node.id)) return true
+  return node.children.some(hasFavoriteDescendant)
+}
+
 const visibleChildren = computed(() => {
+  let list = props.node.children
+
+  // Фильтрация по поиску
   const q = props.search.trim().toLowerCase()
-  if (!q) return props.node.children
-  return props.node.children.filter(c => subtreeMatches(c, q))
+  if (q) {
+    list = list.filter(c => subtreeMatches(c, q))
+  }
+
+  // Фильтрация по избранному
+  if (props.showFavoritesOnly) {
+    list = list.filter(c => hasFavoriteDescendant(c))
+  }
+
+  return list
 })
 
 const hasChildren = computed(() => visibleChildren.value.length > 0)
 
 const isOpen = computed(() => {
-  if (props.search.trim()) return true
+  // Если идет поиск или включен режим избранного — раскрываем всё, где есть совпадения
+  if (props.search.trim() || props.showFavoritesOnly) return true
   return props.expanded.has(props.node.id)
 })
 
@@ -69,16 +93,40 @@ const look = computed(() => {
     }
   }
 })
+
+// Обработчик клика по строке узла
+function onRowClick() {
+  emit('select', props.node.id)
+  if (hasChildren.value) {
+    emit('toggle', props.node.id)
+  }
+}
 </script>
 
 <template>
   <li role="treeitem" :aria-expanded="hasChildren ? isOpen : undefined">
     <div
-      class="group flex cursor-pointer items-center gap-2 rounded-md py-2 pr-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
+      class="group flex cursor-pointer items-center gap-1.5 rounded-md py-2 pr-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50"
       :class="look.row"
-      :style="{ paddingLeft: `${12 + depth * 20}px` }"
-      @click="hasChildren && emit('toggle', node.id)"
+      @click="onRowClick"
     >
+      <!-- Иконка "В избранное" (всегда прижата к левому краю) -->
+      <button
+        type="button"
+        class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-slate-300 transition hover:text-amber-400 dark:text-slate-600 dark:hover:text-amber-400"
+        @click.stop="emit('toggle-favorite', node.id)"
+      >
+        <UIcon
+          name="i-lucide-star"
+          class="h-3.5 w-3.5"
+          :class="favorites.has(node.id) ? 'fill-amber-400 text-amber-400' : ''"
+        />
+      </button>
+
+      <!-- Отступ для вложенности (после звездочки) -->
+      <div class="shrink-0" :style="{ width: `${depth * 16}px` }" />
+
+      <!-- Кнопка развернуть/свернуть -->
       <button
         v-if="hasChildren"
         type="button"
@@ -92,8 +140,10 @@ const look = computed(() => {
       </button>
       <span v-else class="h-5 w-5 shrink-0" />
 
+      <!-- Иконка типа узла -->
       <UIcon :name="look.icon" class="h-4 w-4 shrink-0" :class="look.iconColor" />
 
+      <!-- Контент узла -->
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
           <span :class="look.title" class="truncate">
@@ -117,7 +167,6 @@ const look = computed(() => {
     </div>
 
     <ul v-if="hasChildren && isOpen" role="group">
-      <!-- рекурсивный вызов по полному имени (папка Education) -->
       <EducationTaxonomyNode
         v-for="child in visibleChildren"
         :key="child.id"
@@ -125,7 +174,11 @@ const look = computed(() => {
         :depth="depth + 1"
         :expanded="expanded"
         :search="search"
+        :favorites="favorites"
+        :show-favorites-only="showFavoritesOnly"
         @toggle="emit('toggle', $event)"
+        @select="emit('select', $event)"
+        @toggle-favorite="emit('toggle-favorite', $event)"
       />
     </ul>
   </li>

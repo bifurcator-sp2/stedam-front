@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, toRaw } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
 import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
-import { mergeFlat } from '~/utils/constructors'
 import { useContentStats } from '~/composables/useContentStats'
 import type {
   LessonModel,
@@ -22,11 +21,14 @@ interface Props {
   structItems: BlockStructItem[]
   activeBlockLocalId?: string | null
   isReadOnly?: boolean
+  /** Показывать ли всплывающее уведомление при попытке редактирования read-only урока */
+  displayReadOnlyToast?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   activeBlockLocalId: null,
   isReadOnly: false,
+  displayReadOnlyToast: true,
 })
 
 // ==================== Модель ====================
@@ -103,12 +105,8 @@ async function duplicateBlock(localId: string) {
     const data = (res as any).data ?? res
 
     const sourceBlock = findBlockInTree(props.structItems, data.block_id)
-
-    const fullSettings = mergeFlat(
-      sourceBlock?.default_settings ?? [],
-      sourceBlock?.settings ?? undefined,
-      data.settings ?? undefined,
-    )
+    const rawSettings = data.settings ?? sourceBlock?.settings ?? sourceBlock?.default_settings ?? null
+    const fullSettings = rawSettings ? structuredClone(toRaw(rawSettings)) : null
 
     const copy: LessonBlockModel = {
       localId: crypto.randomUUID(),
@@ -169,12 +167,8 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
     const data = (res as any).data ?? res
 
     const sourceBlock = findBlockInTree(props.structItems, data.block_id)
-
-    const fullSettings = mergeFlat(
-      sourceBlock?.default_settings ?? [],
-      sourceBlock?.settings ?? undefined,
-      data.settings ?? undefined,
-    )
+    const rawSettings = data.settings ?? sourceBlock?.settings ?? sourceBlock?.default_settings ?? null
+    const fullSettings = rawSettings ? structuredClone(toRaw(rawSettings)) : null
 
     const newBlock: LessonBlockModel = {
       localId: crypto.randomUUID(),
@@ -197,13 +191,8 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
   }
 }
 
-/**
- * Единый обработчик сброса.
- * Использует актуальный dragOverIndex, который уже обновился при наведении
- * на блок или дроп-зону.
- */
 function handleDrop(e: DragEvent) {
-  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
+  if (!getDraggedSource()) return
   e.preventDefault()
   if (dragOverIndex.value === null) return
 
@@ -214,16 +203,14 @@ function handleDrop(e: DragEvent) {
   dragOverIndex.value = null
 }
 
-// Обновление индекса при наведении на дроп-зону
 function onDragOver(index: number, e: DragEvent) {
-  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
+  if (!getDraggedSource()) return
   e.preventDefault()
   dragOverIndex.value = index
 }
 
-// Обновление индекса при наведении на сам блок
 function onBlockDragOver(index: number, e: DragEvent) {
-  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
+  if (!getDraggedSource()) return
   e.preventDefault()
   const target = e.currentTarget as HTMLElement
   if (!target) return
@@ -231,7 +218,6 @@ function onBlockDragOver(index: number, e: DragEvent) {
   const rect = target.getBoundingClientRect()
   const midpoint = rect.top + rect.height / 2
 
-  // Если курсор в верхней половине — зона над блоком (index), иначе под (index + 1)
   if (e.clientY < midpoint) {
     dragOverIndex.value = index
   } else {
@@ -240,7 +226,7 @@ function onBlockDragOver(index: number, e: DragEvent) {
 }
 
 function onDropEmpty(e: DragEvent) {
-  if (!getDraggedSource()) return // Игнорируем, если тащат не блок
+  if (!getDraggedSource()) return
   e.preventDefault()
   const source = getDraggedSource()
   handleDropAtIndex(0, source)
@@ -276,7 +262,7 @@ function updateDescription(v: string) {
   lesson.value = { ...lesson.value, description: v }
 }
 
-// ==================== Статистика (через composable) ====================
+// ==================== Статистика ====================
 
 const contentRef = ref<HTMLElement | null>(null)
 
@@ -296,6 +282,8 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 function showReadOnlyToast() {
   if (isToastVisible) return
+  if (!props.displayReadOnlyToast) return // <-- Проверка пропса
+
   isToastVisible = true
 
   toast.add({
@@ -374,7 +362,6 @@ defineExpose({
     class="relative flex flex-col gap-4 min-h-full"
     @focusin="handleFocusIn"
   >
-    <!-- === Шапка урока === -->
     <div class="flex flex-col gap-2">
       <input
         class="w-full p-0 border-none bg-transparent text-[28px] font-bold leading-tight text-[var(--ui-text,#0f172a)] outline-none placeholder:text-[var(--ui-text-muted,#cbd5e1)]"
@@ -393,11 +380,9 @@ defineExpose({
       />
     </div>
 
-    <!-- === Статистика === -->
     <div
       class="flex items-center justify-between py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
     >
-      <!-- Левая часть: статистика -->
       <div class="flex items-center gap-3.5">
         <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
           <UIcon name="i-lucide-type" />
@@ -413,13 +398,11 @@ defineExpose({
         </span>
       </div>
 
-      <!-- Правая часть: раздел -->
       <div class="flex items-center gap-4">
         <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" />
       </div>
     </div>
 
-    <!-- === Пустой урок === -->
     <div
       v-if="lesson.blocks.length === 0"
       data-drop-zone
@@ -436,7 +419,6 @@ defineExpose({
       </span>
     </div>
 
-    <!-- === Список блоков === -->
     <VueDraggable
       v-else
       v-model="lesson.blocks"
@@ -451,7 +433,6 @@ defineExpose({
       @dragleave="onDragLeave"
     >
       <template #default>
-        <!-- Drop-zone ПЕРЕД первым -->
         <div
           data-drop-zone
           class="relative rounded transition-all duration-150 pointer-events-auto"
@@ -464,8 +445,6 @@ defineExpose({
         />
 
         <template v-for="(block, index) in lesson.blocks" :key="block.localId">
-
-          <!-- Обертка для позиционирования плашки вне LessonBlockWrapper -->
           <div
             class="relative"
             @dragover="onBlockDragOver(index, $event)"
@@ -496,7 +475,6 @@ defineExpose({
               </div>
             </LessonBlockWrapper>
 
-            <!-- Плашка 75px на всю высоту (минус 50px), со сдвигом вправо на 5px и градиентом -->
             <div
               class="absolute top-0 left-full ml-[5px] h-[calc(100%-50px)] w-[75px] rounded-r-md cursor-pointer transition-colors z-0 bg-gradient-to-r from-transparent"
               :class="props.activeBlockLocalId === block.localId
@@ -507,7 +485,6 @@ defineExpose({
             />
           </div>
 
-          <!-- Drop-zone ПОСЛЕ блока -->
           <div
             data-drop-zone
             class="relative rounded transition-all duration-150 pointer-events-auto"
@@ -522,7 +499,6 @@ defineExpose({
       </template>
     </VueDraggable>
 
-    <!-- === ТОТАЛЬНЫЙ ОВЕРЛЕЙ (перехватывает все клики) === -->
     <div
       v-if="isReadOnly"
       class="absolute inset-0 z-50 bg-transparent cursor-not-allowed"

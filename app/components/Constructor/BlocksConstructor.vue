@@ -1,48 +1,38 @@
 <script setup lang="ts">
-
-
 import { ref, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
-import { mergeFlat, unmergeFlat } from '~/utils/constructors'
 
 // ==================== Типы ====================
 
 interface BlockType {
-  id: number
   code: string
-  type: 'info' | 'task'
+  type?: 'info' | 'task'
   name: string
   description: string | null
-  default_settings: SettingNode[]
-  created_at?: string
-  updated_at?: string
+  default_settings: SettingNode | null
+  icon?: string | null
 }
 
 interface BlockItem {
   id: number
   code: string
-  block_type_id: number
   title: string
   description: string
   icon: string
-  schema: SettingNode[]
-  default_settings: SettingNode[]
-  settings: SettingNode[]
+  settings: SettingNode | null
   parent_block_index_ids: number[] | null
   published: boolean
 }
 
 interface BlockResource {
   id: number
-  block_type_id: number
   code: string | null
-  name: string | null
   title: string | null
   description: string | null
-  settings: Record<string, any> | SettingNode[]
+  settings: SettingNode | null
   created_at: string
   updated_at: string
 }
@@ -75,22 +65,17 @@ const router = useRouter()
 
 // ==================== Хелпер: иконка ====================
 
-function iconOf(type: Pick<BlockType, 'default_settings'>): string {
-  const fields = Array.isArray(type.default_settings) ? type.default_settings : []
-  const iconField = fields.find((f: any) => f.key === 'icon')
-  return (iconField?.default as string | undefined) ?? 'i-lucide-square'
+function iconOf(type: Pick<BlockType, 'default_settings' | 'icon'>): string {
+  if (type.icon) return type.icon
+  const node = type.default_settings
+  const icon = node?.children?.find((c: any) => c.key === 'icon')?.default
+  return typeof icon === 'string' && icon ? icon : 'i-lucide-square'
 }
 
-function iconOfSettings(settings: Record<string, any> | SettingNode[] | undefined): string {
-  if (Array.isArray(settings)) {
-    const iconField = settings.find((f: any) => f.key === 'icon')
-    return (iconField?.default as string | undefined) ?? 'i-lucide-square'
-  }
-  if (settings && typeof settings === 'object') {
-    const icon = (settings as Record<string, any>).icon
-    return typeof icon === 'string' && icon ? icon : 'i-lucide-square'
-  }
-  return 'i-lucide-square'
+function iconOfSettings(settings: SettingNode | null | undefined): string {
+  if (!settings || typeof settings !== 'object') return 'i-lucide-square'
+  const icon = (settings as any).children?.find((c: any) => c.key === 'icon')?.default
+  return typeof icon === 'string' && icon ? icon : 'i-lucide-square'
 }
 
 // ==================== Выбранный блок ====================
@@ -100,30 +85,23 @@ const blockKey = ref(0)
 
 // ==================== Создание блока ====================
 async function createBlockFromType(type: BlockType): Promise<BlockItem> {
-  // Загружаем шаблон схемы с сервера по коду типа блока
   const res = await api.get<BlockResource | { data: BlockResource }>(
     `/block/template/${type.code}`,
   )
 
-  const template =
-    (res as { data?: BlockResource }).data ?? (res as BlockResource)
+  const template = (res as { data?: BlockResource }).data ?? (res as BlockResource)
 
-  // Схема настроек из шаблона; fallback — дефолтные настройки типа
-  const schema = Array.isArray(template?.settings)
-    ? template.settings
-    : type.default_settings
+  const raw = template?.settings as any
+  const settings: SettingNode | null =
+    raw && typeof raw === 'object' && 'key' in raw ? structuredClone(raw) : null
 
   return {
     id: 0,
     code: type.code,
-    block_type_id: type.id,
     title: template?.title ?? template?.name ?? type.name,
     description: template?.description ?? type.description ?? '',
-    icon: iconOfSettings(template?.settings) || iconOf(type),
-    schema,
-    default_settings:
-      (template as any)?.default_settings ?? type.default_settings,
-    settings: structuredClone(schema),
+    icon: iconOfSettings(settings) || iconOf(type),
+    settings,
     parent_block_index_ids: [],
     published: false,
   }
@@ -140,7 +118,6 @@ async function addBlock(type: BlockType) {
     console.error('[addBlock] failed', e)
   }
 }
-
 
 // ==================== Режим списка ====================
 
@@ -209,7 +186,7 @@ async function loadBlocks() {
 
 watch(
   () => [route.query.addBlock, blockTypes.value] as const,
-  ([code, types]) => {
+  async ([code, types]) => {
     if (!code || typeof code !== 'string') return
     if (!types) return
     if (editingBlock.value?.code === code) return
@@ -217,7 +194,7 @@ watch(
     const type = types.find((t) => t.code === code)
     if (!type) return
 
-    editingBlock.value = createBlockFromType(type)
+    editingBlock.value = await createBlockFromType(type)
   },
   { immediate: true },
 )
@@ -239,27 +216,20 @@ watch(
       const res = await api.get<{ data: BlockResource } | BlockResource>(`/blocks/${numId}`)
       const block = (res as { data?: BlockResource }).data ?? (res as BlockResource)
 
-      const type = types.find((t) => t.id === block.block_type_id)
+      const type = types.find((t) => t.code === block.code)
       if (!type) {
-        console.warn('[load block] block_type not found:', block.block_type_id)
+        console.warn('[load block] block type not found:', block.code)
         return
       }
-
-/*      const item = createBlockFromType(type)
-
-      // Разворачиваем плоские переопределения в полное дерево
-      const fullSettings = mergeFlat(
-        type.default_settings,
-        isPlainSettings(block.settings) ? block.settings : undefined,
-        undefined,
-      )*/
 
       editingBlock.value = {
         ...block,
         id: block.id,
-        title: block.title??'',
-        description: block.description??'',
-        settings: block.settings ?? [],
+        code: block.code ?? type.code,
+        title: block.title ?? '',
+        description: block.description ?? '',
+        icon: iconOfSettings(block.settings) || iconOf(type),
+        settings: block.settings ?? null,
         parent_block_index_ids: block.parent_block_index_ids ?? [],
         published: block.published ?? false,
       }
@@ -269,17 +239,6 @@ watch(
   },
   { immediate: true },
 )
-
-/**
- * Проверка: settings — плоский объект переопределений (не массив).
- */
-function isPlainSettings(s: unknown): s is Record<string, any> {
-  return (
-    typeof s === 'object' &&
-    s !== null &&
-    !Array.isArray(s)
-  )
-}
 
 // ==================== Watch: список блоков ====================
 
@@ -325,8 +284,6 @@ function goToPage(page: number) {
 
 // ==================== Сохранение ====================
 
-// ==================== Сохранение ====================
-
 const saving = ref(false)
 
 async function save() {
@@ -337,15 +294,8 @@ async function save() {
   try {
     const isUpdate = block.id > 0
 
-    // Сжимаем полное дерево в плоские переопределения.
-    /*const compactSettings = unmergeFlat(
-      block.settings,
-      block.default_settings,
-      undefined,
-    )*/
-
     const payload: Record<string, any> = {
-      block_type_id: block.block_type_id,
+      code:          block.code,
       title:         block.title,
       description:   block.description,
       settings:      block.settings,
@@ -360,22 +310,12 @@ async function save() {
     const saved: BlockResource =
       (res as { data?: BlockResource }).data ?? (res as BlockResource)
 
-    // ВАЖНО: Берем обновленные настройки от сервера (где temp заменены на store)
-    // и разворачиваем их обратно в полное дерево
-   /* const fullSettings = mergeFlat(
-      block.default_settings,
-      isPlainSettings(saved.settings) ? saved.settings : undefined,
-      undefined,
-    )*/
-
-    const fullSettings =  saved.settings;
-
     editingBlock.value = {
       ...block,
       id:          saved.id,
       title:       saved.title ?? block.title,
       description: saved.description ?? '',
-      settings:    fullSettings, // <-- Перезаписываем настройки ответом сервера!
+      settings:    saved.settings ?? null,
     }
 
     router.replace({
@@ -403,10 +343,8 @@ function reset() {
     right-title="Свойства"
     :show-viewport-picker="!!editingBlock"
   >
-    <!-- ==================== LEFT ==================== -->
     <template #left>
       <div class="palette-list">
-        <!-- Все блоки -->
         <div
           class="palette-item"
           :class="{ 'palette-item-active': !listTypeCode && !editingBlock }"
@@ -456,7 +394,6 @@ function reset() {
       </div>
     </template>
 
-    <!-- ==================== MAIN HEADER ==================== -->
     <template #main-header>
       <div class="main-header-inner">
         <span>{{ centerTitle }}</span>
@@ -474,9 +411,7 @@ function reset() {
       </div>
     </template>
 
-    <!-- ==================== MAIN ==================== -->
     <template #main>
-      <!-- === Режим редактирования конкретного блока === -->
       <template v-if="editingBlock">
         <LoadingOverlay :loading="saving">
           <TextBlock
@@ -489,7 +424,6 @@ function reset() {
         </LoadingOverlay>
       </template>
 
-      <!-- === Режим списка блоков === -->
       <template v-else>
         <div v-if="listLoading" class="empty-state">Загрузка…</div>
 
@@ -526,7 +460,7 @@ function reset() {
                   {{ item.description }}
                 </div>
                 <div class="block-card-meta">
-                  <span v-if="item.name" class="block-card-chip">{{ item.name }}</span>
+                  <span v-if="item.code" class="block-card-chip">{{ item.code }}</span>
                   <span class="block-card-id">#{{ item.id }}</span>
                 </div>
               </div>
@@ -534,7 +468,6 @@ function reset() {
             </button>
           </div>
 
-          <!-- Пагинация -->
           <div v-if="blocksPage.meta.last_page > 1" class="pagination">
             <UButton
               icon="i-lucide-chevron-left"
@@ -566,7 +499,6 @@ function reset() {
       </template>
     </template>
 
-    <!-- ==================== RIGHT HEADER ==================== -->
     <template #right-header>
       <span>Свойства</span>
       <UButton
@@ -582,7 +514,6 @@ function reset() {
       </UButton>
     </template>
 
-    <!-- ==================== RIGHT ==================== -->
     <template #right>
       <LoadingOverlay :loading="saving">
         <div v-if="!editingBlock" class="empty-state">
@@ -605,16 +536,13 @@ function reset() {
 </template>
 
 <style scoped>
-/* ==================== Заголовок центральной панели ==================== */
-
+/* ... стили не меняются, оставляем как было ... */
 .main-header-inner {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
 }
-
-/* ==================== Палитра (левая) ==================== */
 
 .palette-list {
   display: flex;
@@ -697,8 +625,6 @@ function reset() {
   background: var(--ui-bg-muted, rgba(59, 130, 246, 0.14));
 }
 
-/* ==================== Список блоков (центр) ==================== */
-
 .blocks-list {
   display: flex;
   flex-direction: column;
@@ -724,13 +650,6 @@ function reset() {
 .block-card:hover {
   border-color: var(--ui-primary, #3b82f6);
   box-shadow: 0 1px 2px rgba(59, 130, 246, 0.08);
-}
-
-.block-card-icon {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  color: var(--ui-text-muted, #6b7280);
 }
 
 .block-card-main {
@@ -787,8 +706,6 @@ function reset() {
   color: var(--ui-text-muted, #9ca3af);
 }
 
-/* ==================== Пагинация ==================== */
-
 .pagination {
   display: flex;
   align-items: center;
@@ -803,8 +720,6 @@ function reset() {
   min-width: 60px;
   text-align: center;
 }
-
-/* ==================== Пустое состояние ==================== */
 
 .empty-state {
   padding: 32px 16px;

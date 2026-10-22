@@ -1,36 +1,7 @@
+<!-- app/components/Constructor/LessonsList.vue -->
 <script setup lang="ts">
-// app/components/Constructor/LessonsList.vue
-//
-// Список уроков текущего пользователя.
-// Верх — кнопка «Создать урок» → /construct-lesson.
-// Ниже — список с пагинацией (UPagination).
-
 import { computed } from 'vue'
-
-// ==================== Типы ====================
-
-interface LessonListItem {
-  id: number
-  title: string | null
-  description: string | null
-  blocks_count: number
-  saved: boolean
-  published: boolean
-  created_at: string | null
-  updated_at: string | null
-}
-
-interface LessonsPage {
-  data: LessonListItem[]
-  meta: {
-    current_page: number
-    per_page: number
-    total: number
-    last_page: number
-    from: number | null
-    to: number | null
-  }
-}
+import type { LessonListItem, LessonsPage } from '~/types/lesson'
 
 // ==================== Зависимости ====================
 
@@ -71,33 +42,6 @@ const { data, pending, error } = await useAsyncData<LessonsPage>(
 
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
 const meta = computed(() => data.value?.meta ?? null)
-
-// ==================== Хелперы ====================
-
-const TITLE_FALLBACK = 'Без названия'
-const DESCRIPTION_FALLBACK = 'Без описания'
-
-function displayTitle(l: LessonListItem): string {
-  const t = (l.title ?? '').trim()
-  return t || TITLE_FALLBACK
-}
-
-function displayDescription(l: LessonListItem): string {
-  const d = (l.description ?? '').trim()
-  return d || DESCRIPTION_FALLBACK
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-
-  return d.toLocaleDateString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  })
-}
 
 // ==================== Переходы ====================
 
@@ -164,42 +108,10 @@ function pageTo(page: number) {
           v-for="l in lessons"
           :key="l.id"
         >
-          <button
-            type="button"
-            class="w-full text-left p-3.5 rounded-lg border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] transition-colors hover:border-[var(--ui-primary,#3b82f6)]"
-            @click="openLesson(l.id)"
-          >
-            <!-- Верхняя строка: ID, счётчик блоков, дата -->
-            <div class="flex items-center gap-2 mb-1.5 text-[11px] font-mono text-[var(--ui-text-muted,#9ca3af)]">
-              <span>#{{ l.id }}</span>
-              <span class="text-[var(--ui-border,#e5e7eb)]">·</span>
-              <span class="inline-flex items-center gap-1">
-                <UIcon name="i-lucide-layers" class="w-3 h-3" />
-                {{ l.blocks_count }}
-              </span>
-              <span class="ml-auto">{{ formatDate(l.created_at) }}</span>
-            </div>
-
-            <!-- Название -->
-            <div
-              class="text-sm font-medium mb-1"
-              :class="l.title?.trim()
-                ? 'text-[var(--ui-text,#111827)]'
-                : 'text-[var(--ui-text-muted,#9ca3af)] italic'"
-            >
-              {{ displayTitle(l) }}
-            </div>
-
-            <!-- Описание -->
-            <div
-              class="text-xs leading-normal line-clamp-2"
-              :class="l.description?.trim()
-                ? 'text-[var(--ui-text-muted,#64748b)]'
-                : 'text-[var(--ui-text-muted,#9ca3af)] italic'"
-            >
-              {{ displayDescription(l) }}
-            </div>
-          </button>
+          <EducationLessonListElement
+            :lesson="l"
+            @open="openLesson"
+          />
         </li>
       </ul>
 

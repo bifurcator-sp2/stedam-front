@@ -24,7 +24,6 @@ const props = withDefaults(
     mode?: 'admin' | 'public'
     settings?: Record<string, any> | SettingItem[] | null
     maxImages?: number | null
-    /** Путь от корня настроек (например, 'text.title'). Нужен для сохранения состояния. */
     path?: string
   }>(),
   {
@@ -57,7 +56,6 @@ function loadCollapsed(): Set<string> {
 
 const collapsedPaths = ref<Set<string>>(loadCollapsed())
 
-// ВАЖНО: если props.path передан, значит он уже является полным путем до текущего узла
 const currentPath = computed(() => {
   if (props.path) return props.path
   return model.value.key
@@ -115,6 +113,12 @@ const publicIcon = computed(() => model.value.public ? 'i-lucide-eye' : 'i-lucid
 
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
+
+  // Поддержка единичного корневого узла (SettingNode) — разворачиваем в список
+  if (!Array.isArray(root) && typeof root === 'object' && 'key' in root) {
+    root = [root]
+  }
+
   if (Array.isArray(root)) {
     const [head, ...rest] = path.split('.')
     const found = root.find((it: any) => it?.key === head)
@@ -133,7 +137,7 @@ const dynamicResolvers: Record<string, (params: any, settings: any, path: string
   'parent.count': (params, settings, path) => {
     if (!path) return null
     const parts = path.split('.')
-    parts.pop() // Убираем ключ текущего элемента (например, 'gallery2')
+    parts.pop()
     parts.push('count')
     const countPath = parts.join('.')
     const val = resolvePath(settings, countPath)
@@ -143,7 +147,7 @@ const dynamicResolvers: Record<string, (params: any, settings: any, path: string
 }
 
 // ============================================================
-// Обновление значения (эмит события наверх)
+// Обновление значения
 // ============================================================
 
 function updateDefault(val: any) {
@@ -251,8 +255,6 @@ const resolvedCount = computed<number | null>(() => {
     if (resolver) {
       return resolver(params, props.settings, props.path)
     }
-
-    // Fallback для старых путей (например, 'images.count')
     const val = resolvePath(props.settings, raw)
     const num = Number(val)
     return Number.isFinite(num) ? num : null

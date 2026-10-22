@@ -3,7 +3,7 @@
 import { computed, type Component } from 'vue'
 import type { SettingNode } from '~/utils/constructors'
 
-const value = defineModel<any[]>({ default: () => [] })
+const value = defineModel<SettingNode | null>({ default: null })
 
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
@@ -47,9 +47,14 @@ function getContentComponent(name: string): Component | null {
 // ==================== Layout ====================
 
 const layoutNode = computed(() => {
-  const arr = value.value as any[] | undefined
-  if (!Array.isArray(arr)) return null
-  return arr.find((b: any) => b.type === 'layout' || b.key === 'type') ?? null
+  const v = value.value as any
+  if (Array.isArray(v)) {
+    return v.find((b: any) => b.type === 'layout' || b.key === 'type') ?? null
+  }
+  if (v && typeof v === 'object' && (v.type === 'layout' || v.key === 'type')) {
+    return v
+  }
+  return null
 })
 
 const layoutChildren = computed(() => layoutNode.value?.children || [])
@@ -104,8 +109,7 @@ function getBlockStyle(blockIndex: number) {
   }
   if (layoutType.value === 'row') {
     const percent = blockIndex === 0 ? firstBlockPercent.value : secondBlockPercent.value
-    return { flex: `0 0 calc(${percent * 100}%)` }
-    //return { flex: `0 0 calc(${percent * 100}% - 0.5rem)` }
+    return { flex: `0 0 ${percent * 100}%` }
   }
   return { width: '100%' }
 }
@@ -216,17 +220,13 @@ function getChildPath(block: any, blockIndex: number) {
 }
 
 function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
-  const arr = [...value.value]
-  const layoutIdx = arr.findIndex(b => b.type === 'layout' || b.key === 'type')
-  if (layoutIdx === -1) return
+  const root = value.value as any
+  if (!root || !root.children) return
 
-  const newLayout = { ...arr[layoutIdx] }
-  if (!newLayout.children) return
-
-  const cbIdx = newLayout.children.findIndex((c: any) => c.key === 'content-blocks')
+  const cbIdx = root.children.findIndex((c: any) => c.key === 'content-blocks')
   if (cbIdx === -1) return
 
-  const newContentBlocks = { ...newLayout.children[cbIdx] }
+  const newContentBlocks = { ...root.children[cbIdx] }
   if (!newContentBlocks.children) return
 
   const newBlocks = [...newContentBlocks.children]
@@ -259,11 +259,14 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
   newBlocks[blockIndex] = block
   newContentBlocks.children = newBlocks
 
-  newLayout.children = [...newLayout.children]
-  newLayout.children[cbIdx] = newContentBlocks
-
-  arr[layoutIdx] = newLayout
-  value.value = arr
+  value.value = {
+    ...root,
+    children: [
+      ...root.children.slice(0, cbIdx),
+      newContentBlocks,
+      ...root.children.slice(cbIdx + 1),
+    ],
+  } as SettingNode
 }
 </script>
 
@@ -274,14 +277,13 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
     </template>
 
     <template #body>
-      <div class="text-image-root">
-        <div :style="[layoutMarginStyle]">
+      <div class="text-image-root min-h-[200px] w-full">
+         <div :style="[layoutMarginStyle]">
           <div
             :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, layoutContainerStyle]"
             :class="layoutClass"
           >
             <template v-for="(block, index) in visibleBlocks" :key="block.key">
-              <!-- ДИНАМИЧЕСКИЙ РЕНДЕРИНГ КОМПОНЕНТА -->
               <div
                 v-if="getContentComponent(block.default) && getActiveChild(block)"
                 :style="getBlockStyle(index)"
@@ -298,7 +300,14 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
                   @update="onUpdateChild(index, $event)"
                 />
               </div>
+              <div v-else class="p-4 text-xs text-red-500 bg-red-50 rounded">
+                Блок "{{ block.key }}" (default: {{ block.default }}) не найден или нет активного компонента
+              </div>
             </template>
+
+            <div v-if="!visibleBlocks.length" class="p-4 text-xs text-yellow-600 bg-yellow-50 rounded">
+              Массив visibleBlocks пуст. Проверьте наличие content-blocks в настройках.
+            </div>
           </div>
         </div>
       </div>

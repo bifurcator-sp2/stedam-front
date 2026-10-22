@@ -43,10 +43,21 @@ function toggleType(id: number) {
 // ==================== Хелперы ====================
 
 function iconOfBlock(block: BlockStructBlock): string {
-  if (Array.isArray(block.settings)) {
-    const icon = block.settings.find((n: any) => n?.key === 'icon')?.default
+  // 1. Приоритет — метаданные из реестра (приходят с бэка)
+  if (block.block_type_icon && typeof block.block_type_icon === 'string') {
+    return block.block_type_icon
+  }
+
+  // 2. Fallback — ищем 'icon' в настройках блока
+  const settings = block.settings as any
+  if (settings && typeof settings === 'object') {
+    const children = Array.isArray(settings.children)
+      ? settings.children
+      : (Array.isArray(settings) ? settings : [])
+    const icon = children.find((n: any) => n?.key === 'icon')?.default
     if (typeof icon === 'string' && icon) return icon
   }
+
   return 'i-lucide-file-text'
 }
 

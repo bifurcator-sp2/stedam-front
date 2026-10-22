@@ -10,7 +10,7 @@ import {
 const id = defineModel<number | null>('id')
 const title = defineModel<string | null>('title')
 const description = defineModel<string | null>('description')
-const settings = defineModel<SettingNode[]>('settings', { default: () => [] })
+const settings = defineModel<SettingNode | null>('settings', { default: null })
 const parentBlockIndexIds = defineModel<number[] | null>('parent_block_index_ids', {
   default: null,
 })
@@ -28,9 +28,22 @@ const props = withDefaults(
 /** id блока — прокидываем в FileContainer */
 const blockId = computed(() => id.value ?? null)
 
+/** Корневой узел схемы (единый SettingNode). Совместимо с legacy list-of-one. */
+const rootNode = computed<SettingNode | null>(() => {
+  const s = settings.value as any
+  if (Array.isArray(s)) return (s[0] as SettingNode) ?? null
+  if (s && typeof s === 'object' && 'key' in s) return s as SettingNode
+  return null
+})
+
+/** Обёртка-массив для resolvePath / collectPublicSettingsWithPaths. */
+const rootAsList = computed<SettingNode[]>(() => rootNode.value ? [rootNode.value] : [])
+
 /** Плоский список public-настроек с путями до них в дереве. */
 const publicSettings = computed<PublicSettingRef[]>(() =>
-  collectPublicSettingsWithPaths(settings.value),
+  rootAsList.value.length
+    ? collectPublicSettingsWithPaths(rootAsList.value)
+    : [],
 )
 
 function resolvePath(root: any, path: string): any {
@@ -54,12 +67,10 @@ function computeMaxImages(item: SettingNode): number | null {
   if (typeof raw === 'number') {
     return Number.isFinite(raw) ? raw : null
   } else if (typeof raw === 'string') {
-    // Если это динамический резолвер (например, parent.count),
-    // возвращаем null — BlocksSettingField сам его вычислит.
     if (raw === 'parent.count') {
       return null
     }
-    const val = resolvePath(settings.value, raw)
+    const val = resolvePath(rootAsList.value, raw)
     const num = Number(val)
     return Number.isFinite(num) ? num : null
   }
@@ -67,24 +78,22 @@ function computeMaxImages(item: SettingNode): number | null {
   return null
 }
 
-function updateItem(index: number, updated: SettingNode) {
-  const next = settings.value.slice()
-  next[index] = updated
-  settings.value = next
+function updateItem(updated: SettingNode) {
+  settings.value = updated
 }
 
 function updatePublicItem(path: number[], updated: SettingNode) {
-  settings.value = replaceNodeAtPath(settings.value, path, () => updated)
+  if (!rootNode.value) return
+  const next = replaceNodeAtPath(rootAsList.value, path, () => updated)
+  settings.value = next[0] ?? null
 }
 
 const published = defineModel<boolean>('published', { default: false })
-
 </script>
 
 <template>
   <div class="flex flex-col gap-4 px-3.5 pb-6 pt-3.5 block-settings-panel">
     <template v-if="mode === 'admin'">
-      <!-- Шапка с ID и статусом -->
       <div
         class="relative flex items-center justify-between gap-2.5 overflow-hidden rounded-lg border border-default bg-elevated py-2 pl-3 pr-2.5"
       >
@@ -97,7 +106,6 @@ const published = defineModel<boolean>('published', { default: false })
         </span>
 
         <div class="flex items-center gap-3">
-          <!-- Свитч статуса -->
           <div
             class="flex items-center gap-2 cursor-pointer select-none"
             @click="published = !published"
@@ -115,7 +123,6 @@ const published = defineModel<boolean>('published', { default: false })
             </span>
           </div>
 
-          <!-- ID блока -->
           <span
             class="inline-flex items-center gap-1 rounded-full border border-default bg-default px-2.5 py-[3px] font-mono text-[11.5px] font-semibold text-highlighted shadow-sm"
           >
@@ -125,7 +132,6 @@ const published = defineModel<boolean>('published', { default: false })
         </div>
       </div>
 
-      <!-- Основные поля -->
       <section class="flex flex-col gap-2.5">
         <header class="relative flex items-center gap-1.5 pb-2 pl-2.5">
         <span
@@ -177,9 +183,7 @@ const published = defineModel<boolean>('published', { default: false })
       </section>
     </template>
 
-    <!-- Настройки -->
     <section class="flex flex-col gap-2.5">
-      <!-- ============ ADMIN ============ -->
       <template v-if="mode === 'admin'">
         <header class="relative flex items-center gap-1.5 pb-2 pl-2.5">
         <span
@@ -193,26 +197,24 @@ const published = defineModel<boolean>('published', { default: false })
           Настройки
         </span>
           <span
-            v-if="settings?.length"
+            v-if="rootNode"
             class="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-full border border-primary/20 bg-primary/10 px-2 text-[10.5px] font-bold leading-none text-primary"
           >
-          {{ settings.length }}
+          {{ rootNode.children?.length ?? 0 }}
         </span>
         </header>
 
 
-        <div v-if="settings?.length" class="flex flex-col gap-2">
+        <div v-if="rootNode" class="flex flex-col gap-2">
           <BlocksSettingField
-            v-for="(item, index) in settings"
-            :key="item.key"
-            :model-value="item"
+            :model-value="rootNode"
             :block-id="blockId"
             :model-name="modelName"
             :mode="mode"
             :settings="settings"
-            :max-images="computeMaxImages(item)"
-            :path="item.key"
-            @update:model-value="updateItem(index, $event)"
+            :max-images="computeMaxImages(rootNode)"
+            :path="rootNode.key"
+            @update:model-value="updateItem($event)"
           />
         </div>
 
@@ -232,7 +234,6 @@ const published = defineModel<boolean>('published', { default: false })
         </div>
       </template>
 
-      <!-- ============ PUBLIC ============ -->
       <template v-else>
         <div v-if="publicSettings.length" class="flex flex-col gap-2.5">
           <BlocksSettingField

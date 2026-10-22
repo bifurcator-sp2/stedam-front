@@ -2,13 +2,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useFormula } from '~/composables/useFormula'
-import { useVideoEmbed } from '~/composables/useVideoEmbed' // <-- ИМПОРТ
+import { useVideoEmbed } from '~/composables/useVideoEmbed'
 import type { InlineEditBinding } from '~/directives/inlineEdit'
 import type { SettingNode } from '~/utils/constructors'
 
 const props = withDefaults(defineProps<{
   node: SettingNode
-  settings?: SettingNode[] | null
+  settings?: SettingNode | null
   stylePath?: string
   editable?: boolean
 }>(), {
@@ -22,12 +22,18 @@ const emit = defineEmits<{
 }>()
 
 const { renderFormulas } = useFormula()
-const { renderVideos } = useVideoEmbed() // <-- ИНИЦИАЛИЗАЦИЯ
+const { renderVideos } = useVideoEmbed()
 
 // ==================== Резолв пути ====================
 
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
+
+  // Поддержка единичного корневого узла (SettingNode) — разворачиваем в список
+  if (!Array.isArray(root) && typeof root === 'object' && 'key' in root) {
+    root = [root]
+  }
+
   const parts = path.split('.')
   let current = root
 
@@ -91,7 +97,6 @@ const binding = computed<InlineEditBinding>(() => ({
     if (v === textValue.value) return
     emit('update', { ...props.node, default: v })
   },
-  // Сначала рендерим формулы, затем видео
   renderFormulas: (html: string) => renderVideos(renderFormulas(html)),
 }))
 

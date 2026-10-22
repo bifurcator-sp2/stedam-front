@@ -7,13 +7,11 @@ const props = withDefaults(defineProps<{
   siblings?: ImageItem[]
   showDraft?: boolean
   allowDragAndDrop?: boolean
-  showToDelete?: boolean
   draggingIndex?: number | null
 }>(), {
   siblings: () => [],
   showDraft: true,
   allowDragAndDrop: true,
-  showToDelete: false,
   draggingIndex: null,
 })
 
@@ -30,11 +28,7 @@ const emit = defineEmits<{
 // Состояния
 // ============================================================
 
-const isToDelete = computed(
-  () => props.showToDelete === true && props.item.toDelete === true,
-)
-
-const canRemove = computed(() => props.showToDelete === true)
+const isToDelete = computed(() => !!props.item.toDelete)
 
 const isDraft = computed(
   () => !isToDelete.value && props.showDraft && props.item.source === 'temp',
@@ -295,7 +289,7 @@ function onRestoreClick(e: MouseEvent) {
 
     <!-- Крестик удаления -->
     <button
-      v-if="canRemove && !isToDelete"
+      v-if="!isToDelete"
       type="button"
       class="absolute top-1.5 right-1.5 z-[2] inline-flex items-center justify-center w-6 h-6 p-0 border-none rounded-full bg-gray-900/70 text-white cursor-pointer opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all duration-150 hover:bg-red-600 hover:scale-105"
       aria-label="Удалить"

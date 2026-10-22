@@ -115,8 +115,16 @@ const filteredNodes = computed(() => {
 // Действия
 // ============================================================
 
-function select(id: number) {
-  model.value = [id]
+// Проверка: является ли узел листом (нет дочерних элементов)
+function isLeaf(node: TaxonomyNode): boolean {
+  return !node.children || node.children.length === 0
+}
+
+function select(node: TaxonomyNode) {
+  // Защита: выбирать можно только листья
+  if (!isLeaf(node)) return
+
+  model.value = [node.id]
   internalOpen.value = false
 }
 
@@ -185,17 +193,34 @@ function clear() {
               v-for="node in filteredNodes"
               :key="node.id"
               type="button"
-              class="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-elevated"
-              :class="{ 'bg-primary/5': selectedIds.includes(node.id) }"
-              @click="select(node.id)"
+              class="flex w-full items-start gap-2 rounded px-2 py-1.5 text-left transition-colors"
+              :class="{
+                'hover:bg-elevated cursor-pointer': isLeaf(node),
+                'cursor-default opacity-80': !isLeaf(node),
+                'bg-primary/5': selectedIds.includes(node.id)
+              }"
+              @click="select(node)"
             >
+              <!-- Чекбокс: рисуем ТОЛЬКО для листьев -->
               <UIcon
+                v-if="isLeaf(node)"
                 :name="selectedIds.includes(node.id) ? 'i-lucide-check-square' : 'i-lucide-square'"
                 class="mt-0.5 size-3.5 shrink-0"
                 :class="selectedIds.includes(node.id) ? 'text-primary' : 'text-muted'"
               />
+
+              <!-- Иконка папки для родительских узлов (чтобы текст не прыгал) -->
+              <UIcon
+                v-else
+                name="i-lucide-folder"
+                class="mt-0.5 size-3.5 shrink-0 text-muted/50"
+              />
+
               <div class="min-w-0 flex-1">
-                <div class="truncate text-[12px] font-medium text-highlighted">
+                <div
+                  class="truncate text-[12px] font-medium"
+                  :class="isLeaf(node) ? 'text-highlighted' : 'text-muted'"
+                >
                   {{ node.title || '—' }}
                 </div>
                 <div class="truncate font-mono text-[10px] text-muted/70">

@@ -7,7 +7,7 @@ import type { SettingNode } from '~/utils/constructors'
 
 const props = withDefaults(defineProps<{
   gallery: SettingNode
-  settings?: SettingNode[] | null
+  settings?: SettingNode | null
   stylePath?: string
   fallbackStylePath?: string | null
   allowDragAndDrop?: boolean
@@ -24,6 +24,12 @@ const props = withDefaults(defineProps<{
 
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
+
+  // Поддержка единичного корневого узла (SettingNode) — разворачиваем в список
+  if (!Array.isArray(root) && typeof root === 'object' && 'key' in root) {
+    root = [root]
+  }
+
   const parts = path.split('.')
   let current = root
 
@@ -64,7 +70,6 @@ function styleGet(key: string): any {
   return undefined
 }
 
-// ... остальные функции без изменений ...
 function clampInt(value: unknown, min: number, max: number, fallback: number = min): number {
   const n = Number(value)
   if (!Number.isFinite(n)) return fallback
@@ -326,7 +331,7 @@ const masonryKey = computed(() => JSON.stringify({
   </div>
 
   <div v-else :class="[imagesContainerClass]" :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle, imagesPaddingStyle, imagesMarginStyle]">
-    <ImageWrapper v-for="(img, idx) in filesModel" :key="img.url ?? idx" :item="img" :siblings="filesModel" :allow-drag-and-drop="allowDragAndDrop" :show-to-delete="showToDeleteImages" :dragging-index="draggingIndex" @drag-start="onImageDragStart" @drag-end="onImageDragEnd" @drop-before="onDropBefore" @drop-after="onDropAfter" @remove="onRemoveImage" @restore="onRestoreImage" :class="imageItemClass" :style="[imageItemStyle]">
+    <ImageWrapper v-for="(img, idx) in filesModel" :key="img.url ?? idx" :item="img" :siblings="filesModel" :allow-drag-and-drop="allowDragAndDrop" :show-to-delete-images="showToDeleteImages" :dragging-index="draggingIndex" @drag-start="onImageDragStart" @drag-end="onImageDragEnd" @drop-before="onDropBefore" @drop-after="onDropAfter" @remove="onRemoveImage" @restore="onRestoreImage" :class="imageItemClass" :style="[imageItemStyle]">
       <img :src="img.url" :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]" />
     </ImageWrapper>
   </div>

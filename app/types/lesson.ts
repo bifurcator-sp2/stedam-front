@@ -22,7 +22,7 @@ export interface LessonBlockModel {
   id: number
   blockId: number | null
   blockTypeCode: string
-  settings: SettingNode[]
+  settings: SettingNode | null
   images: any[]
   files: any[]
 }
@@ -38,14 +38,18 @@ export interface DraggedBlockSource {
 
 export interface BlockStructBlock {
   id: number
-  block_type_id: number
-  /** Код типа блока (добавлено для быстрого доступа без поиска по дереву) */
+  /** Код типа блока (например, 'text_image') */
   block_type_code: string | null
-  /** Дефолтные настройки типа блока (добавлено для рендера и drag&drop) */
-  default_settings: SettingNode[]
+  /** Название типа блока (из реестра) */
+  block_type_name?: string | null
+  /** Иконка типа блока (из реестра) */
+  block_type_icon?: string | null
+  /** Дефолтные настройки типа блока (схема) */
+  default_settings: SettingNode | null
   title: string | null
   description: string | null
-  settings: Record<string, any>
+  /** Текущие настройки блока (экземпляра) */
+  settings: SettingNode | null
   images?: any[]
   files?: any[]
 }
@@ -60,7 +64,7 @@ export interface BlockStructItem {
   type: string
   name: string
   description: string | null
-  default_settings: SettingNode[]
+  default_settings: SettingNode | null
   blocks_count: number
   blocks: BlockStructBlock[]
   /** Вложенные дочерние узлы (добавлено для поддержки дерева) */
@@ -84,7 +88,7 @@ export interface LessonBlockResponse {
   id: number
   block_id: number | null
   block_type_code: string | null
-  settings: Record<string, any> | null
+  settings: SettingNode | null
   images: any[] | null
   files: any[] | null
   order: number
@@ -104,7 +108,7 @@ export interface LessonSavePayload {
 
 export interface LessonBlockSavePayload {
   id: number
-  settings: Record<string, any>
+  settings: SettingNode | null
   images: any[]
   files: any[]
 }
@@ -121,5 +125,35 @@ export function createEmptyLesson(id: number | null = null): LessonModel {
     published: false,
     taxonomy_ids: null,
     blocks: [],
+  }
+}
+
+
+/** Один узел хлебной крошки (таксономия) */
+export interface LessonBreadcrumb {
+  id: number
+  title: string
+}
+
+export interface LessonListItem {
+  id: number
+  title: string | null
+  description: string | null
+  blocks_count: number
+  saved: boolean
+  published: boolean
+  created_at: string | null
+  updated_at: string | null
+  // Добавлено для построения крошек на клиенте
+  taxonomy_ids?: number[]
+}
+export interface LessonsPage {
+  data: LessonListItem[]
+  meta: {
+    current_page: number
+    per_page: number
+    has_more_pages: boolean // Заменяет total/last_page для simplePaginate
+    from: number | null
+    to: number | null
   }
 }

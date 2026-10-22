@@ -5,7 +5,6 @@ import Lesson from '~/components/Constructor/Lesson.vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import LessonBlocksIndex from '~/components/Constructor/LessonBlocksIndex.vue'
-import { mergeFlat } from '~/utils/constructors'
 import { useAutosave } from '~/composables/useAutosave'
 import type {
   LessonModel,
@@ -35,29 +34,20 @@ const {
 
 const structItems = computed<BlockStructItem[]>(() => struct.value?.data ?? [])
 
-// ==================== Утилита: Поиск настроек блока в дереве ====================
+// ==================== Утилита: поиск настроек блока в дереве ====================
 
-function findBlockSettingsInTree(nodes: BlockStructItem[], blockId: number | null): any[] {
-  if (!blockId) return []
+function findBlockSettingsInTree(nodes: BlockStructItem[], blockId: number | null): any {
+  if (!blockId) return null
   for (const node of nodes) {
     const found = node.blocks?.find(b => b.id === blockId)
-    if (found) return found.default_settings ?? []
+    if (found) return found.default_settings ?? null
     if (node.children?.length) {
       const inChildren = findBlockSettingsInTree(node.children, blockId)
-      if (inChildren.length) return inChildren
+      if (inChildren) return inChildren
     }
   }
-  return []
+  return null
 }
-
-// ==================== Состояние raw ====================
-
-interface RawState {
-  raw: Record<string, any>
-  lastSyncedView: any[]
-}
-
-const rawStates = ref<Record<string, RawState>>({})
 
 // ==================== Модель урока ====================
 
@@ -110,64 +100,6 @@ function deepClone<T>(v: T): T {
   return structuredClone(unwrapProxy(v)) as T
 }
 
-function deepEqual(a: any, b: any): boolean {
-  if (a === b) return true
-  if (a == null || b == null) return a === b
-  if (typeof a !== typeof b) return false
-  if (Array.isArray(a)) {
-    return Array.isArray(b)
-      && a.length === b.length
-      && a.every((x, i) => deepEqual(x, b[i]))
-  }
-  if (typeof a === 'object') {
-    const ka = Object.keys(a)
-    const kb = Object.keys(b)
-    return ka.length === kb.length && ka.every((k) => deepEqual(a[k], b[k]))
-  }
-  return false
-}
-
-function setValueByPath(obj: Record<string, any>, path: string[], value: any) {
-  let cur: any = obj
-  for (let i = 0; i < path.length - 1; i++) {
-    const k = path[i]
-    if (cur[k] == null || typeof cur[k] !== 'object') cur[k] = {}
-    cur = cur[k]
-  }
-  cur[path[path.length - 1]] = value
-}
-
-function patchRawFromViewDiff(
-  raw: Record<string, any>,
-  prevView: any[],
-  nextView: any[],
-  basePath: string[],
-) {
-  const prevByKey = new Map<string, any>(prevView.map((n: any) => [n.key, n]))
-
-  for (const nextNode of nextView) {
-    const prevNode = prevByKey.get(nextNode.key)
-    const nodePath = [...basePath, nextNode.key]
-    const hasChildren = Array.isArray(nextNode.children) && nextNode.children.length > 0
-
-    if (hasChildren) {
-      if (!prevNode || !deepEqual(prevNode.default, nextNode.default)) {
-        setValueByPath(raw, [...nodePath, 'default'], nextNode.default)
-      }
-      patchRawFromViewDiff(
-        raw,
-        prevNode?.children ?? [],
-        nextNode.children!,
-        nodePath,
-      )
-    } else {
-      if (!prevNode || !deepEqual(prevNode.default, nextNode.default)) {
-        setValueByPath(raw, nodePath, nextNode.default)
-      }
-    }
-  }
-}
-
 // ==================== Snapshot + retry для автосохранения ====================
 
 function snapshotLesson(): string {
@@ -212,34 +144,23 @@ async function loadLesson(id: number) {
     const res = await api.get<{ data: LessonResponse } | LessonResponse>(`/lessons/${id}`)
     const data = (res as any).data ?? res
 
-    const nextRawStates: Record<string, RawState> = {}
-
     const blocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-      const defaultSettings = findBlockSettingsInTree(structItems.value, b.block_id)
-
-      const view = mergeFlat(
-        defaultSettings,
-        b.settings ?? undefined,
-        undefined,
-      )
-
-      const localId = crypto.randomUUID()
-      nextRawStates[localId] = {
-        raw: deepClone(b.settings ?? {}),
-        lastSyncedView: deepClone(view),
-      }
+      const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
+      const rawSettings = b.settings
+      const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
+        ? deepClone(rawSettings)
+        : deepClone(fallback)
 
       return {
-        localId,
+        localId: crypto.randomUUID(),
         id: b.id,
         blockId: b.block_id ?? null,
         blockTypeCode: b.block_type_code ?? '',
-        settings: view,
-      }
+        settings,
+      } as LessonBlockModel
     })
 
     isProgrammatic.value = true
-    rawStates.value = nextRawStates
     lesson.value = {
       id: data.id,
       title: data.title ?? '',
@@ -279,53 +200,6 @@ async function createAndRedirect() {
   }
 }
 
-// ==================== syncMissingRaw ====================
-
-async function syncMissingRaw() {
-  if (!lesson.value.id) return
-
-  const missing = lesson.value.blocks.filter((b) => !rawStates.value[b.localId] && b.id > 0)
-  if (missing.length === 0) return
-
-  try {
-    const res = await api.get<{ data: LessonResponse } | LessonResponse>(
-      `/lessons/${lesson.value.id}`,
-    )
-    const data = (res as any).data ?? res
-
-    const byId = new Map<number, any>()
-    for (const sb of data.blocks ?? []) {
-      byId.set(sb.id, sb)
-    }
-
-    for (const block of missing) {
-      const sb = byId.get(block.id)
-      if (!sb) continue
-
-      rawStates.value[block.localId] = {
-        raw: deepClone(sb.settings ?? {}),
-        lastSyncedView: deepClone(block.settings ?? []),
-      }
-    }
-  } catch (e) {
-    console.error('[syncMissingRaw] failed', e)
-  }
-}
-
-watch(
-  () => lesson.value.blocks.map((b) => b.localId).join(','),
-  async () => {
-    if (!lesson.value.id) return
-
-    const currentIds = new Set(lesson.value.blocks.map((b) => b.localId))
-    for (const id of Object.keys(rawStates.value)) {
-      if (!currentIds.has(id)) delete rawStates.value[id]
-    }
-
-    await syncMissingRaw()
-  },
-)
-
 // ==================== Сохранение ====================
 
 const saving = ref(false)
@@ -345,21 +219,6 @@ async function save() {
 
   saving.value = true
   try {
-    await syncMissingRaw()
-
-    for (const block of lesson.value.blocks) {
-      const state = rawStates.value[block.localId]
-      if (!state) continue
-
-      patchRawFromViewDiff(
-        state.raw,
-        state.lastSyncedView,
-        block.settings,
-        [],
-      )
-      state.lastSyncedView = deepClone(block.settings)
-    }
-
     const snapshotAtSave = snapshotLesson()
 
     const payload: LessonSavePayload = {
@@ -371,7 +230,7 @@ async function save() {
       taxonomy_ids: lesson.value.taxonomy_ids ?? [],
       blocks: lesson.value.blocks.map((block) => ({
         id: block.id,
-        settings: rawStates.value[block.localId]?.raw ?? {},
+        settings: deepClone(block.settings),
         images: [],
         files: [],
       })),
@@ -389,17 +248,6 @@ async function save() {
     const userEditedDuringSave = snapshotLesson() !== snapshotAtSave
 
     if (userEditedDuringSave) {
-      const byId = new Map<number, any>()
-      for (const sb of data.blocks ?? []) byId.set(sb.id, sb)
-
-      for (const block of lesson.value.blocks) {
-        const state = rawStates.value[block.localId]
-        if (!state) continue
-        const sb = byId.get(block.id)
-        if (!sb) continue
-        state.raw = deepClone(sb.settings ?? {})
-      }
-
       lesson.value = {
         ...lesson.value,
         saved: data.saved ?? true,
@@ -409,34 +257,23 @@ async function save() {
 
       scheduleRetrySave()
     } else {
-      const nextRawStates: Record<string, RawState> = {}
-
       const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-        const defaultSettings = findBlockSettingsInTree(structItems.value, b.block_id)
-
-        const view = mergeFlat(
-          defaultSettings,
-          b.settings ?? undefined,
-          undefined,
-        )
-
-        const localId = crypto.randomUUID()
-        nextRawStates[localId] = {
-          raw: deepClone(b.settings ?? {}),
-          lastSyncedView: deepClone(view),
-        }
+        const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
+        const rawSettings = b.settings
+        const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
+          ? deepClone(rawSettings)
+          : deepClone(fallback)
 
         return {
-          localId,
+          localId: crypto.randomUUID(),
           id: b.id,
           blockId: b.block_id ?? null,
           blockTypeCode: b.block_type_code ?? '',
-          settings: view,
-        }
+          settings,
+        } as LessonBlockModel
       })
 
       isProgrammatic.value = true
-      rawStates.value = nextRawStates
       lesson.value = {
         ...lesson.value,
         saved: data.saved ?? true,
@@ -466,7 +303,7 @@ const { remaining: autosaveRemaining, cancel: cancelAutosave } = useAutosave({
     !!lesson.value.id
     && lesson.value.blocks.length > 0
     && !busy.value
-    && !isReadOnly.value, // Не запускаем автосохранение, если урок опубликован
+    && !isReadOnly.value,
   save,
   watchSource: () => lesson.value,
   isProgrammatic: () => isProgrammatic.value,
@@ -528,7 +365,7 @@ watch(
 const activeBlockIdModel = computed(() => activeBlock.value?.id ?? null)
 
 const activeBlockSettingsModel = computed({
-  get: () => activeBlock.value?.settings ?? [],
+  get: () => activeBlock.value?.settings ?? null,
   set: (v) => {
     if (activeBlock.value) {
       activeBlock.value.settings = v
@@ -553,7 +390,6 @@ onBeforeUnmount(() => {
     right-title="Свойства"
     :show-viewport-picker="true"
   >
-    <!-- ==================== LEFT ==================== -->
     <template #left>
       <LessonBlocksIndex
         :struct-items="structItems"
@@ -562,14 +398,12 @@ onBeforeUnmount(() => {
       />
     </template>
 
-    <!-- ==================== MAIN HEADER ==================== -->
     <template #main-header>
       <div class="flex min-w-0 items-center gap-2">
         <span>{{ centerTitle }}</span>
       </div>
     </template>
 
-    <!-- ==================== MAIN ==================== -->
     <template #main>
       <LoadingOverlay :loading="busy">
         <Lesson
@@ -581,7 +415,6 @@ onBeforeUnmount(() => {
       </LoadingOverlay>
     </template>
 
-    <!-- ==================== RIGHT HEADER ==================== -->
     <template #right-header>
       <div class="flex w-full items-center justify-between gap-2">
         <span>Свойства</span>
@@ -600,7 +433,6 @@ onBeforeUnmount(() => {
             </span>
           </Transition>
 
-          <!-- Свитч публикации -->
           <div
             class="flex items-center gap-2 cursor-pointer select-none"
             @click="togglePublished"
@@ -618,7 +450,6 @@ onBeforeUnmount(() => {
             </span>
           </div>
 
-          <!-- Кнопка Сохранить (теперь доступна всегда) -->
           <UButton
             icon="i-lucide-save"
             size="xs"
@@ -634,10 +465,8 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <!-- ==================== RIGHT ==================== -->
     <template #right>
       <LoadingOverlay :loading="busy">
-        <!-- Если урок опубликован, скрываем панель настроек -->
         <div
           v-if="isReadOnly"
           class="flex h-full flex-col items-center justify-center p-6 text-center text-(--ui-text-muted)"
@@ -651,7 +480,6 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
-        <!-- Если черновик, показываем панель -->
         <template v-else>
           <div v-if="!activeBlock" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
             Выберите блок в центре.
