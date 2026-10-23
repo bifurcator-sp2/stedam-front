@@ -1,7 +1,7 @@
 <!-- app/components/Constructor/TaxonomySelector.vue -->
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
 
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 // ============================================================
 // Типы
 // ============================================================
@@ -60,20 +60,20 @@ async function load() {
     const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
     tree.value = res.data ?? []
     loaded.value = true
-
-    // Открываем поповер ТОЛЬКО после загрузки данных,
-    // если урок еще не привязан к разделу
-    if (!model.value || model.value.length === 0) {
-      internalOpen.value = true
-    }
   } catch (e: any) {
     error.value = e?.data?.message ?? e?.message ?? 'Ошибка загрузки'
   } finally {
     loading.value = false
   }
 }
-
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // Даём родителю один цикл рендера, чтобы v-model гарантированно привязался
+  await nextTick()
+  if (!model.value?.length) {
+    internalOpen.value = true
+  }
+})
 
 // Если выбор сбросили через крестик — принудительно открываем
 watch(model, (val) => {

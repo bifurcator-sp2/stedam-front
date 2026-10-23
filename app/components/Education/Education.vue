@@ -33,6 +33,15 @@ function onBreadcrumbOpen(id: number) {
   router.push({ query: { tax: id } })
 }
 
+function createLesson() {
+  const query: Record<string, string> = {}
+  const tax = selectedTaxonomyId.value
+  if (tax !== null && Number.isFinite(tax) && tax > 0) {
+    query.tax = String(tax)
+  }
+  router.push({ path: '/construct-lesson', query })
+}
+
 // ==================== Выбранный урок ====================
 const selectedLessonId = ref<number | null>(null)
 
@@ -64,6 +73,30 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleGlobalClick)
 })
+
+
+// ==================== Валидность выбранного раздела ====================
+
+function findNodeById(nodes: any[], id: number): any | null {
+  for (const n of nodes) {
+    if (n.id === id) return n
+    if (n.children?.length) {
+      const found = findNodeById(n.children, id)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/** ?tax валиден, если узел существует и у него нет детей (лист) */
+const isSelectedTaxLeaf = computed<boolean>(() => {
+  const id = selectedTaxonomyId.value
+  if (id === null || !Number.isFinite(id) || id <= 0) return false
+  if (!taxonomyData.value?.length) return false
+  const node = findNodeById(taxonomyData.value, id)
+  if (!node) return false
+  return !node.children || node.children.length === 0
+})
 </script>
 
 <template>
@@ -91,7 +124,22 @@ onBeforeUnmount(() => {
         @select="onTaxonomySelect"
       />
     </template>
-
+    <template #main-header-right>
+      <UButton
+        icon="i-lucide-plus"
+        size="sm"
+        color="primary"
+        variant="solid"
+        class="normal-case tracking-normal font-semibold shadow-sm hover:shadow-md transition-all duration-200"
+        :disabled="!isSelectedTaxLeaf"
+        :title="isSelectedTaxLeaf
+      ? 'Создать урок в выбранном разделе'
+      : 'Выберите конечный раздел в дереве слева'"
+        @click="createLesson"
+      >
+        Создать урок
+      </UButton>
+    </template>
     <template #main>
       <!-- Передаем только существующие переменные -->
       <EducationLessonsSearch

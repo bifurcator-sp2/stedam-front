@@ -14,10 +14,10 @@ interface NavItem {
 
 
 const navItems: NavItem[] = [
-  { label: 'Профиль', icon: 'i-lucide-user', to: '/profile' },
-  { label: 'Конструктор блоков', icon: 'i-lucide-layout-dashboard', to: '/construct' },
-  { label: 'Уроки', icon: 'i-lucide-pencil-ruler', to: '/lessons' },
-  { label: 'Обучение', icon: 'i-lucide-book-open', to: '/edu' },
+  { label: 'Профиль',            icon: 'i-lucide-circle-user',    to: '/profile' },
+  { label: 'Конструктор блоков', icon: 'i-lucide-blocks',         to: '/construct' },
+  { label: 'Я - преподаватель',  icon: 'i-lucide-presentation',   to: '/edu' },
+  { label: 'Я - ученик',         icon: 'i-lucide-graduation-cap', to: '/learn' },
 ]
 
 </script>

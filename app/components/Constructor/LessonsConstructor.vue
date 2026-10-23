@@ -48,7 +48,15 @@ function findBlockSettingsInTree(nodes: BlockStructItem[], blockId: number | nul
   }
   return null
 }
+// ==================== Утилита: валидный ?tax из query ====================
 
+function getValidTaxFromQuery(): number | null {
+  const raw = route.query.tax
+  const v = Array.isArray(raw) ? raw[0] : raw
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 // ==================== Модель урока ====================
 
 const lesson = ref<LessonModel>(createEmptyLesson())
@@ -160,6 +168,13 @@ async function loadLesson(id: number) {
       } as LessonBlockModel
     })
 
+    // ?tax применяем только если у урока ещё нет сохранённых разделов
+    const taxFromQuery = getValidTaxFromQuery()
+    const hasSavedTaxonomies = Array.isArray(data.taxonomy_ids) && data.taxonomy_ids.length > 0
+    const taxonomyIds: number[] = hasSavedTaxonomies
+      ? data.taxonomy_ids
+      : (taxFromQuery !== null ? [taxFromQuery] : [])
+
     isProgrammatic.value = true
     lesson.value = {
       id: data.id,
@@ -168,7 +183,7 @@ async function loadLesson(id: number) {
       locale: data.locale ?? 'ru',
       saved: data.saved ?? false,
       published: data.published ?? false,
-      taxonomy_ids: data.taxonomy_ids ?? [],
+      taxonomy_ids: taxonomyIds,
       blocks,
     }
 
@@ -191,7 +206,12 @@ async function createAndRedirect() {
     const res = await api.post<{ data: LessonResponse } | LessonResponse>('/lessons/make')
     const data = (res as any).data ?? res
 
-    await router.replace({ query: { id: String(data.id) } })
+    // Пробрасываем ?tax в финальный URL, чтобы loadLesson его увидел
+    const tax = getValidTaxFromQuery()
+    const query: Record<string, string> = { id: String(data.id) }
+    if (tax !== null) query.tax = String(tax)
+
+    await router.replace({ query })
   } catch (e) {
     console.error('[createAndRedirect] failed', e)
     loadError.value = 'Не удалось создать урок'

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 
+
 const title = 'Уроки'
 const description = 'Stedam уроки'
 
@@ -18,9 +19,8 @@ useSeoMeta({
   ogImage: 'https://ui.nuxt.com/assets/templates/nuxt/saas-light.png',
 })
 
-
 </script>
 
 <template>
-<ConstructorLessonsList />
+<EducationLessonsLearnList />
 </template>

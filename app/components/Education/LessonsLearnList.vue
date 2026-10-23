@@ -1,4 +1,4 @@
-<!-- app/components/Constructor/LessonsList.vue -->
+<!-- app/components/Constructor/LessonsLearnList.vue -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { LessonListItem, LessonsPage } from '~/types/lesson'
@@ -31,7 +31,7 @@ const currentPage = computed<number>({
 const { data, pending, error } = await useAsyncData<LessonsPage>(
   () => `lessons-list-${currentPage.value}`,
   () =>
-    api.get<LessonsPage>('/lessons', {
+    api.get<LessonsPage>('/lessons/learn', {
       params: {
         page: currentPage.value,
         per_page: PER_PAGE,
@@ -45,12 +45,9 @@ const meta = computed(() => data.value?.meta ?? null)
 
 // ==================== Переходы ====================
 
-function createLesson() {
-  router.push('/construct-lesson')
-}
 
 function openLesson(id: number) {
-  router.push({ path: '/construct-lesson', query: { id: String(id) } })
+  router.push({ path: '/learn/'+String(id) })
 }
 
 // ==================== UPagination: to ====================
@@ -65,18 +62,6 @@ function pageTo(page: number) {
 
 <template>
   <div class="flex flex-col gap-5 p-6 max-w-3xl mx-auto w-full">
-    <!-- === Кнопка "Создать урок" === -->
-    <UButton
-      icon="i-lucide-plus"
-      size="sm"
-      color="primary"
-      variant="soft"
-      block
-      @click="createLesson"
-    >
-      Создать урок
-    </UButton>
-
     <!-- === Загрузка === -->
     <div
       v-if="pending"

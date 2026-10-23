@@ -399,7 +399,7 @@ defineExpose({
       </div>
 
       <div class="flex items-center gap-4">
-        <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" />
+        <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" v-if="lesson.id" />
       </div>
     </div>
 
