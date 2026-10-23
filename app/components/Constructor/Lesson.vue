@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount, onMounted, toRaw } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, toRaw, provide } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
 import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
@@ -12,6 +12,52 @@ import type {
   DraggedBlockSource,
 } from '~/types/lesson'
 
+/*
+================================================================================
+📖 ИНСТРУКЦИЯ: РЕЖИМЫ УРОКА (lesson-mode)
+================================================================================
+
+Система позволяет централизованно управлять поведением компонентов
+в зависимости от того, где открыт урок.
+
+📌 ДОСТУПНЫЕ РЕЖИМЫ:
+  - 'edit'  — Редактор (конструктор). Все интерактивные элементы (D&D,
+              инлайн-редактирование, кнопки удаления) доступны.
+  - 'learn' — Режим ученика. Элементы управления скрыты, текст защищен от
+              случайного изменения, но лайтбоксы и скролл работают.
+
+🛠 КАК ИСПОЛЬЗОВАТЬ В ДОЧЕРНИХ КОМПОНЕНТАХ:
+  (Доступно внутри любого компонента, отрендеренного внутри <ConstructorLesson>)
+
+  1. Импортируйте inject и Ref:
+     import { inject, ref, type Ref } from 'vue'
+
+  2. Получите режим (по умолчанию 'edit'):
+     const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
+  3. Применяйте в логике или шаблоне:
+     // В шаблоне (скрыть кнопку/меню):
+     <div v-if="lessonMode === 'edit'">...панель управления...</div>
+
+     // В шаблоне (запретить действие):
+     <button :disabled="lessonMode === 'learn'">Удалить</button>
+
+     // В JS (защита от вызова):
+     function deleteItem() {
+       if (lessonMode.value === 'learn') return
+       // ...логика...
+     }
+
+📂 ТЕКУЩИЕ КОМПОНЕНТЫ С ПОДДЕРЖКОЙ РЕЖИМА:
+  - LessonBlockWrapper (скрывает панель действий)
+  - TaxonomySelector (отключает выбор таксономии)
+  - TextNode / htmltext (запрещают редактирование)
+  - text_image / gallery (запрещают удаление и D&D картинок)
+================================================================================
+*/
+
+
+
 const api = useApi()
 const toast = useToast()
 
@@ -21,6 +67,8 @@ interface Props {
   structItems: BlockStructItem[]
   activeBlockLocalId?: string | null
   isReadOnly?: boolean
+  /** Режим отображения урока: редактирование или прохождение (чтение) */
+  mode?: 'edit' | 'learn'
   /** Показывать ли всплывающее уведомление при попытке редактирования read-only урока */
   displayReadOnlyToast?: boolean
 }
@@ -28,6 +76,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   activeBlockLocalId: null,
   isReadOnly: false,
+  mode: 'edit',
   displayReadOnlyToast: true,
 })
 
@@ -41,6 +90,11 @@ const emit = defineEmits<{
   (e: 'update:activeBlockLocalId', value: string | null): void
   (e: 'register-files', blockLocalId: string, inst: any): void
 }>()
+
+// ==================== Провайд режима (для дочерних компонентов) ====================
+
+const lessonMode = computed(() => props.mode)
+provide('lesson-mode', lessonMode)
 
 // ==================== Утилита поиска блока в дереве ====================
 
@@ -64,6 +118,8 @@ function setActive(localId: string | null) {
 }
 
 function activateBlock(localId: string) {
+  // В режиме learn или read-only не активируем блоки
+  if (props.mode === 'learn' || props.isReadOnly) return
   setActive(localId)
 }
 
@@ -74,6 +130,7 @@ function deactivate() {
 // ==================== Работа с блоками ====================
 
 function removeBlock(localId: string) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   const idx = lesson.value.blocks.findIndex((b) => b.localId === localId)
   if (idx < 0) return
 
@@ -87,6 +144,7 @@ function removeBlock(localId: string) {
 }
 
 async function duplicateBlock(localId: string) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   const idx = lesson.value.blocks.findIndex((b) => b.localId === localId)
   if (idx < 0) return
 
@@ -129,6 +187,7 @@ async function duplicateBlock(localId: string) {
 }
 
 function moveBlockUp(localId: string) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   const idx = lesson.value.blocks.findIndex((b) => b.localId === localId)
   if (idx <= 0) return
 
@@ -139,6 +198,7 @@ function moveBlockUp(localId: string) {
 }
 
 function moveBlockDown(localId: string) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   const idx = lesson.value.blocks.findIndex((b) => b.localId === localId)
   if (idx < 0 || idx >= lesson.value.blocks.length - 1) return
 
@@ -153,6 +213,7 @@ function moveBlockDown(localId: string) {
 const dragOverIndex = ref<number | null>(null)
 
 async function handleDropAtIndex(index: number, source: DraggedBlockSource | null) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   if (!source) return
   if (!lesson.value.id) return
 
@@ -255,10 +316,12 @@ function onRegisterFiles(block: LessonBlockModel, inst: any) {
 // ==================== Inline-edit ====================
 
 function updateTitle(v: string) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   lesson.value = { ...lesson.value, title: v }
 }
 
 function updateDescription(v: string) {
+  if (props.mode === 'learn' || props.isReadOnly) return
   lesson.value = { ...lesson.value, description: v }
 }
 
@@ -275,14 +338,14 @@ const { totalChars, readingTimeText } = useContentStats({
   watchSource: () => lesson.value,
 })
 
-// ==================== Защита от редактирования ====================
+// ==================== Защита от редактирования (оверлей) ====================
 
 let isToastVisible = false
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 
 function showReadOnlyToast() {
   if (isToastVisible) return
-  if (!props.displayReadOnlyToast) return // <-- Проверка пропса
+  if (!props.displayReadOnlyToast) return
 
   isToastVisible = true
 
@@ -319,6 +382,7 @@ function handleFocusIn(e: FocusEvent) {
 // ==================== Глобальная деактивация ====================
 
 function onGlobalPointerDown(e: PointerEvent) {
+  if (props.mode === 'learn') return
   const target = e.target as HTMLElement | null
   if (!target) return
 
@@ -367,7 +431,7 @@ defineExpose({
         class="w-full p-0 border-none bg-transparent text-[28px] font-bold leading-tight text-[var(--ui-text,#0f172a)] outline-none placeholder:text-[var(--ui-text-muted,#cbd5e1)]"
         :value="lesson.title"
         placeholder="Заголовок урока"
-        :readonly="isReadOnly"
+        :readonly="isReadOnly || mode === 'learn'"
         @input="updateTitle(($event.target as HTMLInputElement).value)"
       />
       <textarea
@@ -375,7 +439,7 @@ defineExpose({
         :value="lesson.description"
         placeholder="Краткое описание урока"
         rows="1"
-        :readonly="isReadOnly"
+        :readonly="isReadOnly || mode === 'learn'"
         @input="updateDescription(($event.target as HTMLTextAreaElement).value)"
       />
     </div>
@@ -429,7 +493,7 @@ defineExpose({
       drag-class="block-drag"
       class="flex flex-col min-h-[100px]"
       :filter="'[data-drop-zone]'"
-      :disabled="isReadOnly"
+      :disabled="isReadOnly || mode === 'learn'"
       @dragleave="onDragLeave"
     >
       <template #default>
@@ -475,7 +539,9 @@ defineExpose({
               </div>
             </LessonBlockWrapper>
 
+            <!-- Клик-зона для выбора блока (скрываем в learn) -->
             <div
+              v-if="mode === 'edit' && !isReadOnly"
               class="absolute top-0 left-full ml-[5px] h-[calc(100%-50px)] w-[75px] rounded-r-md cursor-pointer transition-colors z-0 bg-gradient-to-r from-transparent"
               :class="props.activeBlockLocalId === block.localId
                 ? 'to-blue-200/40 dark:to-blue-800/40'
@@ -499,6 +565,7 @@ defineExpose({
       </template>
     </VueDraggable>
 
+    <!-- Оверлей для isReadOnly (публикация) -->
     <div
       v-if="isReadOnly"
       class="absolute inset-0 z-50 bg-transparent cursor-not-allowed"

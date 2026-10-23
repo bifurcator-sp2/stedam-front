@@ -124,8 +124,8 @@ function goBack() {
     </header>
 
     <!-- Контент -->
-    <main class="flex-1 overflow-y-auto">
-      <div class="max-w-3xl mx-auto p-6">
+    <main class="overflow-y-auto">
+      <div class="max-w-4xl mx-auto">
         <div v-if="pending" class="flex justify-center py-20">
           <UIcon
             name="i-lucide-loader-circle"

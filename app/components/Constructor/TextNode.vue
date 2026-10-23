@@ -1,6 +1,6 @@
 <!-- components/Constructor/TextNode.vue -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
 import { useFormula } from '~/composables/useFormula'
 import { useVideoEmbed } from '~/composables/useVideoEmbed'
 import type { InlineEditBinding } from '~/directives/inlineEdit'
@@ -24,12 +24,18 @@ const emit = defineEmits<{
 const { renderFormulas } = useFormula()
 const { renderVideos } = useVideoEmbed()
 
+// ==================== Режим урока ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
+// Разрешаем редактирование только в режиме edit
+const canEdit = computed(() => props.editable && lessonMode.value === 'edit')
+
 // ==================== Резолв пути ====================
 
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
 
-  // Поддержка единичного корневого узла (SettingNode) — разворачиваем в список
   if (!Array.isArray(root) && typeof root === 'object' && 'key' in root) {
     root = [root]
   }
@@ -101,15 +107,28 @@ const binding = computed<InlineEditBinding>(() => ({
 }))
 
 const isEmpty = computed(() => !textValue.value.trim())
+
+// Для режима чтения рендерим HTML вручную
+const renderedText = computed(() => renderVideos(renderFormulas(textValue.value)))
 </script>
 
 <template>
+  <!-- Режим редактирования -->
   <component
     :is="container"
-    v-if="!isEmpty || editable"
+    v-if="canEdit"
     :style="{ columnCount: colsValue }"
     :class="[sizeClass, alignClass, 'block-title-break']"
-    v-inline-edit="editable ? binding : undefined"
+    v-inline-edit="binding"
+  ></component>
+
+  <!-- Режим обучения (или если редактирование запрещено пропсом) -->
+  <component
+    :is="container"
+    v-else-if="!isEmpty"
+    :style="{ columnCount: colsValue }"
+    :class="[sizeClass, alignClass, 'block-title-break']"
+    v-html="renderedText"
   ></component>
 </template>
 

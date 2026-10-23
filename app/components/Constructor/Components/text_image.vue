@@ -1,6 +1,6 @@
 <!-- components/Constructor/Components/text_image.vue -->
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
+import { computed, inject, ref, type Component, type Ref } from 'vue'
 import type { SettingNode } from '~/utils/constructors'
 
 const value = defineModel<SettingNode | null>({ default: null })
@@ -18,6 +18,17 @@ const props = withDefaults(defineProps<{
   initialImages: () => [],
   modelName: 'blocks',
 })
+
+// ==================== Режим урока ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
+// Разрешаем редактирование только в режиме edit
+const isEditable = computed(() => lessonMode.value === 'edit')
+
+// Передаем вниз флаги, учитывая режим
+const allowDrag = computed(() => props.allowDragAndDrop && isEditable.value)
+const allowDelete = computed(() => props.showToDeleteImages && isEditable.value)
 
 // ==================== Динамический рендеринг компонентов ====================
 
@@ -220,6 +231,8 @@ function getChildPath(block: any, blockIndex: number) {
 }
 
 function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
+  if (!isEditable.value) return // Блокируем обновления в режиме learn
+
   const root = value.value as any
   if (!root || !root.children) return
 
@@ -271,48 +284,46 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
 </script>
 
 <template>
-  <ConstructorBlockLayout :mode="props.mode ?? 'body'">
-    <template #form>
-      <div>Тут ничего нет еще</div>
-    </template>
+  <!-- Режим формы (для палитры) -->
+  <div v-if="props.mode === 'form'">
+    <div>Тут ничего нет еще</div>
+  </div>
 
-    <template #body>
-      <div class="text-image-root min-h-[200px] w-full">
-         <div :style="[layoutMarginStyle]">
+  <!-- Режим просмотра (body) -->
+  <div v-else class="text-image-root min-h-[200px] w-full">
+    <div :style="[layoutMarginStyle]">
+      <div
+        :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, layoutContainerStyle]"
+        :class="layoutClass"
+      >
+        <template v-for="(block, index) in visibleBlocks" :key="block.key">
           <div
-            :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, layoutContainerStyle]"
-            :class="layoutClass"
+            v-if="getContentComponent(block.default) && getActiveChild(block)"
+            :style="getBlockStyle(index)"
+            class="min-w-0"
           >
-            <template v-for="(block, index) in visibleBlocks" :key="block.key">
-              <div
-                v-if="getContentComponent(block.default) && getActiveChild(block)"
-                :style="getBlockStyle(index)"
-                class="min-w-0"
-              >
-                <component
-                  :is="getContentComponent(block.default)!"
-                  :node="getActiveChild(block)!"
-                  :gallery="getGalleryNode(block)!"
-                  :settings="value"
-                  :style-path="getChildPath(block, index)"
-                  :allow-drag-and-drop="allowDragAndDrop"
-                  :show-to-delete-images="showToDeleteImages"
-                  @update="onUpdateChild(index, $event)"
-                />
-              </div>
-              <div v-else class="p-4 text-xs text-red-500 bg-red-50 rounded">
-                Блок "{{ block.key }}" (default: {{ block.default }}) не найден или нет активного компонента
-              </div>
-            </template>
-
-            <div v-if="!visibleBlocks.length" class="p-4 text-xs text-yellow-600 bg-yellow-50 rounded">
-              Массив visibleBlocks пуст. Проверьте наличие content-blocks в настройках.
-            </div>
+            <component
+              :is="getContentComponent(block.default)!"
+              :node="getActiveChild(block)!"
+              :gallery="getGalleryNode(block)!"
+              :settings="value"
+              :style-path="getChildPath(block, index)"
+              :allow-drag-and-drop="allowDrag"
+              :show-to-delete-images="allowDelete"
+              @update="onUpdateChild(index, $event)"
+            />
           </div>
+          <div v-else class="p-4 text-xs text-red-500 bg-red-50 rounded">
+            Блок "{{ block.key }}" (default: {{ block.default }}) не найден или нет активного компонента
+          </div>
+        </template>
+
+        <div v-if="!visibleBlocks.length" class="p-4 text-xs text-yellow-600 bg-yellow-50 rounded">
+          Массив visibleBlocks пуст. Проверьте наличие content-blocks в настройках.
         </div>
       </div>
-    </template>
-  </ConstructorBlockLayout>
+    </div>
+  </div>
 </template>
 
 <style scoped>

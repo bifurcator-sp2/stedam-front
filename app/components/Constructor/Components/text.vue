@@ -1,5 +1,8 @@
+<!-- components/Constructor/Components/text.vue -->
 <script setup lang="ts">
-const { sanitizeHtml } = useSanitize()
+import { ref, computed, inject, type Ref } from 'vue'
+import { useFormula } from '~/composables/useFormula'
+import { useVideoEmbed } from '~/composables/useVideoEmbed'
 
 const value = defineModel<string>({ default: '' })
 
@@ -7,7 +10,19 @@ const props = defineProps<{
   mode?: 'form' | 'body'
 }>()
 
-// Высота textarea для режима form
+// ==================== Режим урока ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+const canEdit = computed(() => lessonMode.value === 'edit')
+
+// ==================== Рендер для чтения ====================
+
+const { renderFormulas } = useFormula()
+const { renderVideos } = useVideoEmbed()
+const renderedText = computed(() => renderVideos(renderFormulas(value.value)))
+
+// ==================== Высота textarea для режима form ====================
+
 const MIN_HEIGHT = 80
 const DEFAULT_HEIGHT = 120
 
@@ -43,40 +58,45 @@ function startResize(e: MouseEvent) {
 </script>
 
 <template>
-  <ConstructorBlockLayout :mode="props.mode ?? 'body'">
-    <template #form>
-      <div class="relative w-full">
-        <UTextarea
-          v-model="value"
-          :rows="4"
-          :style="{ height: textareaHeight + 'px', resize: 'none' }"
-          class="w-full"
-          autoresize
-          maxrows="500"
-        />
+  <!-- Режим формы (для палитры) -->
+  <div v-if="props.mode === 'form'" class="relative w-full">
+    <UTextarea
+      v-model="value"
+      :rows="4"
+      :style="{ height: textareaHeight + 'px', resize: 'none' }"
+      class="w-full"
+      autoresize
+      maxrows="500"
+    />
 
-        <div
-          class="absolute bottom-0 right-0 w-4 h-4 cursor-ns-resize
-                 flex items-end justify-end p-0.5"
-          @mousedown="startResize"
-        >
-          <div class="w-2 h-2 border-r border-b border-default opacity-60" />
-        </div>
-      </div>
-    </template>
+    <div
+      class="absolute bottom-0 right-0 w-4 h-4 cursor-ns-resize flex items-end justify-end p-0.5"
+      @mousedown="startResize"
+    >
+      <div class="w-2 h-2 border-r border-b border-default opacity-60" />
+    </div>
+  </div>
 
-    <template #body>
-      {{value}}
-      <div
-        v-inline-edit="{
-          get: () => value,
-          set: (v: string) => (value = v),
-          renderFormulas: true,
-        }"
-        class="text-default inline-edit"
-      ></div>
-    </template>
-  </ConstructorBlockLayout>
+  <!-- Режим просмотра (body) -->
+  <div v-else>
+    <!-- Если можно редактировать -->
+    <div
+      v-if="canEdit"
+      v-inline-edit="{
+        get: () => value,
+        set: (v: string) => (value = v),
+        renderFormulas: true,
+      }"
+      class="text-default inline-edit"
+    ></div>
+
+    <!-- Если режим обучения -->
+    <div
+      v-else
+      class="text-default inline-edit"
+      v-html="renderedText"
+    ></div>
+  </div>
 </template>
 
 <style scoped>

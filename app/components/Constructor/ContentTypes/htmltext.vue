@@ -2,16 +2,18 @@
 <script setup lang="ts">
 import {
   computed,
+  inject,
   ref,
   watch,
   nextTick,
   onMounted,
   onBeforeUnmount,
+  type Ref,
 } from 'vue'
 import type { EditorToolbarItem } from '@nuxt/ui'
 import type { SettingNode } from '~/utils/constructors'
 import { useFormula } from '~/composables/useFormula'
-import { useVideoEmbed } from '~/composables/useVideoEmbed' // <-- ИМПОРТ
+import { useVideoEmbed } from '~/composables/useVideoEmbed'
 
 const props = withDefaults(defineProps<{
   node: SettingNode
@@ -28,10 +30,14 @@ const emit = defineEmits<{
   (e: 'update', value: SettingNode): void
 }>()
 
-const { renderFormulas } = useFormula()
-const { renderVideos } = useVideoEmbed() // <-- ИНИЦИАЛИЗАЦИЯ
+// ==================== Режим урока ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
 
 // ==================== Данные ====================
+
+const { renderFormulas } = useFormula()
+const { renderVideos } = useVideoEmbed()
 
 const htmlValue = computed({
   get: () => {
@@ -53,7 +59,11 @@ const renderedHtml = computed(() => renderVideos(renderFormulas(htmlValue.value)
 const activeId = useState<string | null>('htmltext-active-id', () => null)
 const myId = ref<string>('')
 
-const showEditor = computed(() => props.editable && activeId.value === myId.value)
+// Запрещаем открывать редактор в режиме learn
+const showEditor = computed(() => {
+  if (lessonMode.value === 'learn') return false
+  return props.editable && activeId.value === myId.value
+})
 
 // ==================== Refs ====================
 
@@ -72,6 +82,7 @@ const toolbarStyle = ref<Record<string, string>>({
 // ==================== Показ по клику ====================
 
 function onRootClick(e: MouseEvent) {
+  if (lessonMode.value === 'learn') return // Блокируем в режиме прохождения
   if (!props.editable) return
   if (!myId.value) return
 
@@ -302,7 +313,7 @@ const toolbarItems: EditorToolbarItem[][] = [
     @click.stop="onRootClick"
   >
     <ClientOnly>
-      <!-- Редактор: появляется по клику -->
+      <!-- Редактор: появляется по клику (только в режиме edit) -->
       <UEditor
         v-if="showEditor"
         v-slot="{ editor }"

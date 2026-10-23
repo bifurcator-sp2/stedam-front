@@ -5,19 +5,7 @@ const props = defineProps<{
 </script>
 
 <template>
-  <ConstructorBlockLayout :mode="props.mode ?? 'body'">
-    <template #form>
-      <div class="py-2">
-        <USeparator color="primary" type="solid" />
-      </div>
-    </template>
-
-    <template #body>
-      <div class="py-2">
-        <USeparator color="primary" type="solid" />
-      </div>
-    </template>
-
-  </ConstructorBlockLayout>
+  <div class="py-2">
+    <USeparator color="primary" type="solid" />
+  </div>
 </template>
-

@@ -6,94 +6,54 @@ export interface InlineEditBinding {
   get: () => string
   set: (value: string) => void
   onUpdate?: (html: string) => void
-  /** Функция рендера формул (LaTeX → HTML). Если не передана — рендера нет. */
   renderFormulas?: (html: string) => string
 }
 
-// ==================== Утилиты нормализации ====================
-
-/** Декодировать HTML-сущности: &amp; → &, &lt; → <, и т.п. */
 function decodeHtml(s: string): string {
   const t = document.createElement('textarea')
   t.innerHTML = s
   return t.value
 }
 
-/** Убрать все теги, оставить текст. */
 function stripTags(s: string): string {
   const t = document.createElement('div')
   t.innerHTML = s
   return t.textContent ?? ''
 }
 
-/**
- * Извлечь LaTeX из KaTeX-разметки.
- * KaTeX кладёт исходник в <annotation encoding="application/x-tex">...</annotation>
- * внутри <span class="katex"> или <span class="katex-display">.
- *
- * Возвращает строку, где каждая KaTeX-формула заменена на $...$ или $$...$$.
- * Если в HTML нет KaTeX — вернёт исходный HTML (теги не тронуты — их снимет stripTags).
- */
 function restoreLatexFromKatex(html: string): string {
   if (!html || !/class="katex/.test(html)) return html
-
   let out = html
-
-  // Сначала — display-формулы ($$...$$)
   out = out.replace(
     /<span class="katex-display">[\s\S]*?<annotation encoding="application\/x-tex">([\s\S]*?)<\/annotation>[\s\S]*?<\/span>/g,
     (_, latex) => `$$${decodeHtml(latex)}$$`
   )
-
-  // Затем — inline-формулы ($...$), которые ещё остались
   out = out.replace(
     /<span class="katex">[\s\S]*?<annotation encoding="application\/x-tex">([\s\S]*?)<\/annotation>[\s\S]*?<\/span>/g,
     (_, latex) => `$${decodeHtml(latex)}$`
   )
-
   return out
 }
 
-/**
- * Нормализовать HTML из contenteditable в «чистый» текст:
- *  - KaTeX → $...$
- *  - Видео iframe → ссылка
- *  - <br>, </div>, </p>, </li> → \n
- *  - убрать zero-width и NBSP
- *  - схлопнуть множественные \n
- *  - снять оставшиеся теги (если нужен plain-text)
- */
 function normalizeHtml(html: string): string {
   if (!html) return ''
-
-  // 1. Восстановить формулы
   let out = restoreLatexFromKatex(html)
-
-  // 2. Восстановить ссылки из видео-блоков (iframe → url)
   out = restoreVideos(out)
-
-  // 3. Блочные элементы → \n
   out = out.replace(/<br\s*\/?>/gi, '\n')
   out = out.replace(/<\/(div|p|li|h[1-6])>/gi, '\n')
   out = out.replace(/<(div|p|li|h[1-6])[^>]*>/gi, '')
-
-  // 4. Остальные теги снять (если хотим plain-text)
   out = stripTags(out)
-
-  // 5. Невидимые символы и NBSP
   out = out.replace(/[\u200B-\u200D\uFEFF]/g, '')
   out = out.replace(/\u00A0/g, ' ')
-
-  // 6. Схлопнуть множественные \n
   out = out.replace(/\n{3,}/g, '\n\n')
-
   return out
 }
 
-// ==================== Директива ====================
-
 export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
   mounted(el, binding) {
+    // 👇 ЗАЩИТА: если значения нет, ничего не делаем
+    if (!binding.value) return
+
     el.setAttribute('contenteditable', 'true')
     el.setAttribute('autocorrect', 'off')
     el.setAttribute('autocapitalize', 'off')
@@ -111,29 +71,22 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
     let rawValue = current.get() ?? ''
     let selfUpdate = false
 
-    // Стартовый рендер: если узел не в фокусе — показываем формулы и видео
     if (document.activeElement === el) {
       if (el.innerHTML !== rawValue) el.innerHTML = rawValue
     } else {
       el.innerHTML = render(rawValue)
     }
 
-    // ==================== События ====================
-
     const onDragStart = (e: DragEvent) => e.preventDefault()
 
     const onPaste = (e: ClipboardEvent) => {
       e.preventDefault()
-
       const html = e.clipboardData?.getData('text/html') ?? ''
       const text = e.clipboardData?.getData('text/plain') ?? ''
-
       let payload = text
 
       if (html) {
-        // Восстановим $...$ из KaTeX, если он там есть
         const restored = restoreLatexFromKatex(html)
-        // Если после восстановления что-то поменялось — используем HTML-ветку
         if (restored !== html) {
           let cleaned = restored
             .replace(/<br\s*\/?>/gi, '\n')
@@ -142,16 +95,12 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
           cleaned = stripTags(cleaned)
           payload = cleaned
         } else if (html && !text) {
-          // На всякий случай: если plain-текста нет, снимем теги с html
           payload = stripTags(html)
         }
       }
-
-      // Вставляем как plain-text — execCommand не даст браузеру добавить свои теги
       document.execCommand('insertText', false, payload)
     }
 
-    // Enter → <br> (Shift+Enter — обычный перенос, тоже <br>)
     const onKeydown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
@@ -160,7 +109,6 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
     }
 
     const onFocus = () => {
-      // Показываем сырой источник (LaTeX с $...$, чистый текст, URL видео)
       if (el.innerHTML !== rawValue) {
         el.innerHTML = rawValue
         const range = document.createRange()
@@ -173,8 +121,6 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
     }
 
     const onInput = () => {
-      // ВАЖНО: пока фокус у нас — innerHTML не трогаем (каретка должна остаться).
-      // Модель обновляем нормализованным значением.
       rawValue = normalizeHtml(el.innerHTML)
       selfUpdate = true
       current.set(rawValue)
@@ -206,15 +152,12 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
     el.addEventListener('input', onInput)
     el.addEventListener('blur', onBlur)
 
-    // ==================== Watch на модель ====================
-
     const stop: WatchStopHandle = watch(
       () => current.get(),
       (next) => {
         const str = next ?? ''
         rawValue = str
 
-        // Пока фокус у нас — DOM не трогаем
         if (document.activeElement === el) return
         if (selfUpdate) return
 
@@ -233,6 +176,13 @@ export const vInlineEdit: Directive<HTMLElement, InlineEditBinding> = {
   },
 
   updated(el, binding) {
+    // 👇 ЗАЩИТА: если пришло undefined, отключаем редактирование
+    if (!binding.value) {
+      el.removeAttribute('contenteditable')
+      ;(el as any).__inlineEdit?.stop?.()
+      delete (el as any).__inlineEdit
+      return
+    }
     ;(el as any).__inlineEdit?.setCurrent?.(binding.value)
   },
 

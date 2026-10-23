@@ -1,6 +1,6 @@
 <!-- components/Constructor/ContentTypes/gallery.vue -->
 <script setup lang="ts">
-import { computed, ref, watch, toRaw } from 'vue'
+import { computed, inject, ref, watch, toRaw, type Ref } from 'vue'
 import { MasonryWall } from '@yeger/vue-masonry-wall'
 import type { ImageItem } from '~/types/files'
 import type { SettingNode } from '~/utils/constructors'
@@ -20,12 +20,22 @@ const props = withDefaults(defineProps<{
   showToDeleteImages: false,
 })
 
+// ==================== Режим урока ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
+// Разрешаем редактирование только в режиме edit
+const canEdit = computed(() => lessonMode.value === 'edit')
+
+// Эффективные флаги (проверяем и пропсы, и режим)
+const effectiveAllowDrag = computed(() => props.allowDragAndDrop && canEdit.value)
+const effectiveShowDelete = computed(() => props.showToDeleteImages && canEdit.value)
+
 // ==================== Резолв путей ====================
 
 function resolvePath(root: any, path: string): any {
   if (root == null || !path) return undefined
 
-  // Поддержка единичного корневого узла (SettingNode) — разворачиваем в список
   if (!Array.isArray(root) && typeof root === 'object' && 'key' in root) {
     root = [root]
   }
@@ -267,6 +277,8 @@ watch(
   filesModel,
   (images) => {
     if (!props.gallery) return
+    // В режиме learn не обновляем модель (страховка)
+    if (!canEdit.value) return
     const current = Array.isArray(props.gallery.default) ? props.gallery.default : []
     if (imagesEqual(current, images)) return
     props.gallery.default = images
@@ -277,9 +289,18 @@ watch(
 // ==================== Drag & drop ====================
 
 const draggingIndex = ref<number | null>(null)
-function onImageDragStart(index: number) { draggingIndex.value = index }
-function onImageDragEnd() { draggingIndex.value = null }
+
+function onImageDragStart(index: number) {
+  if (!canEdit.value) return
+  draggingIndex.value = index
+}
+
+function onImageDragEnd() {
+  draggingIndex.value = null
+}
+
 function onDropBefore(from: number, beforeIndex: number) {
+  if (!canEdit.value) return
   const imgs = filesModel.value
   if (from < 0 || from >= imgs.length) return
   let to = beforeIndex
@@ -291,7 +312,9 @@ function onDropBefore(from: number, beforeIndex: number) {
   next.splice(to, 0, moved)
   filesModel.value = next
 }
+
 function onDropAfter(from: number, afterIndex: number) {
+  if (!canEdit.value) return
   const imgs = filesModel.value
   if (from < 0 || from >= imgs.length) return
   let to = afterIndex + 1
@@ -303,10 +326,14 @@ function onDropAfter(from: number, afterIndex: number) {
   next.splice(to, 0, moved)
   filesModel.value = next
 }
+
 function onRemoveImage(item: ImageItem) {
+  if (!canEdit.value) return
   filesModel.value = filesModel.value.filter((i) => i.url !== item.url)
 }
+
 function onRestoreImage(item: ImageItem) {
+  if (!canEdit.value) return
   filesModel.value = filesModel.value.map((i) => i.url === item.url ? { ...i, toDelete: false } : i)
 }
 
@@ -323,7 +350,21 @@ const masonryKey = computed(() => JSON.stringify({
   <div v-if="isMasonry" :style="[imagesBcgStyle, imagesBorderStyle, imagesPaddingStyle, imagesMarginStyle]">
     <MasonryWall :items="filesModel" :column-width="masonryColumnWidth" :gap="distancePx" :min-columns="columns" :max-columns="columns" :ssr-columns="columns" :key="masonryKey">
       <template #default="{ item }">
-        <ImageWrapper :item="item" :siblings="filesModel" :allow-drag-and-drop="allowDragAndDrop" :show-to-delete="showToDeleteImages" :dragging-index="draggingIndex" @drag-start="onImageDragStart" @drag-end="onImageDragEnd" @drop-before="onDropBefore" @drop-after="onDropAfter" @remove="onRemoveImage" @restore="onRestoreImage" :class="imageItemClass" :style="[imageItemStyle]">
+        <ImageWrapper
+          :item="item"
+          :siblings="filesModel"
+          :allow-drag-and-drop="effectiveAllowDrag"
+          :show-to-delete="effectiveShowDelete"
+          :dragging-index="draggingIndex"
+          @drag-start="onImageDragStart"
+          @drag-end="onImageDragEnd"
+          @drop-before="onDropBefore"
+          @drop-after="onDropAfter"
+          @remove="onRemoveImage"
+          @restore="onRestoreImage"
+          :class="imageItemClass"
+          :style="[imageItemStyle]"
+        >
           <img :src="item.url" :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]" />
         </ImageWrapper>
       </template>
@@ -331,7 +372,23 @@ const masonryKey = computed(() => JSON.stringify({
   </div>
 
   <div v-else :class="[imagesContainerClass]" :style="[imagesContainerStyle, imagesBcgStyle, imagesBorderStyle, imagesPaddingStyle, imagesMarginStyle]">
-    <ImageWrapper v-for="(img, idx) in filesModel" :key="img.url ?? idx" :item="img" :siblings="filesModel" :allow-drag-and-drop="allowDragAndDrop" :show-to-delete-images="showToDeleteImages" :dragging-index="draggingIndex" @drag-start="onImageDragStart" @drag-end="onImageDragEnd" @drop-before="onDropBefore" @drop-after="onDropAfter" @remove="onRemoveImage" @restore="onRestoreImage" :class="imageItemClass" :style="[imageItemStyle]">
+    <ImageWrapper
+      v-for="(img, idx) in filesModel"
+      :key="img.url ?? idx"
+      :item="img"
+      :siblings="filesModel"
+      :allow-drag-and-drop="effectiveAllowDrag"
+      :show-to-delete-images="effectiveShowDelete"
+      :dragging-index="draggingIndex"
+      @drag-start="onImageDragStart"
+      @drag-end="onImageDragEnd"
+      @drop-before="onDropBefore"
+      @drop-after="onDropAfter"
+      @remove="onRemoveImage"
+      @restore="onRestoreImage"
+      :class="imageItemClass"
+      :style="[imageItemStyle]"
+    >
       <img :src="img.url" :style="[imageImgStyle, imageBorderStyle, imageOutlineStyle]" />
     </ImageWrapper>
   </div>

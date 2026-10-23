@@ -1,7 +1,12 @@
 <!-- app/components/Constructor/TaxonomySelector.vue -->
 <script setup lang="ts">
+import { computed, inject, nextTick, onMounted, ref, watch, type Ref } from 'vue'
 
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+// ============================================================
+// Режим урока (из Lesson.vue)
+// ============================================================
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
 // ============================================================
 // Типы
 // ============================================================
@@ -66,18 +71,20 @@ async function load() {
     loading.value = false
   }
 }
+
 onMounted(async () => {
   await load()
   // Даём родителю один цикл рендера, чтобы v-model гарантированно привязался
   await nextTick()
-  if (!model.value?.length) {
+  // Открываем только если мы в режиме редактирования и ничего не выбрано
+  if (lessonMode.value === 'edit' && !model.value?.length) {
     internalOpen.value = true
   }
 })
 
 // Если выбор сбросили через крестик — принудительно открываем
 watch(model, (val) => {
-  if (!val || val.length === 0) {
+  if (lessonMode.value === 'edit' && (!val || val.length === 0)) {
     internalOpen.value = true
   }
 })
@@ -134,7 +141,21 @@ function clear() {
 </script>
 
 <template>
-  <UPopover v-model:open="isOpen" :content="{ side: 'bottom', align: 'end', sideOffset: 8 }">
+  <!-- В режиме learn (ученик) показываем только статичный бейдж, без поповера -->
+  <div
+    v-if="lessonMode === 'learn'"
+    class="flex items-center gap-1.5 rounded-md border border-default bg-elevated px-2 py-1 text-[12px] font-medium text-highlighted"
+  >
+    <UIcon name="i-lucide-folder-tree" class="size-3.5 text-primary/70" />
+    <span class="max-w-[150px] truncate">{{ selectedNode?.title || 'Без раздела' }}</span>
+  </div>
+
+  <!-- В режиме edit (редактор) показываем полноценный UPovover -->
+  <UPopover
+    v-else
+    v-model:open="isOpen"
+    :content="{ side: 'bottom', align: 'end', sideOffset: 8 }"
+  >
     <!-- Триггер (бейдж) -->
     <template #default>
       <!-- Если раздел выбран: обычный бейдж -->

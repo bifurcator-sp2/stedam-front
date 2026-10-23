@@ -1,5 +1,6 @@
 <!-- components/ImageWrapper.vue -->
 <script setup lang="ts">
+import { computed, inject, ref, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import type { ImageItem } from '~/types/files'
 
 const props = withDefaults(defineProps<{
@@ -23,6 +24,15 @@ const emit = defineEmits<{
   (e: 'drop-before', from: number, to: number): void
   (e: 'drop-after', from: number, to: number): void
 }>()
+
+// ============================================================
+// Режим урока (из Lesson.vue)
+// ============================================================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
+// Разрешаем редактирование (удаление и D&D) только в режиме edit
+const canEdit = computed(() => lessonMode.value === 'edit')
 
 // ============================================================
 // Состояния
@@ -57,11 +67,12 @@ const isDragSource = computed(
 )
 
 function onDragStart(e: DragEvent) {
+  if (!canEdit.value) return
   if (!props.allowDragAndDrop) return
   if (isToDelete.value) return
   if (myIndex.value < 0) return
 
-  e.stopPropagation() // <-- Останавливаем всплытие
+  e.stopPropagation()
 
   emit('drag-start', myIndex.value)
 
@@ -72,12 +83,13 @@ function onDragStart(e: DragEvent) {
 }
 
 function onDragOver(e: DragEvent) {
+  if (!canEdit.value) return
   if (!props.allowDragAndDrop) return
   if (isToDelete.value) return
   if (myIndex.value < 0) return
 
   e.preventDefault()
-  e.stopPropagation() // <-- Останавливаем всплытие
+  e.stopPropagation()
 
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
 
@@ -101,10 +113,11 @@ function onDragLeave() {
 }
 
 function onDrop(e: DragEvent) {
+  if (!canEdit.value) return
   if (!props.allowDragAndDrop) return
 
   e.preventDefault()
-  e.stopPropagation() // <-- Останавливаем всплытие
+  e.stopPropagation()
 
   const side = dropSide.value
   dropSide.value = null
@@ -268,7 +281,7 @@ function onRestoreClick(e: MouseEvent) {
     <div
       v-if="isDraft"
       class="absolute top-1.5 z-[2] inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/90 text-white text-[11px] font-semibold leading-[1.6] pointer-events-none select-none opacity-90"
-      :class="allowDragAndDrop && !isToDelete ? 'left-[34px]' : 'left-1.5'"
+      :class="allowDragAndDrop && !isToDelete && canEdit ? 'left-[34px]' : 'left-1.5'"
       title="Черновик"
     >
       <UIcon name="i-lucide-pencil-line" class="w-3 h-3" />
@@ -277,7 +290,7 @@ function onRestoreClick(e: MouseEvent) {
 
     <!-- Drag handle -->
     <div
-      v-if="allowDragAndDrop && !isToDelete"
+      v-if="allowDragAndDrop && !isToDelete && canEdit"
       class="absolute top-1.5 left-1.5 z-[3] inline-flex items-center justify-center w-[22px] h-[22px] rounded bg-gray-900/65 text-white cursor-grab opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150 hover:bg-gray-900/85 active:cursor-grabbing"
       draggable="true"
       title="Перетащить"
@@ -289,7 +302,7 @@ function onRestoreClick(e: MouseEvent) {
 
     <!-- Крестик удаления -->
     <button
-      v-if="!isToDelete"
+      v-if="!isToDelete && canEdit"
       type="button"
       class="absolute top-1.5 right-1.5 z-[2] inline-flex items-center justify-center w-6 h-6 p-0 border-none rounded-full bg-gray-900/70 text-white cursor-pointer opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all duration-150 hover:bg-red-600 hover:scale-105"
       aria-label="Удалить"
@@ -301,6 +314,7 @@ function onRestoreClick(e: MouseEvent) {
     <!-- Оверлей «на удаление» -->
     <div v-if="isToDelete" class="absolute inset-0 z-[3] flex items-center justify-center bg-gray-500/60 backdrop-grayscale">
       <button
+        v-if="canEdit"
         type="button"
         class="inline-flex items-center gap-1.5 px-3.5 py-1.5 border border-white/40 rounded-full bg-white/15 text-white text-[13px] font-medium leading-none cursor-pointer transition-all duration-150 hover:bg-white/25 hover:border-white/60 hover:scale-105 whitespace-nowrap"
         aria-label="Восстановить"
@@ -352,7 +366,6 @@ function onRestoreClick(e: MouseEvent) {
             </button>
 
             <div class="flex flex-col items-center justify-center gap-3 w-full h-full max-w-full max-h-full min-w-0 min-h-0" @click.stop>
-              <!-- flex-1 и min-h-0 заставляют картинку занимать всё доступное место и масштабироваться -->
               <img
                 :src="current.url"
                 :alt="current.title ?? ''"

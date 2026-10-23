@@ -8,7 +8,11 @@
 //   3. Клик/нажатие в любом месте (кроме панели действий) → активация.
 //   4. Слот для самого блока (BlockRenderer).
 
-import { ref } from 'vue'
+import { ref, inject, type Ref } from 'vue'
+
+// ==================== Режим урока (из Lesson.vue) ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
 
 // ==================== Props ====================
 
@@ -97,6 +101,7 @@ function onActivate(e: MouseEvent) {
 
     <!-- === Hover-панель действий (справа, вертикально) === -->
     <div
+      v-if="lessonMode === 'edit'"
       class="absolute top-0 left-[calc(100%+5px)] z-20 flex flex-col items-center gap-1 rounded-lg border border-default bg-default p-1.5 shadow-md transition-[opacity,transform] duration-150 before:absolute before:inset-y-0 before:-left-[5px] before:w-[5px] before:content-['']"
       :class="hovered
         ? 'translate-x-0 opacity-100'

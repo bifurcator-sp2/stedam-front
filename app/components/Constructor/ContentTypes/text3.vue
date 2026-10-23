@@ -1,6 +1,6 @@
 <!-- components/Constructor/ContentTypes/text3.vue -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject, ref, type Ref } from 'vue'
 import TextNode from '../TextNode.vue'
 import type { SettingNode } from '~/utils/constructors'
 
@@ -18,6 +18,13 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update', value: SettingNode): void
 }>()
+
+// ==================== Режим урока ====================
+
+const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
+
+// Разрешаем редактирование только в режиме edit
+const canEdit = computed(() => props.editable && lessonMode.value === 'edit')
 
 // ==================== Хелперы ====================
 
@@ -122,6 +129,8 @@ const textBlockStyle = computed(() => ({
 // ==================== Обновление ====================
 
 function onUpdateTextNode(updatedNode: SettingNode) {
+  if (!canEdit.value) return // Страховка для режима learn
+
   const nextChildren = props.node.children?.map((c) =>
     c.key === updatedNode.key ? updatedNode : c
   ) ?? []
@@ -137,7 +146,7 @@ function onUpdateTextNode(updatedNode: SettingNode) {
       :node="titleNode"
       :settings="settings"
       :style-path="`${stylePath}.title.settings`"
-      :editable="editable"
+      :editable="canEdit"
       @update="onUpdateTextNode"
     />
 
@@ -146,7 +155,7 @@ function onUpdateTextNode(updatedNode: SettingNode) {
       :node="summaryNode"
       :settings="settings"
       :style-path="`${stylePath}.summary.settings`"
-      :editable="editable"
+      :editable="canEdit"
       @update="onUpdateTextNode"
     />
 
@@ -155,7 +164,7 @@ function onUpdateTextNode(updatedNode: SettingNode) {
       :node="textNode"
       :settings="settings"
       :style-path="`${stylePath}.text.settings`"
-      :editable="editable"
+      :editable="canEdit"
       @update="onUpdateTextNode"
     />
   </div>
