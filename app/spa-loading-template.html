@@ -1,0 +1,136 @@
+<!-- app/spa-loading-template.html -->
+<div id="spa-loading" class="spa-loading-screen">
+  <div class="spa-loader">
+    <!-- Кольцо-спиннер -->
+    <div class="spa-spinner"></div>
+
+    <!-- Логотип внутри кольца -->
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none" class="spa-logo">
+      <circle cx="200" cy="90" r="40" fill="#2B9BE0"/>
+      <circle cx="130" cy="140" r="35" fill="#1E7BC0"/>
+      <circle cx="270" cy="140" r="35" fill="#F58220"/>
+      <path d="M 80 280 Q 80 200 130 180 Q 180 200 180 280 Z" fill="#1E7BC0"/>
+      <path d="M 220 280 Q 220 200 270 180 Q 320 200 320 280 Z" fill="#F58220"/>
+      <path d="M 195 180 L 205 180 L 205 220 L 200 240 L 195 220 Z" fill="#F58220"/>
+    </svg>
+  </div>
+</div>
+
+<style>
+  .spa-loading-screen {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff;
+    z-index: 9999;
+
+    opacity: 1;
+    transition: opacity 0.5s ease-out;
+  }
+
+  .spa-loading-screen.is-hiding {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* Контейнер: кольцо + логотип по центру */
+  .spa-loader {
+    position: relative;
+    width: 130px;   /* было 170px */
+    height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Кольцо-спиннер */
+  .spa-spinner {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 3px solid rgba(43, 155, 224, 0.15);
+    border-top-color: #2B9BE0;
+    border-right-color: #2B9BE0;
+    animation: spin 1.2s linear infinite;
+  }
+
+  /* Логотип по центру */
+  .spa-logo {
+    position: relative;
+    z-index: 1;
+    width: 120x;    /* было 115px */
+    height: 120px;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .6; }
+  }
+
+  /* Тёмная тема */
+  @media (prefers-color-scheme: dark) {
+    .spa-loading-screen {
+      background-color: #020618;
+    }
+    .spa-spinner {
+      border-color: rgba(43, 155, 224, 0.15);
+      border-top-color: #2B9BE0;
+      border-right-color: #2B9BE0;
+    }
+  }
+</style>
+
+<script>
+  (function () {
+    var loader = document.getElementById('spa-loading');
+    if (!loader) return;
+
+    function moveToBody() {
+      if (document.body && loader.parentNode !== document.body) {
+        document.body.appendChild(loader);
+      }
+    }
+    if (document.body) {
+      moveToBody();
+    } else {
+      document.addEventListener('DOMContentLoaded', moveToBody);
+    }
+
+    var interval = setInterval(function () {
+      var nuxtEl = document.getElementById('__nuxt');
+      if (!nuxtEl) return;
+
+      var hasContent = false;
+      for (var i = 0; i < nuxtEl.children.length; i++) {
+        if (nuxtEl.children[i].id !== 'spa-loading') {
+          hasContent = true;
+          break;
+        }
+      }
+      if (!hasContent) return;
+
+      clearInterval(interval);
+      loader.classList.add('is-hiding');
+      setTimeout(function () {
+        if (loader.parentNode) loader.remove();
+      }, 500);
+    }, 50);
+
+    setTimeout(function () {
+      clearInterval(interval);
+      if (loader.parentNode) {
+        loader.classList.add('is-hiding');
+        setTimeout(function () {
+          if (loader.parentNode) loader.remove();
+        }, 500);
+      }
+    }, 15000);
+  })();
+</script>

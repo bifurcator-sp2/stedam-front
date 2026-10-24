@@ -1,4 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { resolve } from 'node:path'
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
@@ -10,7 +11,7 @@ export default defineNuxtConfig({
     'nuxt-auth-sanctum',
     '@nuxtjs/i18n',
     '@nuxt/icon',
-
+    '@xiaobailong/web-update-notice-plugin/nuxt',
   ],
 
   icon: {
@@ -35,12 +36,12 @@ export default defineNuxtConfig({
     'katex/dist/katex.min.css',
     'cropperjs/dist/cropper.css'
   ],
-
+  experimental: {
+    emitRouteChunkError: 'automatic-immediate'
+  },
   content: {
     experimental: {
       sqliteConnector: 'native',
-      // 'automatic-immediate' заставляет Nuxt немедленно перезагрузить страницу при ошибке
-      emitRouteChunkError: 'automatic-immediate'
     }
   },
 
@@ -54,14 +55,30 @@ export default defineNuxtConfig({
       ],
     },
   },
-
-  render: {
-    crossorigin: 'use-credentials'
+  webUpdateNotice: {
+    checkInterval: 5 * 60 * 1000, // Проверять каждые 5 минут
+    base: '/app/', // ❗ Важно: путь, по которому доступно приложение
+    autoRefresh: true, // Автоматически перезагружать страницу
+    showButtons: true, // Показывать кнопки "Позже" и "Обновить"
+    text: {
+      title: 'Доступно обновление',
+      desc: 'Вышла новая версия приложения. Пожалуйста, обновите страницу.',
+      cancel: 'Позже',
+      confirm: 'Обновить сейчас',
+    },
   },
+  /*render: {
+    crossorigin: 'use-credentials'
+  },*/
 
   vite: {
     build: {
       target: ['safari16', 'ios16'],
+      rolldownOptions: {
+        output: {
+          codeSplitting: false, // Отключает разделение кода на чанки
+        },
+      },
     },
     define: {
       __VUE_PROD_DEVTOOLS__: 'true'
@@ -69,7 +86,7 @@ export default defineNuxtConfig({
   },
 
   ssr: false,
-
+  spaLoadingTemplate: resolve(__dirname, 'app/spa-loading-template.html'),
   nitro: {
     debug: true,
     preset: 'static',
