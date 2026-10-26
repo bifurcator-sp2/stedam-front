@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ru } from '@nuxt/ui/locale'
+
+
 const colorMode = useColorMode()
 const { locale, locales, setLocale } = useI18n();
 const currentCode = computed(() => locale.value);
@@ -84,5 +86,6 @@ const toaster = { position: 'top-center' }
           :fuse="{ resultLimit: 42 }"
         />
       </ClientOnly>
+      <CookieBanner/>
   </UApp>
 </template>

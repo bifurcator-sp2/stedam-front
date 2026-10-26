@@ -192,5 +192,43 @@
       "parent": "Parent",
       "methodologist": "Methodologist"
     }
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "description": "Policy on the use of cookies and personal data processing",
+    "intro": "This Privacy Policy describes how the {app} platform collects, uses, and protects your information, as well as the rules for using cookies.",
+    "data_collection": {
+      "title": "1. What data we collect",
+      "intro": "We collect only the data necessary for the platform to operate:",
+      "account_title": "Account data:",
+      "account_text": " name, email address, password (encrypted).",
+      "profile_title": "Profile data:",
+      "profile_text": " full name, year of birth, gender, and country (if provided).",
+      "technical_title": "Technical data:",
+      "technical_text": " IP address, browser type, device identifiers (for security purposes)."
+    },
+    "cookies": {
+      "title": "2. Use of Cookies",
+      "intro": "Cookies are small text files stored on your device when you visit a website. We use them for the following purposes:",
+      "strict_title": "Strictly necessary:",
+      "strict_text": " ensure the basic operation of the site (authorization, security, remembering the selected language).",
+      "analytics_title": "Analytical:",
+      "analytics_text": " help us understand how users interact with the platform so we can improve it. Data is collected in an anonymized form.",
+      "outro": "By continuing to use our site and clicking \"Accept\" in the cookie banner, you consent to the use of cookies in accordance with this Policy."
+    },
+    "manage": {
+      "title": "3. How to manage Cookies",
+      "text": "You can change your browser settings at any time to block or delete cookies. Please note that disabling strictly necessary cookies may cause some site features (e.g., logging into your account) to stop working correctly."
+    },
+    "third_party": {
+      "title": "4. Third-party data transfer",
+      "text": "We do not sell or transfer your personal data to third parties, except as required by law or when necessary for the operation of the service (e.g., transferring email to a mail provider to send verification emails)."
+    },
+    "contacts": {
+      "title": "5. Contact",
+      "text": "If you have any questions about this Policy or the processing of your data, you can contact us at:",
+      "email": "info{'@'}stedam.ru"
+    },
+    "last_updated": "Last updated:"
   }
 }

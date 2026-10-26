@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+const { t, locale } = useI18n()
 
 const props = defineProps<{
   isIcons: boolean
@@ -23,6 +24,7 @@ const activeRole = getActiveRole()
 // Общие пункты меню
 const navItemsShared: NavItem[] = [
   { label: 'Профиль', icon: 'i-lucide-circle-user', to: '/profile' },
+  { label: t('privacy.title'), icon: 'i-lucide-cookie', to: '/privacy' },
 ]
 
 // Пункты меню для каждой роли
