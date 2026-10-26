@@ -19,9 +19,24 @@
       "title": "Успешно",
       "description": "Вы вошли в систему"
     },
-    "fail":{
+    "fail": {
       "title": "Ошибка входа",
-      "description": "Не удалось войти. Проверьте email и пароль."
+      "description": "Не удалось войти. Проверьте email и пароль.",
+      "invalid_credentials": "Неверные данные для входа."
+    },
+    "code": {
+      "title": "Вход по коду",
+      "description": "Введите email, чтобы получить код.",
+      "request": "Запросить",
+      "label": "Код из письма",
+      "placeholder": "123456",
+      "submit": "Войти по коду",
+      "change_email": "Изменить email",
+      "invalid": "Неверный или истекший код.",
+      "sent": {
+        "title": "Код отправлен",
+        "description": "Проверьте вашу почту."
+      }
     },
     "validation": {
       "email": "Некорректный email",

@@ -34,7 +34,6 @@ onMounted(async () => {
     return
   }
   try {
-    // Запрос уйдет на /api/devices/{id}/check
     const res = await api.get<{ allowed: boolean }>(`/devices/${id}/check`)
     deviceAllowed.value = res.allowed
   } catch (e) {
@@ -87,8 +86,8 @@ async function onSubmitPassword(payload: FormSubmitEvent<z.output<typeof schema>
     }
   } catch (error: any) {
     toast.add({
-      title: 'Ошибка',
-      description: error?.data?.message || 'Неверные данные',
+      title: t('login.fail.title'),
+      description: error?.data?.message || t('login.fail.invalid_credentials'),
       color: 'error'
     })
   }
@@ -105,12 +104,15 @@ async function requestCode() {
   if (!codeEmail.value) return
   isSendingCode.value = true
   try {
-    // Запрос уйдет на /api/auth/request-code
     await api.post('/auth/request-code', { email: codeEmail.value })
     isCodeSent.value = true
-    toast.add({ title: 'Код отправлен', description: 'Проверьте вашу почту.', color: 'success' })
+    toast.add({
+      title: t('login.code.sent.title'),
+      description: t('login.code.sent.description'),
+      color: 'success'
+    })
   } catch (e: any) {
-    // Ошибка 429 (слишком много запросов) обработается в useApi
+    // Ошибка обрабатывается в useApi
   } finally {
     isSendingCode.value = false
   }
@@ -120,19 +122,13 @@ async function submitCode() {
   if (!codeValue.value) return
   isLoggingIn.value = true
   try {
-    // ВАЖНО: Используем useSanctumClient, чтобы автоматически подтянулся CSRF-токен
-    const client = useSanctumClient()
-
-    // Запрос уйдет на /api/auth/login-with-code (с учетом baseUrl в конфиге sanctum)
     await client(`${config.public.apiBase}/auth/login-with-code`, {
       method: 'POST',
       body: { email: codeEmail.value, code: codeValue.value }
     })
 
-    // Обновляем состояние Sanctum (подтягиваем пользователя)
     await refreshIdentity()
-
-    toast.add({ title: 'Успешный вход', color: 'success' })
+    toast.add({ title: t('login.success.title'), color: 'success' })
 
     const target = (route.query.redirect as string) || '/'
     if (!user.value?.email_verified_at) {
@@ -142,8 +138,8 @@ async function submitCode() {
     }
   } catch (e: any) {
     toast.add({
-      title: 'Ошибка',
-      description: e?.data?.message || 'Неверный код',
+      title: t('login.fail.title'),
+      description: e?.data?.message || t('login.code.invalid'),
       color: 'error'
     })
   } finally {
@@ -171,17 +167,17 @@ async function submitCode() {
   >
     <template #title>
       <AppLogo alt="Logo" class="w-32 h-32 mx-auto" />
-      {{t('login.title')}}
+      {{ t('login.title') }}
     </template>
     <template #description>
-      {{t('login.noAccount')}}
-      <ULink to="/signup" class="text-primary font-medium">{{t('login.signUp')}}</ULink>.
+      {{ t('login.noAccount') }}
+      <ULink to="/signup" class="text-primary font-medium">{{ t('login.signUp') }}</ULink>.
     </template>
     <template #password-hint>
-      <ULink to="/forgot-password" class="text-primary font-medium" tabindex="-1">{{t('login.forgotPassword')}}</ULink>
+      <ULink to="/forgot-password" class="text-primary font-medium" tabindex="-1">{{ t('login.forgotPassword') }}</ULink>
     </template>
     <template #footer>
-      {{t('terms.agree')}} <ULink to="/" class="text-primary font-medium">{{t('terms.terms')}}</ULink>.
+      {{ t('terms.agree') }} <ULink to="/" class="text-primary font-medium">{{ t('terms.terms') }}</ULink>.
       <br>
       <LocaleSwitcher />
     </template>
@@ -192,21 +188,21 @@ async function submitCode() {
     <template #header>
       <div class="text-center">
         <AppLogo alt="Logo" class="w-24 h-24 mx-auto mb-4" />
-        <h2 class="text-lg font-semibold">Вход по коду</h2>
+        <h2 class="text-lg font-semibold">{{ t('login.code.title') }}</h2>
         <p class="text-sm text-muted mt-1">
-          На этом устройстве вход по паролю отключен. Введите email, чтобы получить код.
+          {{ t('login.code.description') }}
         </p>
       </div>
     </template>
 
     <div class="space-y-4">
       <!-- Шаг 1: Ввод Email -->
-      <UFormField label="Email" name="email">
+      <UFormField :label="t('login.email')" name="email">
         <div class="flex gap-2">
           <UInput
             v-model="codeEmail"
             type="email"
-            placeholder="example@mail.ru"
+            :placeholder="t('login.emailPlaceholder')"
             class="w-full"
             :disabled="isCodeSent"
           />
@@ -216,17 +212,17 @@ async function submitCode() {
             :disabled="!codeEmail"
             @click="requestCode"
           >
-            Запросить
+            {{ t('login.code.request') }}
           </UButton>
         </div>
       </UFormField>
 
       <!-- Шаг 2: Ввод кода -->
       <template v-if="isCodeSent">
-        <UFormField label="Код из письма" name="code">
+        <UFormField :label="t('login.code.label')" name="code">
           <UInput
             v-model="codeValue"
-            placeholder="123456"
+            :placeholder="t('login.code.placeholder')"
             class="w-full text-center tracking-widest text-lg"
             maxlength="6"
           />
@@ -237,7 +233,7 @@ async function submitCode() {
           :disabled="codeValue.length < 6"
           @click="submitCode"
         >
-          Войти по коду
+          {{ t('login.code.submit') }}
         </UButton>
 
         <UButton
@@ -246,7 +242,7 @@ async function submitCode() {
           block
           @click="isCodeSent = false; codeValue = ''"
         >
-          Изменить email
+          {{ t('login.code.change_email') }}
         </UButton>
       </template>
     </div>

@@ -19,9 +19,24 @@
       "title": "Success",
       "description": "You have logged in."
     },
-    "fail":{
+    "fail": {
       "title": "Login error",
-      "description": "Failed to log in. Check your email and password."
+      "description": "Failed to log in. Check your email and password.",
+      "invalid_credentials": "Invalid login credentials."
+    },
+    "code": {
+      "title": "Login by code",
+      "description": "Enter your email to receive a code.",
+      "request": "Request",
+      "label": "Code from email",
+      "placeholder": "123456",
+      "submit": "Login by code",
+      "change_email": "Change email",
+      "invalid": "Invalid or expired code.",
+      "sent": {
+        "title": "Code sent",
+        "description": "Check your email."
+      }
     },
     "validation": {
       "email": "Invalid email",
