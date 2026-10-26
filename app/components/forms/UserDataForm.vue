@@ -6,7 +6,7 @@ const { t } = useI18n()
 
 const { show, save, countries } = useUserDataApi()
 const { user: authUser, refreshIdentity } = useSanctumAuth()
-
+const { hasRole } = useAuth()
 // после: const { user: authUser } = useSanctumAuth()
 
 
@@ -188,4 +188,8 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
       </div>
     </UForm>
   </UCard>
+
+  <!-- Блок управления устройствами (только для админа) -->
+  <FormsDeviceAccessToggle v-if="hasRole('admin')" />
+
 </template>

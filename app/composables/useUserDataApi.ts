@@ -56,8 +56,6 @@ export const useUserDataApi = () => {
   }
 
   async function save(payload: UserDataPayload): Promise<UserData> {
-    // PUT сам создаст, если профиля нет
-    payload.country_id = payload.country_id.value;
     return await $fetch<UserData>('/user-data', {
       baseURL,
       method: 'PUT',

@@ -6,20 +6,36 @@ export interface AuthUser {
   id: number
   name: string
   email: string
-  roles: string[]
+  email_verified_at: string | null
+  roles: string[] // ['admin', 'student']
   rolesCount: number
-  allRoles: string[]
+  allRoles: { name: string; label: string | null }[] // [{ name: 'student', label: 'Ученик' }]
   permissions: string[]
   direction: Direction
 }
 
 export const useAuth = () => {
-  const { user, login, logout, refresh } = useSanctumAuth<AuthUser>()
+  const { user, login, logout, refreshIdentity } = useSanctumAuth<AuthUser>()
+
+  // Инстанцируем api здесь — в setup/middleware-контексте.
+  // Так методы ниже могут вызывать api.* безопасно, без "nuxt instance unavailable".
+  const api = useApi()
 
   const roles = computed<string[]>(() => user.value?.roles ?? [])
   const allRoles = computed<string[]>(() => user.value?.allRoles ?? [])
   const permissions = computed<string[]>(() => user.value?.permissions ?? [])
   const rolesCount = computed<number>(() => user.value?.rolesCount ?? 0)
+  const isEmailVerified = computed<boolean>(() =>
+    Boolean(user.value?.email_verified_at),
+  )
+
+  async function fetchUser(): Promise<void> {
+    await refreshIdentity()
+  }
+
+  async function resendVerificationEmail(): Promise<void> {
+    await api.post('/email/verification-notification')
+  }
 
   // direction — отдельный useState, чтобы можно было писать
   const direction = useState<Direction>('auth.direction', () => 'ltr')
@@ -59,7 +75,7 @@ export const useAuth = () => {
     return list.every((p) => permissions.value.includes(p))
   }
 
-  // Направление — оптимистичное обновление + откат при ошибке
+  // Направление
   async function setDirection(value: Direction): Promise<void> {
     direction.value = value
   }
@@ -76,6 +92,9 @@ export const useAuth = () => {
     permissions,
     direction,
     isRtl,
+    isEmailVerified,
+    fetchUser,
+    resendVerificationEmail,
     setDirection,
     toggleDirection,
     hasRole,
@@ -86,6 +105,6 @@ export const useAuth = () => {
     canAll,
     login,
     logout,
-    refresh,
+    refreshIdentity,
   }
 }

@@ -10,7 +10,7 @@ export default defineNuxtRouteMiddleware((to) => {
   if (to.path === '/setroles') return
 
   // Страницы, доступные без ролей
-  const allowedWithoutRoles = ['/logout', '/profile']
+  const allowedWithoutRoles = ['/logout', '/profile', '/verify-email']
   if (allowedWithoutRoles.includes(to.path)) return
 
   // Если ролей нет — принудительно на /setroles

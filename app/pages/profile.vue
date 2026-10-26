@@ -2,7 +2,7 @@
 
 import UserDataForm from "../components/forms/UserDataForm.vue";
 definePageMeta({
-  layout: 'default',
+  layout: 'main',
 })
 
 const title = "Stedam";

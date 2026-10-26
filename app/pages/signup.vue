@@ -20,6 +20,7 @@ const  providers  = useRegProviders()
 
 const toast = useToast()
 const isLoading = ref(false)
+const route = useRoute()
 
 const fields = computed(() => [{
   name: 'name',
@@ -73,10 +74,6 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
       body: payload.data,
     })
 
-    await new Promise(resolve => setTimeout(resolve, 100))
-
-    //console.log('login', login);
-
     await login({
       email: payload.data.email,
       password: payload.data.password,
@@ -86,17 +83,22 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
     toast.add({
       title: t('signup.success.title'),
       description: t('signup.success.description'),
-      color: 'success'
+      color: 'success',
     })
 
-    await navigateTo('/')
+    const target = (route.query.redirect as string) || '/'
+
+    if (!user.value?.email_verified_at) {
+      await navigateTo({ path: '/verify-email', query: { redirect: target } })
+    } else {
+      await navigateTo(target)
+    }
   } catch (error: any) {
-    //console.log('reg: '+error);
     const message = error?.data?.message || t('signup.fail.description')
     toast.add({
       title: t('signup.fail.title'),
       description: message,
-      color: 'error'
+      color: 'error',
     })
   } finally {
     isLoading.value = false

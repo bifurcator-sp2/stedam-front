@@ -18,6 +18,7 @@ useSeoMeta({
 })
 
 const toast = useToast()
+const route = useRoute()
 
 const form = ref({ email: '', password: '' });
 
@@ -54,7 +55,6 @@ type Schema = z.output<typeof schema>
 
 
 async function onSubmit(payload: FormSubmitEvent<Schema>) {
-
   try {
     await login({
       email: payload.data.email,
@@ -68,19 +68,26 @@ async function onSubmit(payload: FormSubmitEvent<Schema>) {
       color: 'success',
     })
 
-    await navigateTo('/')
+    const target = (route.query.redirect as string) || '/'
+
+    if (!user.value?.email_verified_at) {
+      await navigateTo({ path: '/verify-email', query: { redirect: target } })
+    } else {
+      await navigateTo(target)
+    }
   } catch (error: any) {
     const message =
       error?.data?.errors?.email?.[0] ||
       error?.data?.message ||
-      t('login.fail.description')+" "+error
-    //console.log(error);
+      t('login.fail.description') + ' ' + error
+
     toast.add({
       title: t('login.fail.title'),
       description: message,
       color: 'error',
     })
   }
+
 
   /*const route = useRoute()
   console.log('LOGIN ROUTE:', route.path, route.name)*/

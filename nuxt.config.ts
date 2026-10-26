@@ -58,7 +58,7 @@ export default defineNuxtConfig({
   webUpdateNotice: {
     checkInterval: 5 * 60 * 1000, // Проверять каждые 5 минут
     base: '/app/', // ❗ Важно: путь, по которому доступно приложение
-    autoRefresh: true, // Автоматически перезагружать страницу
+    autoRefresh: false, // Автоматически перезагружать страницу
     showButtons: true, // Показывать кнопки "Позже" и "Обновить"
     text: {
       title: 'Доступно обновление',
@@ -73,7 +73,7 @@ export default defineNuxtConfig({
 
   vite: {
     build: {
-      target: ['safari16', 'ios16'],
+      target: ['safari11', 'ios11'],
       rolldownOptions: {
         output: {
           codeSplitting: false, // Отключает разделение кода на чанки
