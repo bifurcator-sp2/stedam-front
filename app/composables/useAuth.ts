@@ -8,6 +8,7 @@ export interface AuthUser {
   email: string
   email_verified_at: string | null
   roles: string[] // ['admin', 'student']
+  allow_password_auth: boolean
   rolesCount: number
   allRoles: { name: string; label: string | null }[] // [{ name: 'student', label: 'Ученик' }]
   permissions: string[]

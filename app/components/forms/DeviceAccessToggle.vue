@@ -3,26 +3,26 @@
 const toast = useToast()
 const api = useApi()
 const { deviceId, getDeviceId } = useDeviceFingerprint()
+const { refreshIdentity } = useSanctumAuth()
 
 const isAllowed = ref(false)
 const loading = ref(true)
 const updating = ref(false)
 
+// При загрузке: получаем ID устройства и запрашиваем его статус с бэкенда
 onMounted(async () => {
-  // Получаем отпечаток устройства
   const id = await getDeviceId()
-
   if (!id) {
     loading.value = false
     return
   }
 
   try {
-    // Проверяем статус устройства на бэкенде
+    // Запрашиваем актуальный статус напрямую из БД
     const res = await api.get<{ allowed: boolean }>(`/devices/${id}/check`)
     isAllowed.value = res.allowed
   } catch (e) {
-    console.error('Ошибка при проверке устройства:', e)
+    console.error('Ошибка проверки устройства:', e)
   } finally {
     loading.value = false
   }
@@ -33,34 +33,25 @@ async function handleToggle(value: boolean) {
   if (!deviceId.value) return
 
   updating.value = true
-  // Оптимистичное обновление: меняем UI сразу
   const previous = isAllowed.value
   isAllowed.value = value
 
   try {
     if (value) {
-      // Добавляем устройство в белый список
       await api.post(`/admin/devices/${deviceId.value}`, {
         description: 'Разрешено через профиль администратора'
       })
-      toast.add({
-        title: 'Устройство разрешено',
-        description: 'Теперь на этом планшете можно входить по паролю.',
-        color: 'success',
-      })
+      toast.add({ title: 'Устройство разрешено', color: 'success' })
     } else {
-      // Удаляем устройство из белого списка
       await api.delete(`/admin/devices/${deviceId.value}`)
-      toast.add({
-        title: 'Устройство заблокировано',
-        description: 'Вход по паролю на этом планшете запрещен.',
-        color: 'warning',
-      })
+      toast.add({ title: 'Устройство заблокировано', color: 'warning' })
     }
+
+    // Обновляем данные пользователя в фоне
+    await refreshIdentity().catch(() => {})
+
   } catch (e) {
-    // Откат UI при ошибке
     isAllowed.value = previous
-    // Ошибку 403 или 500 уже покажет глобальный обработчик в useApi
   } finally {
     updating.value = false
   }
@@ -73,12 +64,8 @@ async function handleToggle(value: boolean) {
       <div class="flex items-center gap-3">
         <UIcon name="i-lucide-tablet-smartphone" class="w-6 h-6 text-primary" />
         <div>
-          <h3 class="font-semibold text-highlighted">
-            Управление доступом с устройства
-          </h3>
-          <p class="text-sm text-muted">
-            Настройка входа по паролю для школьных планшетов.
-          </p>
+          <h3 class="font-semibold text-highlighted">Управление доступом с устройства</h3>
+          <p class="text-sm text-muted">Настройка входа по паролю для школьных планшетов.</p>
         </div>
       </div>
     </template>
@@ -86,7 +73,7 @@ async function handleToggle(value: boolean) {
     <!-- Загрузка -->
     <div v-if="loading" class="flex items-center gap-2 text-sm text-muted">
       <UIcon name="i-lucide-loader-2" class="w-4 h-4 animate-spin" />
-      Определение ID устройства...
+      Проверка статуса устройства...
     </div>
 
     <!-- Не удалось получить ID -->
@@ -107,10 +94,7 @@ async function handleToggle(value: boolean) {
       </div>
 
       <div class="flex items-center gap-3">
-        <span
-          class="text-xs font-medium"
-          :class="isAllowed ? 'text-success' : 'text-error'"
-        >
+        <span class="text-xs font-medium" :class="isAllowed ? 'text-success' : 'text-error'">
           {{ isAllowed ? 'Разрешено' : 'Запрещено' }}
         </span>
         <USwitch
