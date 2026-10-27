@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
+
 const { t, locale } = useI18n()
+const route = useRoute()
 
 const props = defineProps<{
   isIcons: boolean
@@ -11,29 +13,29 @@ interface NavItem {
   label: string
   icon: string
   to: string
-  isSystem?: boolean // Добавили флаг для системных ролей
+  isSystem?: boolean
 }
 
-// Получаем все роли пользователя (roles) и публичные роли (allRoles)
 const { roles, allRoles } = useAuth()
-// Получаем активную роль
 const { getActiveRole } = useActiveRole()
 
-const activeRole = getActiveRole()
+// ✅ Реактивный activeRole — иначе при смене роли / загрузке данных
+// navItems не пересчитается, и watcher ниже не сработает корректно
+const activeRole = computed(() => getActiveRole())
 
-// Общие пункты меню
 const navItemsShared: NavItem[] = [
   { label: 'Профиль', icon: 'i-lucide-circle-user', to: '/profile' },
   { label: t('privacy.title'), icon: 'i-lucide-cookie', to: '/privacy' },
 ]
 
-// Пункты меню для каждой роли
 const navItemsByRoles: Record<string, NavItem[]> = {
   admin: [
     { label: 'Конструктор блоков', icon: 'i-lucide-blocks', to: '/construct' },
   ],
   student: [
-    { label: 'Я - ученик', icon: 'i-lucide-graduation-cap', to: '/learn' },
+    { label: 'Текущее занятие', icon: 'i-lucide-circle-play', to: '/learn/select-lesson' },
+    { label: 'Программы обучения', icon: 'i-lucide-graduation-cap', to: '/learn' },
+    { label: 'Пройденый материал', icon: 'i-lucide-book-check', to: '/learned' },
   ],
   teacher: [
     { label: 'Я - преподаватель', icon: 'i-lucide-presentation', to: '/edu' },
@@ -43,43 +45,61 @@ const navItemsByRoles: Record<string, NavItem[]> = {
   ],
   methodologist: [
     { label: 'Я - методист', icon: 'i-lucide-book-open', to: '/methodist' },
-  ]
+  ],
 }
 
 const navItems = computed<NavItem[]>(() => {
   const items: NavItem[] = []
   const addedRoles = new Set<string>()
 
-  // 1. Добавляем пункты активной роли
-  if (activeRole && navItemsByRoles[activeRole]) {
-    items.push(...navItemsByRoles[activeRole])
-    addedRoles.add(activeRole)
+  // 1. Активная роль
+  const current = activeRole.value
+  if (current && navItemsByRoles[current]) {
+    items.push(...navItemsByRoles[current])
+    addedRoles.add(current)
   }
 
-  // 2. Вычисляем разницу: (все роли) минус (публичные роли)
-  // Это будут системные роли (например, 'admin')
+  // 2. Системные роли (все роли минус публичные)
   const publicRoleNames = (allRoles.value ?? []).map(r => r.name)
   const systemRoles = (roles.value ?? []).filter(r => !publicRoleNames.includes(r))
 
-  // Добавляем пункты для системных ролей
-  systemRoles.forEach(roleName => {
+  systemRoles.forEach((roleName) => {
     if (!addedRoles.has(roleName) && navItemsByRoles[roleName]) {
-      // Пометим эти пункты как системные
-      const systemItems = navItemsByRoles[roleName].map(item => ({
-        ...item,
-        isSystem: true
-      }))
-      items.push(...systemItems)
+      items.push(
+        ...navItemsByRoles[roleName].map(item => ({ ...item, isSystem: true })),
+      )
       addedRoles.add(roleName)
     }
   })
 
-  // 3. Добавляем общие пункты в конец
+  // 3. Общие пункты
   items.push(...navItemsShared)
 
   return items
 })
+
+// 🚀 Редирект с корня приложения (baseURL) на первую страницу из navItems
+watch(
+  navItems,
+  (items) => {
+    // Нас интересует только корень приложения: с baseURL='/app/'
+    // useRoute().path для главной страницы возвращает '/'
+    if (route.path !== '/' || items.length === 0) return
+
+    // Пропускаем общие пункты (Профиль/Приватность) — редиректим
+    // на первый «ролевой» пункт. Иначе при ещё не загруженных roles
+    // пользователя выкинет на /profile.
+    const sharedPaths = new Set(navItemsShared.map(i => i.to))
+    const firstRoleItem = items.find(i => !sharedPaths.has(i.to))
+
+    if (!firstRoleItem) return
+
+    navigateTo(firstRoleItem.to, { replace: true })
+  },
+  { immediate: true },
+)
 </script>
+
 
 <template>
   <ul class="space-y-1 px-2">

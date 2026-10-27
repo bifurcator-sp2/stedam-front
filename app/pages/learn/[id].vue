@@ -87,7 +87,7 @@ watch(
 // ==================== Навигация ====================
 
 function goBack() {
-  router.push('/learn')
+  router.push('/learn/select-lesson')
 }
 </script>
 

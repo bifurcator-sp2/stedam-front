@@ -1,0 +1,26 @@
+<script setup lang="ts">
+
+
+const title = 'Уроки'
+const description = 'Stedam уроки'
+
+definePageMeta({
+  layout: 'main',
+  title: title,   // 👈 meta.title
+})
+
+
+useSeoMeta({
+  titleTemplate: '',
+  title,
+  ogTitle: title,
+  description,
+  ogDescription: description,
+  ogImage: 'https://ui.nuxt.com/assets/templates/nuxt/saas-light.png',
+})
+
+</script>
+
+<template>
+<EducationActualLessonsList />
+</template>
