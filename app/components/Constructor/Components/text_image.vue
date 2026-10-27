@@ -1,9 +1,9 @@
 <!-- components/Constructor/Components/text_image.vue -->
 <script setup lang="ts">
-import { computed, inject, ref, type Component, type Ref } from 'vue'
-import type { SettingNode } from '~/utils/constructors'
+import {computed, inject, ref, type Component, type Ref} from 'vue'
+import type {SettingNode} from '~/utils/constructors'
 
-const value = defineModel<SettingNode | null>({ default: null })
+const value = defineModel<SettingNode | null>({default: null})
 
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
@@ -19,32 +19,24 @@ const props = withDefaults(defineProps<{
   modelName: 'blocks',
 })
 
-// ==================== Режим урока ====================
-
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
-
-// Разрешаем редактирование только в режиме edit
 const isEditable = computed(() => lessonMode.value === 'edit')
-
-// Передаем вниз флаги, учитывая режим
 const allowDrag = computed(() => props.allowDragAndDrop && isEditable.value)
 const allowDelete = computed(() => props.showToDeleteImages && isEditable.value)
 
-// ==================== Динамический рендеринг компонентов ====================
+// ==================== Динамический рендеринг ====================
 
-const contentModules = import.meta.glob('../ContentTypes/*.vue', { eager: true })
+const contentModules = import.meta.glob('../ContentTypes/*.vue', {eager: true})
 
 function getContentComponent(name: string): Component | null {
   if (!name) return null
   const normalized = name.toLowerCase().trim()
 
-  // 1. Пытаемся найти точное совпадение файла
   const exactPath = `../ContentTypes/${normalized}.vue`
   if (contentModules[exactPath]) {
     return (contentModules[exactPath] as any).default
   }
 
-  // 2. Если точного нет, ищем по префиксу (например, 'text' найдет 'text3.vue')
   for (const key of Object.keys(contentModules)) {
     const basename = key.split('/').pop()?.replace('.vue', '')
     if (basename && basename.startsWith(normalized)) {
@@ -88,6 +80,44 @@ const visibleBlocks = computed(() => {
   return contentBlocksNode.value.children.slice(0, 2)
 })
 
+// ==================== Тест ====================
+
+const isTestEnabled = computed(() => {
+  return layoutChildren.value.find((c: any) => c.key === 'isTest')?.default === true
+})
+
+const testNode = computed(() => {
+  // Ищем test внутри content-blocks
+  return contentBlocksNode.value?.children?.find((c: any) => c.key === 'test')
+})
+
+function onUpdateTestNode(updatedNode: SettingNode) {
+  if (!isEditable.value) return
+  const root = value.value as any
+  if (!root || !root.children) return
+
+  // Находим content-blocks в корне
+  const cbIdx = root.children.findIndex((c: any) => c.key === 'content-blocks')
+  if (cbIdx === -1) return
+
+  const newContentBlocks = {...root.children[cbIdx]}
+  if (!newContentBlocks.children) return
+
+  // Находим test внутри content-blocks
+  const testIdx = newContentBlocks.children.findIndex((c: any) => c.key === 'test')
+  if (testIdx === -1) return
+
+  // Обновляем test
+  const newBlocks = [...newContentBlocks.children]
+  newBlocks[testIdx] = updatedNode
+  newContentBlocks.children = newBlocks
+
+  // Собираем корень обратно
+  const newChildren = [...root.children]
+  newChildren[cbIdx] = newContentBlocks
+  value.value = {...root, children: newChildren}
+}
+
 const firstBlockPercent = computed(() => {
   const cols = Number(getLayoutProp('first-block-cols') ?? 12)
   return Math.min(Math.max(cols / 24, 0), 1)
@@ -109,23 +139,23 @@ const layoutClass = computed(() => {
 
 const layoutContainerStyle = computed(() => {
   if (layoutType.value === 'single') {
-    return { justifyContent: singlePosition.value }
+    return {justifyContent: singlePosition.value}
   }
   return {}
 })
 
 function getBlockStyle(blockIndex: number) {
   if (layoutType.value === 'single') {
-    return { width: `${firstBlockPercent.value * 100}%` }
+    return {width: `${firstBlockPercent.value * 100}%`}
   }
   if (layoutType.value === 'row') {
     const percent = blockIndex === 0 ? firstBlockPercent.value : secondBlockPercent.value
-    return { flex: `0 0 ${percent * 100}%` }
+    return {flex: `0 0 ${percent * 100}%`}
   }
-  return { width: '100%' }
+  return {width: '100%'}
 }
 
-// ==================== Стили корневого контейнера ====================
+// ==================== Стили ====================
 
 const layoutBcgStyle = computed(() => {
   const style: Record<string, string> = {}
@@ -189,7 +219,7 @@ const layoutMarginStyle = computed(() => {
   const margin = layoutChildren.value.find((c: any) => c.key === 'margin')?.children
   if (!margin) return {}
   const s: Record<string, string> = {}
-  const map = { left: 'marginLeft', right: 'marginRight', top: 'marginTop', bottom: 'marginBottom' } as const
+  const map = {left: 'marginLeft', right: 'marginRight', top: 'marginTop', bottom: 'marginBottom'} as const
   for (const [side, cssKey] of Object.entries(map)) {
     const px = margin.find((b: any) => b.key === side)?.default
     if (px) s[cssKey] = `${px * 4}px`
@@ -201,7 +231,7 @@ const layoutPaddingStyle = computed(() => {
   const padding = layoutChildren.value.find((c: any) => c.key === 'padding')?.children
   if (!padding) return {}
   const s: Record<string, string> = {}
-  const map = { left: 'paddingLeft', right: 'paddingRight', top: 'paddingTop', bottom: 'paddingBottom' } as const
+  const map = {left: 'paddingLeft', right: 'paddingRight', top: 'paddingTop', bottom: 'paddingBottom'} as const
   for (const [side, cssKey] of Object.entries(map)) {
     const px = padding.find((b: any) => b.key === side)?.default
     if (px) s[cssKey] = `${px * 4}px`
@@ -209,7 +239,7 @@ const layoutPaddingStyle = computed(() => {
   return s
 })
 
-// ==================== Работа с контентом блоков ====================
+// ==================== Контент ====================
 
 function getActiveChild(block: any): SettingNode | null {
   if (!block.children) return null
@@ -231,7 +261,7 @@ function getChildPath(block: any, blockIndex: number) {
 }
 
 function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
-  if (!isEditable.value) return // Блокируем обновления в режиме learn
+  if (!isEditable.value) return
 
   const root = value.value as any
   if (!root || !root.children) return
@@ -239,17 +269,17 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
   const cbIdx = root.children.findIndex((c: any) => c.key === 'content-blocks')
   if (cbIdx === -1) return
 
-  const newContentBlocks = { ...root.children[cbIdx] }
+  const newContentBlocks = {...root.children[cbIdx]}
   if (!newContentBlocks.children) return
 
   const newBlocks = [...newContentBlocks.children]
-  const block = { ...newBlocks[blockIndex] }
+  const block = {...newBlocks[blockIndex]}
 
   if (block.children) {
     if (block.default === 'gallery') {
       const wrapperIdx = block.children.findIndex((c: any) => c.key === 'gallery')
       if (wrapperIdx !== -1) {
-        const newWrapper = { ...block.children[wrapperIdx] }
+        const newWrapper = {...block.children[wrapperIdx]}
         if (newWrapper.children) {
           const imgIdx = newWrapper.children.findIndex((c: any) => c.key === updatedNode.key || c.key.startsWith(block.default))
           if (imgIdx !== -1) {
@@ -284,12 +314,10 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
 </script>
 
 <template>
-  <!-- Режим формы (для палитры) -->
   <div v-if="props.mode === 'form'">
     <div>Тут ничего нет еще</div>
   </div>
 
-  <!-- Режим просмотра (body) -->
   <div v-else class="text-image-root min-h-[200px] w-full">
     <div :style="[layoutMarginStyle]">
       <div
@@ -314,13 +342,28 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
             />
           </div>
           <div v-else class="p-4 text-xs text-red-500 bg-red-50 rounded">
-            Блок "{{ block.key }}" (default: {{ block.default }}) не найден или нет активного компонента
+            Блок "{{ block.key }}" (default: {{ block.default }}) не найден
           </div>
         </template>
 
         <div v-if="!visibleBlocks.length" class="p-4 text-xs text-yellow-600 bg-yellow-50 rounded">
-          Массив visibleBlocks пуст. Проверьте наличие content-blocks в настройках.
+          Массив visibleBlocks пуст. Проверьте наличие content-blocks.
         </div>
+      </div>
+
+      <!-- БЛОК ТЕСТА -->
+      <div
+        v-if="isTestEnabled && testNode && getContentComponent('test')"
+        class="w-full mt-4"
+      >
+        <component
+          :is="getContentComponent('test')!"
+          :node="testNode"
+          :settings="value"
+          :style-path="`type.content-blocks.test`"
+          :editable="isEditable"
+          @update="onUpdateTestNode"
+        />
       </div>
     </div>
   </div>

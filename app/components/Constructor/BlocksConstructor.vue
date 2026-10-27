@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
-import TextBlock from '~/components/Constructor/Components/text_image.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 
@@ -328,11 +327,24 @@ async function save() {
   }
 }
 
-// ==================== Сброс ====================
 
-function reset() {
-  editingBlock.value = null
-  router.replace({ query: { page: '1' } })
+// ==================== Динамический резолв компонентов блоков ====================
+
+const blockComponents = import.meta.glob(
+  '~/components/Constructor/Components/*.vue',
+  { eager: true },
+)
+
+const blockComponentMap: Record<string, any> = Object.fromEntries(
+  Object.entries(blockComponents).map(([path, mod]) => {
+    const name = path.split('/').pop()?.replace(/\.vue$/, '').toLowerCase() ?? ''
+    return [name, (mod as any).default]
+  }),
+)
+
+function resolveBlockComponent(code: string | null | undefined): any | null {
+  if (!code) return null
+  return blockComponentMap[code.toLowerCase().trim()] ?? null
 }
 </script>
 
@@ -398,29 +410,25 @@ function reset() {
       <div class="main-header-inner">
         <span>{{ centerTitle }}</span>
 
-        <UButton
-          v-if="editingBlock"
-          icon="i-lucide-rotate-ccw"
-          size="xs"
-          color="neutral"
-          variant="ghost"
-          @click="reset"
-        >
-          Сбросить
-        </UButton>
       </div>
     </template>
 
     <template #main>
+
       <template v-if="editingBlock">
         <LoadingOverlay :loading="saving">
-          <TextBlock
-            :key="`${editingBlock.id}-${blockKey}`"
+          <component
+            v-if="resolveBlockComponent(editingBlock.code)"
+            :is="resolveBlockComponent(editingBlock.code)"
+            :key="`${editingBlock.id}-${editingBlock.code}-${blockKey}`"
             :mode="'body'"
             v-model="editingBlock.settings"
             :id="editingBlock.id || 0"
             :show-to-delete-images="true"
           />
+          <div v-else class="empty-state">
+            Компонент «{{ editingBlock.code }}» не найден
+          </div>
         </LoadingOverlay>
       </template>
 

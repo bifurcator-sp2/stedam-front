@@ -392,6 +392,12 @@ function onGlobalPointerDown(e: PointerEvent) {
   if (target.closest('[data-block-action]')) return
   if (target.closest('.crop-modal-backdrop')) return
 
+  if (target.closest('[role="dialog"]')) return
+  if (target.closest('[role="listbox"]')) return
+  if (target.closest('[role="menu"]')) return
+  if (target.closest('[data-reka-popper-content-wrapper]')) return
+  if (target.closest('[data-radix-popper-content-wrapper]')) return
+
   deactivate()
 }
 

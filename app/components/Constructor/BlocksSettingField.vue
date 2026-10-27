@@ -8,7 +8,7 @@ import { useSanitize } from '~/composables/useSanitize'
 interface SettingItem {
   key: string
   label: string
-  type: 'string' | 'select' | 'content-type' | 'layout' | 'int' | 'color' | 'bool' | 'icon' | 'image'
+  type: 'string' | 'select' | 'content-type' | 'layout' | 'int' | 'color' | 'bool' | 'icon' | 'image' | 'multiselect'
   default?: any
   allowed?: any[]
   purpose?: string
@@ -101,6 +101,7 @@ const typeIcon = computed(() => {
     case 'bool':   return 'i-lucide-toggle-left'
     case 'icon':   return 'i-lucide-smile'
     case 'image':  return 'i-lucide-image'
+    case 'multiselect': return 'i-lucide-list-checks'
     default:       return 'i-lucide-circle-dot'
   }
 })
@@ -361,6 +362,11 @@ const visibleChildren = computed(() => {
     return activeChild ? [activeChild] : []
   }
 
+  if (model.value.type === 'multiselect') {
+    const selectedKeys = Array.isArray(model.value.default) ? model.value.default : []
+    return model.value.children.filter(child => selectedKeys.includes(child.key))
+  }
+
   return model.value.children
 })
 
@@ -396,7 +402,7 @@ function updateParam(index: number, updated: SettingItem) {
   <div
     class="flex min-w-0 flex-col gap-1.5"
     :class="mode === 'admin' && visibleChildren.length && isExpanded
-      ? 'relative gap-2 overflow-hidden rounded-[10px] border border-default bg-elevated px-0 pb-3 pl-3.5 pt-2.5 shadow-sm'
+      ? 'relative gap-2 rounded-l-[10px] border border-default bg-elevated px-0 pb-3 pl-3.5 pt-2.5 shadow-sm'
       : ''"
   >
     <!-- ============ ICON ============ -->
@@ -438,7 +444,7 @@ function updateParam(index: number, updated: SettingItem) {
             <UButton icon="i-lucide-grid-2x2" size="xs" color="neutral" variant="soft" square title="Выбрать из библиотеки" @click="iconMode = 'picker'" />
           </div>
 
-          <div v-else class="flex min-w-0 items-center gap-1.5">
+          <div v-else class="flex min-w-0 items-center gap-1.5 relative z-50">
             <Vue3IconPicker
               :model-value="model.default"
               placeholder="Поиск иконки..."
@@ -532,7 +538,7 @@ function updateParam(index: number, updated: SettingItem) {
     </template>
 
     <!-- ============ GRID TYPES ============ -->
-    <template v-else-if="['select', 'content-type', 'layout', 'color', 'int', 'bool'].includes(model.type)">
+    <template v-else-if="['select', 'content-type', 'layout', 'color', 'int', 'bool', 'multiselect'].includes(model.type)">
       <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-2.5 rounded-md py-0.5 transition hover:bg-muted/40">
         <span class="flex min-w-0 items-center gap-1.5 pl-0.5">
           <span
@@ -558,6 +564,15 @@ function updateParam(index: number, updated: SettingItem) {
             v-if="['select', 'content-type', 'layout'].includes(model.type)"
             :model-value="model.default"
             :items="model.allowed"
+            size="xs"
+            class="w-full min-w-0 [&_button]:py-0.5 [&_button]:text-[12.5px]"
+            @update:model-value="updateDefault"
+          />
+          <USelectMenu
+            v-else-if="model.type === 'multiselect'"
+            :model-value="model.default"
+            :items="model.allowed"
+            multiple
             size="xs"
             class="w-full min-w-0 [&_button]:py-0.5 [&_button]:text-[12.5px]"
             @update:model-value="updateDefault"
