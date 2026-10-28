@@ -12,52 +12,6 @@ import type {
   DraggedBlockSource,
 } from '~/types/lesson'
 
-/*
-================================================================================
-📖 ИНСТРУКЦИЯ: РЕЖИМЫ УРОКА (lesson-mode)
-================================================================================
-
-Система позволяет централизованно управлять поведением компонентов
-в зависимости от того, где открыт урок.
-
-📌 ДОСТУПНЫЕ РЕЖИМЫ:
-  - 'edit'  — Редактор (конструктор). Все интерактивные элементы (D&D,
-              инлайн-редактирование, кнопки удаления) доступны.
-  - 'learn' — Режим ученика. Элементы управления скрыты, текст защищен от
-              случайного изменения, но лайтбоксы и скролл работают.
-
-🛠 КАК ИСПОЛЬЗОВАТЬ В ДОЧЕРНИХ КОМПОНЕНТАХ:
-  (Доступно внутри любого компонента, отрендеренного внутри <ConstructorLesson>)
-
-  1. Импортируйте inject и Ref:
-     import { inject, ref, type Ref } from 'vue'
-
-  2. Получите режим (по умолчанию 'edit'):
-     const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
-
-  3. Применяйте в логике или шаблоне:
-     // В шаблоне (скрыть кнопку/меню):
-     <div v-if="lessonMode === 'edit'">...панель управления...</div>
-
-     // В шаблоне (запретить действие):
-     <button :disabled="lessonMode === 'learn'">Удалить</button>
-
-     // В JS (защита от вызова):
-     function deleteItem() {
-       if (lessonMode.value === 'learn') return
-       // ...логика...
-     }
-
-📂 ТЕКУЩИЕ КОМПОНЕНТЫ С ПОДДЕРЖКОЙ РЕЖИМА:
-  - LessonBlockWrapper (скрывает панель действий)
-  - TaxonomySelector (отключает выбор таксономии)
-  - TextNode / htmltext (запрещают редактирование)
-  - text_image / gallery (запрещают удаление и D&D картинок)
-================================================================================
-*/
-
-
-
 const api = useApi()
 const toast = useToast()
 
@@ -67,9 +21,7 @@ interface Props {
   structItems: BlockStructItem[]
   activeBlockLocalId?: string | null
   isReadOnly?: boolean
-  /** Режим отображения урока: редактирование или прохождение (чтение) */
   mode?: 'edit' | 'learn'
-  /** Показывать ли всплывающее уведомление при попытке редактирования read-only урока */
   displayReadOnlyToast?: boolean
 }
 
@@ -91,7 +43,7 @@ const emit = defineEmits<{
   (e: 'register-files', blockLocalId: string, inst: any): void
 }>()
 
-// ==================== Провайд режима (для дочерних компонентов) ====================
+// ==================== Провайд режима ====================
 
 const lessonMode = computed(() => props.mode)
 provide('lesson-mode', lessonMode)
@@ -118,7 +70,6 @@ function setActive(localId: string | null) {
 }
 
 function activateBlock(localId: string) {
-  // В режиме learn или read-only не активируем блоки
   if (props.mode === 'learn' || props.isReadOnly) return
   setActive(localId)
 }
@@ -338,7 +289,7 @@ const { totalChars, readingTimeText } = useContentStats({
   watchSource: () => lesson.value,
 })
 
-// ==================== Защита от редактирования (оверлей) ====================
+// ==================== Защита от редактирования ====================
 
 let isToastVisible = false
 let toastTimer: ReturnType<typeof setTimeout> | null = null
@@ -423,6 +374,7 @@ function clearDragOver() {
 defineExpose({
   removeBlock,
   duplicateBlock,
+  contentRef, // <--- Экспорт DOM-контейнера для родителя
 })
 </script>
 

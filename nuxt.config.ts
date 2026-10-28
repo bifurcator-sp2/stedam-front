@@ -73,7 +73,7 @@ export default defineNuxtConfig({
 
   vite: {
     build: {
-      target: ['safari11', 'ios11'],
+      target: ['safari18', 'ios18'],
       rolldownOptions: {
         output: {
           codeSplitting: false, // Отключает разделение кода на чанки

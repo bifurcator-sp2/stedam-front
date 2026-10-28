@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import katex from 'katex'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 import Lesson from '~/components/Constructor/Lesson.vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
@@ -21,6 +22,7 @@ import { toRaw } from 'vue'
 const api = useApi()
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 
 // ==================== Структура типов ====================
 
@@ -48,6 +50,7 @@ function findBlockSettingsInTree(nodes: BlockStructItem[], blockId: number | nul
   }
   return null
 }
+
 // ==================== Утилита: валидный ?tax из query ====================
 
 function getValidTaxFromQuery(): number | null {
@@ -57,9 +60,11 @@ function getValidTaxFromQuery(): number | null {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : null
 }
+
 // ==================== Модель урока ====================
 
 const lesson = ref<LessonModel>(createEmptyLesson())
+const lessonRef = ref<InstanceType<typeof Lesson> | null>(null)
 
 // ==================== Активный блок ====================
 
@@ -83,8 +88,87 @@ const centerTitle = computed(() => {
 
 const isReadOnly = computed(() => lesson.value.published)
 
-function togglePublished() {
-  lesson.value = { ...lesson.value, published: !lesson.value.published }
+async function togglePublished() {
+  if (lesson.value.published) {
+    lesson.value = { ...lesson.value, published: false }
+    return
+  }
+
+  await nextTick()
+  const container = lessonRef.value?.contentRef
+
+  if (container) {
+    let hasErrors = false
+
+    // 1. Проверяем уже сгенерированные ошибки KaTeX (если они есть в DOM)
+    if (container.querySelector('.katex-error')) {
+      hasErrors = true
+    }
+
+    // 2. Если таких нет, сканируем текстовые узлы
+    if (!hasErrors) {
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+      let node: Node | null
+
+      while ((node = walker.nextNode())) {
+        const text = node.textContent || ''
+        if (!text.includes('$')) continue
+
+        // Пытаемся спарсить полные формулы, чтобы проверить их на ошибки
+        const formulas = [
+          ...Array.from(text.matchAll(/\$\$([\s\S]*?)\$\$/g)).map(m => ({ latex: m[1], display: true })),
+          ...Array.from(text.matchAll(/\$([^\$\n]+?)\$/g)).map(m => ({ latex: m[1], display: false }))
+        ]
+
+        for (const { latex, display } of formulas) {
+          try {
+            // strict mode: true (выбрасывает ошибку при проблемах)
+            katex.renderToString(latex.trim(), {
+              displayMode: display,
+              throwOnError: true,
+              strict: false
+            })
+          } catch (e) {
+            hasErrors = true
+            break
+          }
+        }
+
+        if (hasErrors) break
+
+        // Проверяем на "висящие" $$
+        const doubleDollarCount = (text.match(/\$\$/g) || []).length
+        if (doubleDollarCount % 2 !== 0) {
+          hasErrors = true
+          break
+        }
+
+        // Проверяем на "висящие" $
+        // Для защиты от "$100" проверяем, есть ли в тексте LaTeX-подобные символы (\, ^, {, }, _, =) или $ рядом с буквами
+        const singleDollarText = text.replace(/\$\$/g, '')
+        const singleDollarCount = (singleDollarText.match(/\$/g) || []).length
+        if (singleDollarCount % 2 !== 0) {
+          if (text.includes('\\') || /[\^\{\}\_=]/.test(singleDollarText) || /[a-zA-Z]\$|\$[a-zA-Z]/.test(singleDollarText)) {
+            hasErrors = true
+            break
+          }
+        }
+      }
+    }
+
+    if (hasErrors) {
+      toast.add({
+        title: 'Ошибка синтаксиса формул',
+        description: 'В уроке есть поломанные или нераспознанные формулы. Исправьте их перед публикацией.',
+        color: 'error',
+        icon: 'i-lucide-triangle-alert',
+        timeout: 5000,
+      })
+      return
+    }
+  }
+
+  lesson.value = { ...lesson.value, published: true }
 }
 
 // ==================== Утилиты diff / patch ====================
@@ -168,7 +252,6 @@ async function loadLesson(id: number) {
       } as LessonBlockModel
     })
 
-    // ?tax применяем только если у урока ещё нет сохранённых разделов
     const taxFromQuery = getValidTaxFromQuery()
     const hasSavedTaxonomies = Array.isArray(data.taxonomy_ids) && data.taxonomy_ids.length > 0
     const taxonomyIds: number[] = hasSavedTaxonomies
@@ -206,7 +289,6 @@ async function createAndRedirect() {
     const res = await api.post<{ data: LessonResponse } | LessonResponse>('/lessons/make')
     const data = (res as any).data ?? res
 
-    // Пробрасываем ?tax в финальный URL, чтобы loadLesson его увидел
     const tax = getValidTaxFromQuery()
     const query: Record<string, string> = { id: String(data.id) }
     if (tax !== null) query.tax = String(tax)
@@ -427,6 +509,7 @@ onBeforeUnmount(() => {
     <template #main>
       <LoadingOverlay :loading="busy">
         <Lesson
+          ref="lessonRef"
           v-model="lesson"
           v-model:active-block-local-id="activeBlockLocalId"
           :struct-items="structItems"
@@ -458,7 +541,7 @@ onBeforeUnmount(() => {
             @click="togglePublished"
           >
             <USwitch
-              v-model="lesson.published"
+              :model-value="lesson.published"
               color="success"
               size="xs"
             />

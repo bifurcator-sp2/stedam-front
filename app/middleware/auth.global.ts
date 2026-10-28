@@ -1,7 +1,5 @@
 // app/middleware/auth.global.ts
 export default defineNuxtRouteMiddleware(async (to) => {
-  // Публичные страницы (login, signup, forgot-password, password-reset)
-  // уже помечены sanctum.excluded — их не трогаем
   if ((to.meta as any).sanctum?.excluded === true) return
 
   const { user, fetchUser, hasRole, isEmailVerified } = useAuth()
@@ -16,6 +14,12 @@ export default defineNuxtRouteMiddleware(async (to) => {
       query: { redirect: to.fullPath },
     })
   }
+
+  // === ДОБАВЛЕНА ЗАГРУЗКА ПРОФИЛЯ ===
+  // Загружаем профиль пользователя (если он ещё не загружен)
+  const { fetchUserData } = useProfile()
+  await fetchUserData()
+  // ===================================
 
   const skipVerification =
     to.path === '/verify-email' ||

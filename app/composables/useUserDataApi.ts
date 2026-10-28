@@ -17,6 +17,17 @@ export interface UserData {
     iso3: string | null
     name: string
   } | null
+  settings: {
+    ink?: {
+      penSize: number
+      eraserSize: number
+      bg: 'none' | 'lined' | 'grid' | 'dots'
+      bgOpacity: number
+      bgScale: number
+      bgColor: string
+    }
+    [key: string]: any // Для будущих расширений
+  }
   created_at: string
   updated_at: string
 }
@@ -29,6 +40,11 @@ export interface UserDataPayload {
   birth_year?: number | null
   gender?: 'male' | 'female' | null
   country_id?: number | null
+  direction?: 'ltr' | 'rtl'
+  settings?: {
+    ink?: Record<string, any>
+    [key: string]: any
+  }
 }
 
 export interface Country {

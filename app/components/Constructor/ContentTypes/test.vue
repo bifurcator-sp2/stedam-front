@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, onBeforeUnmount, watch, type Ref } from 'vue'
 import TextNode from '../TextNode.vue'
-import Whiteboard from '../Whiteboard.vue'
+import Whiteboard from '~/components/Education/Whiteboard/Whiteboard.vue'
 import type { InlineEditBinding } from '~/directives/inlineEdit'
 import type { SettingNode } from '~/utils/constructors'
 

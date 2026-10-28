@@ -1,52 +1,73 @@
-<!-- components/Constructor/Whiteboard.vue -->
+<!-- components/Education/Whiteboard/Whiteboard.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { useProfile } from '~/composables/useProfile'
 
 const props = withDefaults(defineProps<{
-  penSize?: number
-  eraserSize?: number
+  settings?: {
+    penSize?: number
+    eraserSize?: number
+    bg?: 'none' | 'lined' | 'grid' | 'dots'
+    bgOpacity?: number
+    bgScale?: number
+    bgColor?: string
+  }
   color?: string
+  hideToolbar?: boolean
 }>(), {
-  penSize: 3,
-  eraserSize: 30,
   color: '#000000',
+  hideToolbar: false,
 })
 
-// ==================== Настройки (с сохранением в localStorage) ====================
+const { userData } = useProfile()
 
-const STORAGE_KEY = 'whiteboard_settings'
-
-const loadSettings = () => {
-  if (import.meta.server) return { pen: props.penSize, eraser: props.eraserSize, mode: 'pen' as const }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      return {
-        pen: parsed.pen ?? props.penSize,
-        eraser: parsed.eraser ?? props.eraserSize,
-        mode: parsed.mode ?? 'pen'
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to load whiteboard settings', e)
+// Приоритет: 1) Пропс (для предпросмотра в форме), 2) Глобальный профиль, 3) Дефолт
+const effectiveSettings = computed(() => {
+  if (props.settings) return props.settings
+  if (userData.value?.settings?.ink) return userData.value.settings.ink
+  return {
+    penSize: 3,
+    eraserSize: 30,
+    bg: 'none',
+    bgOpacity: 1,
+    bgScale: 1,
+    bgColor: '#d1d5db'
   }
-  return { pen: props.penSize, eraser: props.eraserSize, mode: 'pen' as const }
-}
+})
 
-const settings = loadSettings()
+const currentMode = ref<'pen' | 'eraser'>('pen')
+const currentPenSize = computed(() => effectiveSettings.value.penSize ?? 3)
+const currentEraserSize = computed(() => effectiveSettings.value.eraserSize ?? 30)
+const currentBg = computed(() => effectiveSettings.value.bg ?? 'none')
+const bgOpacity = computed(() => effectiveSettings.value.bgOpacity ?? 1)
+const bgScale = computed(() => effectiveSettings.value.bgScale ?? 1)
+const bgColor = computed(() => effectiveSettings.value.bgColor ?? '#d1d5db')
 
-const currentMode = ref<'pen' | 'eraser'>(settings.mode)
-const currentPenSize = ref<number>(settings.pen)
-const currentEraserSize = ref<number>(settings.eraser)
+// ==================== Стили фона ====================
 
-watch([currentMode, currentPenSize, currentEraserSize], () => {
-  if (import.meta.client) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      mode: currentMode.value,
-      pen: currentPenSize.value,
-      eraser: currentEraserSize.value
-    }))
+const bgStyle = computed(() => {
+  if (currentBg.value === 'none') return { display: 'none' }
+
+  const size = Math.max(12, 32 * bgScale.value)
+  const color = bgColor.value
+
+  let backgroundImage = ''
+  let backgroundSize = 'auto'
+
+  if (currentBg.value === 'lined') {
+    backgroundImage = `repeating-linear-gradient(to bottom, transparent, transparent ${size - 1}px, ${color} ${size - 1}px, ${color} ${size}px)`
+  } else if (currentBg.value === 'grid') {
+    backgroundImage = `repeating-linear-gradient(to bottom, transparent, transparent ${size - 1}px, ${color} ${size - 1}px, ${color} ${size}px), repeating-linear-gradient(to right, transparent, transparent ${size - 1}px, ${color} ${size - 1}px, ${color} ${size}px)`
+  } else if (currentBg.value === 'dots') {
+    const dotRadius = Math.max(1, size / 24)
+    backgroundImage = `radial-gradient(circle, ${color} ${dotRadius}px, transparent ${dotRadius}px)`
+    backgroundSize = `${size}px ${size}px`
+  }
+
+  return {
+    backgroundImage,
+    backgroundSize,
+    opacity: bgOpacity.value,
   }
 })
 
@@ -62,7 +83,6 @@ let drawing = false
 let isErasing = false
 let currentPointerId: number | null = null
 
-// Для интерполяции
 let lastX = 0
 let lastY = 0
 
@@ -79,7 +99,7 @@ function initCanvas() {
   if (ctx) {
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
-    ctx.imageSmoothingEnabled = true // Включаем сглаживание
+    ctx.imageSmoothingEnabled = true
   }
 }
 
@@ -116,18 +136,15 @@ function getCoordinates(e: PointerEvent) {
   }
 }
 
-// ==================== Рисование (сглаженное) ====================
+// ==================== Рисование ====================
 
-// Функция для рисования гладкой линии между двумя точками
 function drawSmoothLine(x1: number, y1: number, x2: number, y2: number) {
   if (!ctx) return
 
-  // Расстояние между точками
   const dx = x2 - x1
   const dy = y2 - y1
   const distance = Math.sqrt(dx * dx + dy * dy)
 
-  // Шаг отрисовки (чем меньше, тем глаже, но тяжелее для процессора)
   const step = 1.5
   const steps = Math.ceil(distance / step)
 
@@ -170,7 +187,6 @@ function onPointerDown(e: PointerEvent) {
   lastX = x
   lastY = y
 
-  // Рисуем точку при клике
   ctx.beginPath()
   ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2)
   ctx.fill()
@@ -201,9 +217,7 @@ function onPointerMove(e: PointerEvent) {
     }
   }
 
-  // Отрисовка с интерполяцией
   drawSmoothLine(lastX, lastY, x, y)
-
   lastX = x
   lastY = y
 }
@@ -231,8 +245,6 @@ function onPointerCancel(e: PointerEvent) {
   }
 }
 
-// ==================== Курсор и клавиатура ====================
-
 function onPointerEnter(e: PointerEvent) {
   isPointerInside.value = true
   onPointerMove(e)
@@ -259,8 +271,6 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
-// ==================== Lifecycle ====================
-
 onMounted(() => {
   initCanvas()
   handleResize()
@@ -281,23 +291,16 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
 })
-
-watch(currentMode, (newMode) => {
-  if (newMode === 'eraser' && isPointerInside.value) {
-    showEraserCursor.value = true
-  } else if (newMode === 'pen' && !isCtrlPressed.value) {
-    showEraserCursor.value = false
-  }
-})
 </script>
 
 <template>
   <div
     ref="containerRef"
-    class="relative w-full h-full overflow-hidden select-none"
+    class="relative w-full h-full overflow-hidden select-none bg-default"
     style="touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none;"
   >
-    <!-- Холст -->
+    <div class="absolute inset-0 pointer-events-none transition-opacity duration-200" :style="bgStyle"></div>
+
     <canvas
       ref="canvasRef"
       class="absolute inset-0 w-full h-full"
@@ -310,65 +313,40 @@ watch(currentMode, (newMode) => {
       @pointerenter="onPointerEnter"
     ></canvas>
 
-    <!-- Панель управления -->
+    <!-- Тулбар -->
     <div
+      v-if="!hideToolbar"
       class="wb-toolbar absolute top-2 right-2 z-50 flex items-center gap-1.5 rounded-lg border border-default bg-default/90 p-1 shadow-sm backdrop-blur-sm"
       @pointerdown.stop
     >
-      <div class="flex rounded-md overflow-hidden border border-default">
-        <button
-          type="button"
-          class="p-1.5 transition-colors"
-          :class="currentMode === 'pen' ? 'bg-primary text-white' : 'bg-elevated text-muted hover:bg-elevated/80'"
-          title="Перо"
-          @click="currentMode = 'pen'"
-        >
-          <UIcon name="i-lucide-pencil" class="size-4" />
-        </button>
-        <button
-          type="button"
-          class="p-1.5 transition-colors border-l border-default"
-          :class="currentMode === 'eraser' ? 'bg-primary text-white' : 'bg-elevated text-muted hover:bg-elevated/80'"
-          title="Ластик"
-          @click="currentMode = 'eraser'"
-        >
-          <UIcon name="i-lucide-eraser" class="size-4" />
-        </button>
-      </div>
-
-      <div class="flex items-center gap-1 px-1.5 border-l border-default h-6">
-        <span class="text-[10px] text-muted uppercase font-bold">Толщина</span>
-        <input
-          type="range"
-          :min="1"
-          :max="20"
-          v-model.number="currentPenSize"
-          class="w-16 h-1 bg-default rounded-lg appearance-none cursor-pointer accent-primary"
-          title="Размер пера"
-        >
-        <span class="text-[10px] text-muted tabular-nums w-3 text-right">{{ currentPenSize }}</span>
-      </div>
+      <button
+        type="button"
+        class="p-1.5 rounded-md transition-colors"
+        :class="currentMode === 'pen' ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
+        title="Перо"
+        @click="currentMode = 'pen'"
+      >
+        <UIcon name="i-lucide-pencil" class="size-4" />
+      </button>
+      <button
+        type="button"
+        class="p-1.5 rounded-md transition-colors"
+        :class="currentMode === 'eraser' ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
+        title="Ластик"
+        @click="currentMode = 'eraser'"
+      >
+        <UIcon name="i-lucide-eraser" class="size-4" />
+      </button>
     </div>
 
-    <!-- Иконка-курсор ластика -->
+    <!-- Курсор ластика -->
     <div
       v-if="showEraserCursor"
       class="absolute pointer-events-none transform -translate-x-1/2 -translate-y-1/2 z-40 flex items-center justify-center mix-blend-difference"
-      :style="{
-        width: `${currentEraserSize}px`,
-        height: `${currentEraserSize}px`,
-        left: `${cursorPos.x}px`,
-        top: `${cursorPos.y}px`,
-      }"
+      :style="{ width: `${currentEraserSize}px`, height: `${currentEraserSize}px`, left: `${cursorPos.x}px`, top: `${cursorPos.y}px` }"
     >
       <div class="absolute inset-0 rounded-full border-2 border-white bg-white/20"></div>
-
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        class="relative z-10 text-white"
-        :style="{ width: `${Math.max(12, currentEraserSize * 0.5)}px`, height: `${Math.max(12, currentEraserSize * 0.5)}px` }"
-        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-      >
+      <svg xmlns="http://www.w3.org/2000/svg" class="relative z-10 text-white" :style="{ width: `${Math.max(12, currentEraserSize * 0.5)}px`, height: `${Math.max(12, currentEraserSize * 0.5)}px` }" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path>
         <path d="M22 21H7"></path>
         <path d="m5 11 9 9"></path>
