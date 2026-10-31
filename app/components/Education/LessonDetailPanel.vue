@@ -1,6 +1,6 @@
 <!-- app/components/Education/LessonDetailPanel.vue -->
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import type { LessonModel, LessonBlockModel } from '~/types/lesson'
 import Lesson from '~/components/Constructor/Lesson.vue'
 
@@ -44,6 +44,8 @@ watch(
       settings: b.settings,
       images: b.images || [],
       files: b.files || [],
+      isTest: b.is_test ?? false,
+      userId: b.user_id ?? null,
     }))
 
     lessonModel.value = {
@@ -59,6 +61,34 @@ watch(
   },
   { immediate: true, deep: true }
 )
+
+// ==================== Масштабирование превью (как в TestListElement) ====================
+
+const VIRTUAL_WIDTH = 800
+
+const containerRef = ref<HTMLElement | null>(null)
+const zoomFactor = ref(1)
+
+let resizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  if (!containerRef.value) return
+
+  resizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const width = entry.contentRect.width
+      if (width > 0) {
+        zoomFactor.value = width / VIRTUAL_WIDTH
+      }
+    }
+  })
+  resizeObserver.observe(containerRef.value)
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
 </script>
 
 <template>
@@ -76,11 +106,13 @@ watch(
       Данные урока не найдены
     </div>
 
-    <div v-else class="flex-1 overflow-y-auto overflow-x-hidden relative">
-
+    <div v-else ref="containerRef" class="flex-1 overflow-y-auto overflow-x-hidden relative">
       <div
-        class="origin-top-left w-[200%] p-6 bg-[var(--ui-bg,#ffffff)] shadow-sm"
-        style="transform: scale(0.5);"
+        class="pointer-events-none origin-top-left p-6 bg-[var(--ui-bg,#ffffff)] shadow-sm"
+        :style="{
+          zoom: zoomFactor,
+          width: `${VIRTUAL_WIDTH}px`,
+        }"
       >
         <div v-if="lessonModel.blocks.length === 0" class="text-center text-slate-400 text-sm py-10">
           Урок пока пуст
@@ -92,9 +124,9 @@ watch(
           :struct-items="[]"
           :is-read-only="true"
           :display-read-only-toast="false"
+          mode="learn"
         />
       </div>
-
     </div>
   </div>
 </template>

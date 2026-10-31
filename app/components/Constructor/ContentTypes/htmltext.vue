@@ -334,11 +334,11 @@ const toolbarItems: EditorToolbarItem[][] = [
         </Teleport>
       </UEditor>
 
-      <!-- Просмотр: v-html + KaTeX-формулы + видео, когда редактор не активен -->
+      <!-- Просмотр -->
       <div
         v-else
         v-html="renderedHtml"
-        class="htmltext-preview prose dark:prose-invert max-w-none min-h-[200px]"
+        class="htmltext-preview max-w-none min-h-[200px]"
       />
     </ClientOnly>
   </div>
@@ -355,12 +355,119 @@ const toolbarItems: EditorToolbarItem[][] = [
   white-space: nowrap;
 }
 
-/* Гасим sticky/fixed внутри UEditorToolbar — наша обёртка сама задаёт позицию */
+/* Гасим sticky/fixed внутри UEditorToolbar */
 .htmltext-toolbar-surface :deep([data-slot='toolbar']),
 .htmltext-toolbar-surface :deep(.editor-toolbar) {
   position: static !important;
   box-shadow: none !important;
   border: none !important;
   background: transparent !important;
+}
+
+/* ==================== УБИРАЕМ ПАДДИНГИ РЕДАКТОРА ==================== */
+/* Перебиваем классы sm:px-8 и px-7, которые Nuxt UI добавляет изнутри */
+.htmltext-root :deep(.tiptap),
+.htmltext-root :deep(.ProseMirror) {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* ==================== СТИЛИ ПРЕВЬЮ ==================== */
+.htmltext-preview {
+  color: var(--ui-text, #334155);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.htmltext-preview :deep(p) {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+
+.htmltext-preview :deep(h1),
+.htmltext-preview :deep(h2),
+.htmltext-preview :deep(h3),
+.htmltext-preview :deep(h4) {
+  color: var(--ui-text-highlighted, #0f172a);
+  font-weight: 700;
+  text-decoration: none;
+  line-height: 1.3;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.htmltext-preview :deep(h1) { font-size: 1.875rem; }
+.htmltext-preview :deep(h2) { font-size: 1.5rem; }
+.htmltext-preview :deep(h3) { font-size: 1.25rem; }
+
+.htmltext-preview :deep(ul) {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+.htmltext-preview :deep(ol) {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+.htmltext-preview :deep(li) {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.htmltext-preview :deep(blockquote) {
+  border-left: 4px solid var(--ui-border, #e2e8f0);
+  padding-left: 1em;
+  color: var(--ui-text-muted, #64748b);
+  font-style: italic;
+  margin: 1em 0;
+}
+
+.htmltext-preview :deep(:not(pre) > code) {
+  background-color: var(--ui-bg-elevated, #f1f5f9);
+  color: var(--ui-primary, #3b82f6);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875em;
+  font-weight: 600;
+}
+
+.htmltext-preview :deep(pre) {
+  background-color: var(--ui-bg-elevated, #f1f5f9);
+  color: var(--ui-text, #334155);
+  padding: 1em;
+  border-radius: 0.5rem;
+  border: 1px solid var(--ui-border, #e2e8f0);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875em;
+  margin: 1em 0;
+}
+
+.htmltext-preview :deep(pre code) {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-weight: normal;
+}
+
+.htmltext-preview :deep(a) {
+  color: var(--ui-primary, #3b82f6);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.htmltext-preview :deep(strong) {
+  color: var(--ui-text-highlighted, #0f172a);
+  font-weight: 600;
+}
+.htmltext-preview :deep(em) {
+  font-style: italic;
 }
 </style>

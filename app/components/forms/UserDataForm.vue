@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import type { FormError, FormSubmitEvent } from '#ui/types'
 import Whiteboard from '~/components/Education/Whiteboard/Whiteboard.vue'
+import VideoCalibrate from '~/components/video/Calibrate.vue'
 
 const { t } = useI18n()
 const { countries } = useUserDataApi()
@@ -141,6 +142,25 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
         </div>
 
         <USeparator />
+
+        <!-- Блок калибровки камеры -->
+        <div class="space-y-5">
+          <div class="flex items-center gap-2">
+            <UIcon name="i-lucide-scan-face" class="w-5 h-5 text-primary" />
+            <h4 class="text-base font-semibold text-highlighted">Отслеживание взгляда</h4>
+          </div>
+          <div class="bg-elevated/50 p-4 rounded-lg border border-default flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="text-sm text-muted max-w-xl">
+              Откалибруйте камеру, чтобы система могла определять направление вашего взгляда. Это может использоваться для интерактивных элементов и сбора аналитики вовлеченности.
+            </div>
+            <div class="shrink-0">
+              <VideoCalibrate />
+            </div>
+          </div>
+        </div>
+
+        <USeparator />
+
 
         <!-- Блок рукописного ввода (Whiteboard) -->
         <div class="space-y-5">

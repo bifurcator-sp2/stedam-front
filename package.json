@@ -37,11 +37,13 @@
     "ufo": "^1.6.4",
     "vue-draggable-plus": "^0.6.1",
     "vue3-icon-picker": "^1.0.1",
+    "webgazer": "^3.5.3",
     "zod": "^4.6.4"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.141",
     "@nuxt/eslint": "^1.17.0",
+    "@tailwindcss/typography": "^0.5.20",
     "@types/dompurify": "^3.2.0",
     "@xiaobailong/web-update-notice-plugin": "^2.0.9",
     "eslint": "^10.10.0",

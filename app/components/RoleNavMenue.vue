@@ -38,7 +38,8 @@ const navItemsByRoles: Record<string, NavItem[]> = {
     { label: 'Пройденый материал', icon: 'i-lucide-book-check', to: '/learned' },
   ],
   teacher: [
-    { label: 'Я - преподаватель', icon: 'i-lucide-presentation', to: '/edu' },
+    { label: 'Мои уроки', icon: 'i-lucide-presentation', to: '/teacher-lessons' },
+    { label: 'Задания', icon: 'i-lucide-clipboard-check', to: '/teacher-tests' },
   ],
   parent: [
     { label: 'Я - родитель', icon: 'i-lucide-users', to: '/parent' },

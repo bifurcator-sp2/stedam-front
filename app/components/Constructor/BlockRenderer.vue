@@ -17,6 +17,7 @@ interface Props {
   code: string | null | undefined
   id?: number
   mode?: 'body' | 'form'
+  isTest?: boolean
   showToDeleteImages?: boolean
   allowDragAndDrop?: boolean
   /** Готовые изображения — проброс в блок (например, text_image) */
@@ -26,6 +27,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   id: 0,
   mode: 'body',
+  isTest: false,
   showToDeleteImages: false,
   allowDragAndDrop: true,
   initialImages: () => [],
@@ -62,6 +64,7 @@ function onRegisterFiles(inst: any) {
     v-model="settings"
     :id="props.id"
     :mode="props.mode"
+    :is-test="props.isTest"
     model-name="lesson_blocks"
     :show-to-delete-images="props.showToDeleteImages"
     :allow-drag-and-drop="props.allowDragAndDrop"

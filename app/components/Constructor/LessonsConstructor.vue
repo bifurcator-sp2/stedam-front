@@ -6,6 +6,7 @@ import Lesson from '~/components/Constructor/Lesson.vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import LessonBlocksIndex from '~/components/Constructor/LessonBlocksIndex.vue'
+import TestsSearch from '~/components/Education/TestsSearch.vue'
 import { useAutosave } from '~/composables/useAutosave'
 import type {
   LessonModel,
@@ -13,6 +14,7 @@ import type {
   BlockStructItem,
   LessonSavePayload,
   LessonResponse,
+  DraggedBlockSource,
 } from '~/types/lesson'
 import { createEmptyLesson } from '~/types/lesson'
 import { toRaw } from 'vue'
@@ -23,6 +25,24 @@ const api = useApi()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+
+// Получаем текущего пользователя для проверки владельца задания
+const { user } = useAuth()
+const currentUserId = computed(() => user.value?.id)
+
+const strictSaveMode = ref(false)
+
+// ==================== Кастомный скроллбар для модалки ====================
+const modalScrollClasses =
+  "overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] " +
+  "[scrollbar-width:thin] [scrollbar-color:transparent_transparent] " +
+  "hover:[scrollbar-color:var(--ui-border,#e5e7eb)_transparent] " +
+  "[&::-webkit-scrollbar]:w-1.5 " +
+  "[&::-webkit-scrollbar-track]:bg-transparent " +
+  "[&::-webkit-scrollbar-thumb]:bg-transparent " +
+  "[&::-webkit-scrollbar-thumb]:rounded-full " +
+  "hover:[&::-webkit-scrollbar-thumb]:bg-[var(--ui-border,#e5e7eb)] " +
+  "[&::-webkit-scrollbar-thumb:hover]:bg-[var(--ui-text-muted,#9ca3af)]"
 
 // ==================== Структура типов ====================
 
@@ -100,12 +120,10 @@ async function togglePublished() {
   if (container) {
     let hasErrors = false
 
-    // 1. Проверяем уже сгенерированные ошибки KaTeX (если они есть в DOM)
     if (container.querySelector('.katex-error')) {
       hasErrors = true
     }
 
-    // 2. Если таких нет, сканируем текстовые узлы
     if (!hasErrors) {
       const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
       let node: Node | null
@@ -114,7 +132,6 @@ async function togglePublished() {
         const text = node.textContent || ''
         if (!text.includes('$')) continue
 
-        // Пытаемся спарсить полные формулы, чтобы проверить их на ошибки
         const formulas = [
           ...Array.from(text.matchAll(/\$\$([\s\S]*?)\$\$/g)).map(m => ({ latex: m[1], display: true })),
           ...Array.from(text.matchAll(/\$([^\$\n]+?)\$/g)).map(m => ({ latex: m[1], display: false }))
@@ -122,7 +139,6 @@ async function togglePublished() {
 
         for (const { latex, display } of formulas) {
           try {
-            // strict mode: true (выбрасывает ошибку при проблемах)
             katex.renderToString(latex.trim(), {
               displayMode: display,
               throwOnError: true,
@@ -136,15 +152,12 @@ async function togglePublished() {
 
         if (hasErrors) break
 
-        // Проверяем на "висящие" $$
         const doubleDollarCount = (text.match(/\$\$/g) || []).length
         if (doubleDollarCount % 2 !== 0) {
           hasErrors = true
           break
         }
 
-        // Проверяем на "висящие" $
-        // Для защиты от "$100" проверяем, есть ли в тексте LaTeX-подобные символы (\, ^, {, }, _, =) или $ рядом с буквами
         const singleDollarText = text.replace(/\$\$/g, '')
         const singleDollarCount = (singleDollarText.match(/\$/g) || []).length
         if (singleDollarCount % 2 !== 0) {
@@ -171,28 +184,101 @@ async function togglePublished() {
   lesson.value = { ...lesson.value, published: true }
 }
 
-// ==================== Утилиты diff / patch ====================
+// ==================== Модалка предупреждения о задании ====================
 
-function unwrapProxy(v: any): any {
-  if (v === null || typeof v !== 'object') return v
-  v = toRaw(v)
-  if (Array.isArray(v)) {
-    return v.map(unwrapProxy)
-  }
-  const out: any = {}
-  for (const k in v) {
-    if (Object.prototype.hasOwnProperty.call(v, k)) {
-      out[k] = unwrapProxy(v[k])
-    }
-  }
-  return out
+const isTestWarningOpen = ref(false)
+const rememberTestChoice = ref(false)
+const pendingTestBlock = ref<{ index: number, source: DraggedBlockSource } | null>(null)
+
+function handleTestWarning(payload: { index: number, source: DraggedBlockSource }) {
+  pendingTestBlock.value = payload
+  isTestWarningOpen.value = true
 }
+
+function confirmTestWarning() {
+  if (rememberTestChoice.value && import.meta.client) {
+    localStorage.setItem('lesson_test_warning_accepted', 'true')
+  }
+
+  if (pendingTestBlock.value && lessonRef.value) {
+    lessonRef.value.handleDropAtIndex(pendingTestBlock.value.index, pendingTestBlock.value.source, true)
+  }
+
+  isTestWarningOpen.value = false
+  pendingTestBlock.value = null
+}
+
+// ==================== Модалка выбора задания из коллекции ====================
+
+const isTaskCollectionOpen = ref(false)
+const pendingTestIndex = ref<number | null>(null) // <--- Храним индекс для вставки
+
+const modalTaxId = computed(() => {
+  return lesson.value.taxonomy_ids?.[0] || null
+})
+
+// Принимаем индекс из Lesson.vue
+function handleOpenTaskCollection(index: number) {
+  pendingTestIndex.value = index
+  isTaskCollectionOpen.value = true
+}
+
+function onSelectTestFromCollection(test: any) {
+  // ПРОВЕРКА: запрещаем дублирование экземпляров из модалки
+  const alreadyExists = lesson.value.blocks.some(
+    b => b.isTest && b.id === test.id
+  )
+
+  if (alreadyExists) {
+    toast.add({
+      title: 'Задание уже добавлено',
+      description: 'Этот экземпляр задания уже есть в вашем уроке.',
+      color: 'warning',
+      icon: 'i-lucide-alert-circle',
+    })
+    return
+  }
+
+  isTaskCollectionOpen.value = false
+
+  const newBlock: LessonBlockModel = {
+    localId: crypto.randomUUID(),
+    id: test.id,
+    blockId: null,
+    blockTypeCode: test.block_type_code,
+    settings: deepClone(test.settings),
+    images: [],
+    files: [],
+    isTest: true,
+    userId: test.user_id,
+  }
+
+  const next = lesson.value.blocks.slice()
+
+  // Вставляем строго туда, куда перетащили, либо в конец (если индекса нет)
+  const insertIndex = pendingTestIndex.value !== null ? pendingTestIndex.value : next.length
+  const safeIndex = Math.max(0, Math.min(insertIndex, next.length))
+
+  next.splice(safeIndex, 0, newBlock)
+  lesson.value = { ...lesson.value, blocks: next }
+  pendingTestIndex.value = null
+
+  toast.add({
+    title: 'Успешно',
+    description: 'Задание добавлено в урок',
+    color: 'success',
+    icon: 'i-lucide-check-circle',
+  })
+}
+
+// ==================== Утилиты клонирования ====================
 
 function deepClone<T>(v: T): T {
-  return structuredClone(unwrapProxy(v)) as T
+  if (v === null || v === undefined) return v
+  return JSON.parse(JSON.stringify(toRaw(v))) as T
 }
 
-// ==================== Snapshot + retry для автосохранения ====================
+// ==================== Snapshot для автосохранения ====================
 
 function snapshotLesson(): string {
   return JSON.stringify({
@@ -200,8 +286,10 @@ function snapshotLesson(): string {
     description: lesson.value.description,
     locale: lesson.value.locale,
     published: lesson.value.published,
+    taxonomy_ids: lesson.value.taxonomy_ids,
     blocks: lesson.value.blocks.map((b) => ({
       id: b.id,
+      localId: b.localId,
       settings: b.settings,
     })),
   })
@@ -249,6 +337,8 @@ async function loadLesson(id: number) {
         blockId: b.block_id ?? null,
         blockTypeCode: b.block_type_code ?? '',
         settings,
+        isTest: b.is_test ?? false,
+        userId: b.user_id ?? null,
       } as LessonBlockModel
     })
 
@@ -306,6 +396,8 @@ async function createAndRedirect() {
 
 const saving = ref(false)
 
+const isInitialLoading = computed(() => loading.value || creating.value)
+
 const busy = computed(() =>
   loading.value || creating.value || saving.value,
 )
@@ -322,6 +414,7 @@ async function save() {
   saving.value = true
   try {
     const snapshotAtSave = snapshotLesson()
+    const prevActiveId = activeBlock.value?.id ?? null
 
     const payload: LessonSavePayload = {
       title: lesson.value.title,
@@ -329,7 +422,7 @@ async function save() {
       locale: lesson.value.locale,
       saved: true,
       published: lesson.value.published,
-      taxonomy_ids: lesson.value.taxonomy_ids ?? [],
+      taxonomy_ids: deepClone(lesson.value.taxonomy_ids ?? []),
       blocks: lesson.value.blocks.map((block) => ({
         id: block.id,
         settings: deepClone(block.settings),
@@ -338,8 +431,6 @@ async function save() {
       })),
     }
 
-    const prevActiveId = activeBlock.value?.id ?? null
-
     const res = await api.put<{ data: LessonResponse } | LessonResponse>(
       `/lessons/${lesson.value.id}`,
       payload,
@@ -347,47 +438,58 @@ async function save() {
 
     const data = (res as any).data ?? res
 
-    const userEditedDuringSave = snapshotLesson() !== snapshotAtSave
+    if (strictSaveMode.value) {
+      const userEditedDuringSave = snapshotLesson() !== snapshotAtSave
 
-    if (userEditedDuringSave) {
-      lesson.value = {
-        ...lesson.value,
-        saved: data.saved ?? true,
-        taxonomy_ids: data.taxonomy_ids ?? [],
-        published: data.published ?? lesson.value.published,
+      if (userEditedDuringSave) {
+        lesson.value = {
+          ...lesson.value,
+          saved: data.saved ?? true,
+          taxonomy_ids: data.taxonomy_ids ?? [],
+          published: data.published ?? lesson.value.published,
+        }
+        scheduleRetrySave()
+      } else {
+        const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
+          const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
+          const rawSettings = b.settings
+          const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
+            ? deepClone(rawSettings)
+            : deepClone(fallback)
+
+          return {
+            localId: crypto.randomUUID(),
+            id: b.id,
+            blockId: b.block_id ?? null,
+            blockTypeCode: b.block_type_code ?? '',
+            settings,
+            isTest: b.is_test ?? false,
+            userId: b.user_id ?? null,
+          } as LessonBlockModel
+        })
+
+        isProgrammatic.value = true
+        lesson.value = {
+          ...lesson.value,
+          saved: data.saved ?? true,
+          published: data.published ?? lesson.value.published,
+          blocks: updatedBlocks,
+        }
+
+        activeBlockLocalId.value =
+          updatedBlocks.find((b) => b.id === prevActiveId)?.localId ?? null
+
+        lastSavedSnapshot = snapshotLesson()
       }
-
-      scheduleRetrySave()
     } else {
-      const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-        const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
-        const rawSettings = b.settings
-        const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
-          ? deepClone(rawSettings)
-          : deepClone(fallback)
-
-        return {
-          localId: crypto.randomUUID(),
-          id: b.id,
-          blockId: b.block_id ?? null,
-          blockTypeCode: b.block_type_code ?? '',
-          settings,
-        } as LessonBlockModel
-      })
-
+      // --- БЫСТРЫЙ РЕЖИМ (по умолчанию) ---
       isProgrammatic.value = true
-      lesson.value = {
-        ...lesson.value,
-        saved: data.saved ?? true,
-        published: data.published ?? lesson.value.published,
-        blocks: updatedBlocks,
-      }
-
-      activeBlockLocalId.value =
-        updatedBlocks.find((b) => b.id === prevActiveId)?.localId ?? null
-
+      lesson.value.saved = data.saved ?? true
+      lesson.value.published = data.published ?? lesson.value.published
+      lesson.value.taxonomy_ids = data.taxonomy_ids ?? lesson.value.taxonomy_ids
       lastSavedSnapshot = snapshotLesson()
     }
+
   } catch (e) {
     console.error('[save] failed', e)
   } finally {
@@ -407,7 +509,7 @@ const { remaining: autosaveRemaining, cancel: cancelAutosave } = useAutosave({
     && !busy.value
     && !isReadOnly.value,
   save,
-  watchSource: () => lesson.value,
+  watchSource: () => snapshotLesson(),
   isProgrammatic: () => isProgrammatic.value,
   extraPopupSelectors: ['.crop-modal-backdrop'],
 })
@@ -507,13 +609,15 @@ onBeforeUnmount(() => {
     </template>
 
     <template #main>
-      <LoadingOverlay :loading="busy">
+      <LoadingOverlay :loading="isInitialLoading">
         <Lesson
           ref="lessonRef"
           v-model="lesson"
           v-model:active-block-local-id="activeBlockLocalId"
           :struct-items="structItems"
           :is-read-only="isReadOnly"
+          @test-warning="handleTestWarning"
+          @open-task-collection="handleOpenTaskCollection"
         />
       </LoadingOverlay>
     </template>
@@ -569,7 +673,7 @@ onBeforeUnmount(() => {
     </template>
 
     <template #right>
-      <LoadingOverlay :loading="busy">
+      <LoadingOverlay :loading="isInitialLoading">
         <div
           v-if="isReadOnly"
           class="flex h-full flex-col items-center justify-center p-6 text-center text-(--ui-text-muted)"
@@ -588,6 +692,21 @@ onBeforeUnmount(() => {
             Выберите блок в центре.
           </div>
 
+          <!-- Упрощенная блокировка для заданий -->
+          <div
+            v-else-if="activeBlock.isTest"
+            class="block-settings-panel flex h-full flex-col items-center justify-center p-6 text-center"
+          >
+            <div class="mb-3 flex size-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400">
+              <UIcon name="i-lucide-lock" class="size-6" />
+            </div>
+            <p class="text-sm font-medium text-(--ui-text-highlighted) mb-2">Редактирование заблокировано</p>
+            <p class="text-xs text-(--ui-text-muted) leading-snug max-w-[240px]">
+              Редактировать задания можно только в разделе <NuxtLink @pointerdown.stop to="/teacher-tests" class="text-primary hover:underline font-semibold">Задания</NuxtLink>
+            </p>
+          </div>
+
+          <!-- Обычные настройки -->
           <BlocksSettingsPanel
             v-else
             model-name="lesson_blocks"
@@ -599,6 +718,63 @@ onBeforeUnmount(() => {
       </LoadingOverlay>
     </template>
   </ConstructPanels>
+
+  <!-- 1. Модалка предупреждения о создании задания -->
+  <UModal
+    v-model:open="isTestWarningOpen"
+    title="Информация!"
+    :ui="{ body: 'p-6', content: 'sm:max-w-md' }"
+    :close="false"
+    :dismissible="false"
+  >
+    <template #body>
+      <div class="flex items-center gap-3 mb-4">
+        <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-warning/10">
+          <UIcon name="i-lucide-triangle-alert" class="size-5 text-warning" />
+        </div>
+        <h3 class="text-lg font-semibold text-highlighted">Добавление задания</h3>
+      </div>
+
+      <div class="text-sm text-muted space-y-3 mb-6">
+        <p>Добавляя в урок шаблон задания вы создаете новое задание.</p>
+        <p>Оно будет доступно другим пользователям в их уроках, но они не смогут его редактировать.</p>
+        <p>Задание появится в базе данных, когда оно будет опубликовано хотя бы в одном уроке.</p>
+      </div>
+
+      <div class="flex items-center gap-2 mb-6">
+        <UCheckbox
+          v-model="rememberTestChoice"
+          label="Запомнить мой выбор на этом устройстве"
+        />
+      </div>
+
+      <div class="flex justify-end">
+        <UButton color="primary" @click="confirmTestWarning">
+          Я понял
+        </UButton>
+      </div>
+    </template>
+  </UModal>
+
+  <!-- 2. Модалка добавления задания из коллекции -->
+  <UModal
+    v-model:open="isTaskCollectionOpen"
+    title="Добавление задания из коллекции"
+    :ui="{
+      content: 'sm:max-w-3xl w-full transition-all duration-300 ease-in-out',
+      body: 'p-0 flex flex-col overflow-hidden'
+    }"
+  >
+    <template #body>
+      <!-- Оборачиваем в скроллируемый контейнер с ограничением по высоте и кастомным скроллом -->
+      <div :class="['max-h-[75vh] min-w-[600px] min-h-[300px]', modalScrollClasses]">
+        <TestsSearch
+          :selected-taxonomy-id="modalTaxId"
+          @select-test="onSelectTestFromCollection"
+        />
+      </div>
+    </template>
+  </UModal>
 </template>
 
 <style scoped>

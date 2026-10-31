@@ -289,12 +289,23 @@ function onUpdateChildNode(updatedNode: SettingNode) {
       <!-- Ответ ученика -->
       <div class="flex flex-col gap-2">
 
+
         <!-- Заголовок -->
-        <div v-if="answerTitleNode" class="pl-1 font-bold">
+        <div v-if="answerTitleNode" >
+          <!-- Режим редактирования -->
           <component
+            v-if="canEdit"
             :is="answerTitleContainer"
             :style="answerTitleStyle"
             v-inline-edit="titleBinding"
+          ></component>
+
+          <!-- Режим обучения (или редактирование запрещено) -->
+          <component
+            v-else
+            :is="answerTitleContainer"
+            :style="answerTitleStyle"
+            v-html="titleBinding.get()"
           ></component>
         </div>
         <div v-else class="pl-1">

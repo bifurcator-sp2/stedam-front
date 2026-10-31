@@ -3,6 +3,7 @@ import { computed, ref, onBeforeUnmount, onMounted, toRaw, provide } from 'vue'
 import { VueDraggable } from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
 import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
+import ReadOnlyWrapper from '~/components/Constructor/ReadOnlyWrapper.vue'
 import { useContentStats } from '~/composables/useContentStats'
 import type {
   LessonModel,
@@ -41,6 +42,8 @@ const lesson = defineModel<LessonModel>({ required: true })
 const emit = defineEmits<{
   (e: 'update:activeBlockLocalId', value: string | null): void
   (e: 'register-files', blockLocalId: string, inst: any): void
+  (e: 'test-warning', payload: { index: number, source: DraggedBlockSource }): void
+  (e: 'open-task-collection', index: number): void
 }>()
 
 // ==================== Провайд режима ====================
@@ -103,6 +106,9 @@ async function duplicateBlock(localId: string) {
   if (!original.blockId) return
   if (!lesson.value.id) return
 
+  // Запрещаем дублировать задания
+  if (original.isTest) return
+
   try {
     const res = await api.post<{ data: any } | any>(
       `/lessons/${lesson.value.id}/blocks`,
@@ -125,6 +131,7 @@ async function duplicateBlock(localId: string) {
       settings: fullSettings,
       images: data.images ?? [],
       files: data.files ?? [],
+      isTest: data.is_test ?? false,
     }
 
     const next = lesson.value.blocks.slice()
@@ -163,12 +170,29 @@ function moveBlockDown(localId: string) {
 
 const dragOverIndex = ref<number | null>(null)
 
-async function handleDropAtIndex(index: number, source: DraggedBlockSource | null) {
+async function handleDropAtIndex(index: number, source: DraggedBlockSource | null, force: boolean = false) {
   if (props.mode === 'learn' || props.isReadOnly) return
   if (!source) return
   if (!lesson.value.id) return
 
+  // Проверка на вызов коллекции заданий
+  if (source.isCollectionTask) {
+    emit('open-task-collection', index)
+    return
+  }
+
+  // Проверка на задание (если это не принудительное добавление)
+  if (source.block?.is_test && !force) {
+    const accepted = import.meta.client ? localStorage.getItem('lesson_test_warning_accepted') === 'true' : false
+    if (!accepted) {
+      emit('test-warning', { index, source })
+      return
+    }
+  }
+
   try {
+    if (!source.block) return
+
     const res = await api.post<{ data: any } | any>(
       `/lessons/${lesson.value.id}/blocks`,
       {
@@ -190,6 +214,7 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
       settings: fullSettings,
       images: data.images ?? [],
       files: data.files ?? [],
+      isTest: data.is_test ?? source.block.is_test ?? false,
     }
 
     const next = lesson.value.blocks.slice()
@@ -342,7 +367,7 @@ function onGlobalPointerDown(e: PointerEvent) {
   if (target.closest('[data-drop-zone]')) return
   if (target.closest('[data-block-action]')) return
   if (target.closest('.crop-modal-backdrop')) return
-
+  if (target.closest('.cursor-col-resize')) return
   if (target.closest('[role="dialog"]')) return
   if (target.closest('[role="listbox"]')) return
   if (target.closest('[role="menu"]')) return
@@ -374,7 +399,8 @@ function clearDragOver() {
 defineExpose({
   removeBlock,
   duplicateBlock,
-  contentRef, // <--- Экспорт DOM-контейнера для родителя
+  handleDropAtIndex, // Экспортируем для вызова из родителя
+  contentRef, // Экспорт DOM-контейнера для родителя
 })
 </script>
 
@@ -484,9 +510,27 @@ defineExpose({
               @move-down="moveBlockDown(block.localId)"
             >
               <div data-lesson-content-body>
+                <!-- Обертка для заданий -->
+                <ReadOnlyWrapper v-if="block.isTest">
+                  <BlockRenderer
+                    :code="block.blockTypeCode"
+                    :id="block.id"
+                    :is-test="block.isTest"
+                    mode="body"
+                    model-name="lesson_blocks"
+                    :initial-images="block.images ?? []"
+                    :show-to-delete-images="true"
+                    v-model:settings="block.settings"
+                    @register-files="onRegisterFiles(block, $event)"
+                  />
+                </ReadOnlyWrapper>
+
+                <!-- Обычные блоки -->
                 <BlockRenderer
+                  v-else
                   :code="block.blockTypeCode"
                   :id="block.id"
+                  :is-test="block.isTest"
                   mode="body"
                   model-name="lesson_blocks"
                   :initial-images="block.images ?? []"

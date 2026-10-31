@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import EducationComp from '~/components/Education/Education.vue'
-const title = 'Обучение'
-const description = 'Stedam обучение'
+import MakeTest from '~/components/Constructor/MakeTest.vue'
+const title = 'Создание / редактирование задания'
+const description = 'Stedam Создание / редактирование задания'
 
 definePageMeta({
   layout: 'main',
@@ -22,5 +22,5 @@ useSeoMeta({
 </script>
 
 <template>
-  <EducationComp />
+  <MakeTest />
 </template>

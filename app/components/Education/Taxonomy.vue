@@ -21,6 +21,8 @@ const emit = defineEmits<{
 }>()
 
 const api = useApi()
+const route = useRoute() // <--- ДОБАВЛЕНО
+const router = useRouter() // <--- ДОБАВЛЕНО
 
 // Фоллбэк-загрузка: если данные не переданы снаружи
 const { data: internalData, pending: internalPending, error: internalError, refresh: internalRefresh } = await useAsyncData<TaxonomyNode[]>(
@@ -36,6 +38,17 @@ const roots = computed(() => props.data ?? internalData.value ?? [])
 const pending = computed(() => props.pending !== undefined ? props.pending : internalPending.value)
 const error = computed(() => props.error !== undefined ? props.error : internalError.value)
 const refresh = () => props.refresh ? props.refresh() : internalRefresh()
+
+// ==================== Сброс фильтра по разделу ====================
+function clearTaxonomy() {
+  router.push({
+    query: {
+      ...route.query,
+      tax: undefined,
+      page: undefined // Сбрасываем страницу при сбросе раздела
+    }
+  })
+}
 
 // ==================== Избранное ====================
 const favorites = ref<Set<number>>(new Set())
@@ -137,7 +150,7 @@ const visibleRoots = computed(() => {
 
 <template>
   <div class="min-h-screen bg-slate-50 dark:bg-slate-950">
-    <div class="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-5xl px-1 py-2 sm:px-1 lg:px-2">
       <div class="relative mb-4">
         <UIcon name="i-lucide-search" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input v-model="search" type="text" placeholder="Поиск по предметам и темам..." class="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500 dark:focus:ring-indigo-900" />
@@ -156,6 +169,12 @@ const visibleRoots = computed(() => {
           <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800" @click="refresh">
             <UIcon name="i-lucide-refresh-cw" class="h-3.5 w-3.5" />
           </button>
+
+          <!-- НОВАЯ КНОПКА СБРОСА -->
+          <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 hover:text-red-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-red-400" title="Сбросить выбранный раздел" @click="clearTaxonomy">
+            <UIcon name="i-lucide-filter-x" class="h-3.5 w-3.5" />
+          </button>
+
           <button type="button" class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition" :class="showFavoritesOnly ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-600 dark:bg-amber-950/50 dark:text-amber-300' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'" @click="showFavoritesOnly = !showFavoritesOnly">
             <UIcon name="i-lucide-star" class="h-3.5 w-3.5" :class="showFavoritesOnly ? 'fill-amber-500 text-amber-500' : ''" />
             Избранное

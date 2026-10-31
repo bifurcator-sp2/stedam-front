@@ -11,11 +11,10 @@ const props = withDefaults(defineProps<{
   depth: 0,
 })
 
-// ==================== Аккордеон (состояние открытости) ====================
+// ==================== Аккордеон ====================
 
 const STORAGE_KEY = 'lesson_blocks_open_nodes'
 
-// Общий стейт для всех уровней вложенности
 const openNodes = useState<number[]>('lesson-blocks-open-nodes', () => {
   if (import.meta.client) {
     try {
@@ -43,12 +42,10 @@ function toggleType(id: number) {
 // ==================== Хелперы ====================
 
 function iconOfBlock(block: BlockStructBlock): string {
-  // 1. Приоритет — метаданные из реестра (приходят с бэка)
   if (block.block_type_icon && typeof block.block_type_icon === 'string') {
     return block.block_type_icon
   }
 
-  // 2. Fallback — ищем 'icon' в настройках блока
   const settings = block.settings as any
   if (settings && typeof settings === 'object') {
     const children = Array.isArray(settings.children)
@@ -123,6 +120,17 @@ function onBlockDragStart(e: DragEvent, type: BlockStructItem, block: BlockStruc
   e.dataTransfer.setData('text/plain', String(block.id))
 }
 
+// Обработчик перетаскивания для коллекции заданий
+function onCollectionTaskDragStart(e: DragEvent) {
+  if (!e.dataTransfer) return
+
+  const source = { isCollectionTask: true }
+  ;(window as any).__draggedBlockSource = source
+
+  e.dataTransfer.effectAllowed = 'copy'
+  e.dataTransfer.setData('text/plain', 'collection_task')
+}
+
 function onBlockDragEnd() {
   ;(window as any).__draggedBlockSource = null
 }
@@ -141,11 +149,9 @@ function onBlockDragEnd() {
         Пока ничего нет
       </div>
 
-      <div
-        v-else
-        class="flex flex-col gap-1.5"
-        :class="depth > 0 ? 'mt-1 ml-1 pl-3 border-l border-default' : 'p-2.5'"
-      >
+      <div v-else class="flex flex-col gap-1.5" :class="depth > 0 ? 'mt-1 ml-1 pl-3 border-l border-default' : 'p-2.5'">
+
+        <!-- Дерево блоков -->
         <div
           v-for="type in props.structItems"
           :key="type.id"
@@ -157,80 +163,35 @@ function onBlockDragEnd() {
           <button
             type="button"
             class="relative flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-(--ui-text) transition-colors hover:bg-(--ui-bg-muted)"
-            :class="openNodes.includes(type.id)
-              ? 'rounded-b-none border-b border-(--ui-border)'
-              : ''"
+            :class="openNodes.includes(type.id) ? 'rounded-b-none border-b border-(--ui-border)' : ''"
             @click="toggleType(type.id)"
             @mouseenter="showTooltip($event, type.description)"
             @mouseleave="hideTooltip"
           >
-            <!-- Иконка раскрытия (только если есть блоки или дети) -->
             <span
               class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-(--ui-text-muted) transition-[transform,color] duration-200"
               :class="openNodes.includes(type.id) ? 'rotate-90 text-(--ui-primary)' : ''"
             >
-              <UIcon
-                v-if="type.blocks?.length || type.children?.length"
-                name="i-lucide-chevron-right"
-                class="h-4 w-4"
-              />
+              <UIcon v-if="type.blocks?.length || type.children?.length" name="i-lucide-chevron-right" class="h-4 w-4" />
               <span v-else class="h-4 w-4" />
             </span>
-
-            <!-- Иконка папки/узла -->
-            <UIcon
-              name="i-lucide-folder-tree"
-              class="h-4 w-4 shrink-0 text-(--ui-text-muted)"
-              :class="openNodes.includes(type.id) ? '!text-(--ui-primary)' : ''"
-            />
-
-            <!-- Название -->
-            <span
-              class="relative min-w-0 flex-1 overflow-hidden font-medium whitespace-nowrap"
-              @mouseenter="onNameEnter(type.id, $event)"
-              @mouseleave="onNameLeave"
-            >
-              <span
-                class="struct-name__inner inline-block whitespace-nowrap transition-transform duration-300 ease-out will-change-transform"
-                :style="{
-                  transform: scrollingNameId === type.id
-                    ? `translateX(-${nameShift}px)`
-                    : 'translateX(0)',
-                }"
-              >
+            <UIcon name="i-lucide-folder-tree" class="h-4 w-4 shrink-0 text-(--ui-text-muted)" :class="openNodes.includes(type.id) ? '!text-(--ui-primary)' : ''" />
+            <span class="relative min-w-0 flex-1 overflow-hidden font-medium whitespace-nowrap" @mouseenter="onNameEnter(type.id, $event)" @mouseleave="onNameLeave">
+              <span class="struct-name__inner inline-block whitespace-nowrap transition-transform duration-300 ease-out will-change-transform" :style="{ transform: scrollingNameId === type.id ? `translateX(-${nameShift}px)` : 'translateX(0)' }">
                 {{ type.name }}
               </span>
             </span>
-
-            <!-- Бейдж с количеством -->
-            <span
-              class="inline-flex h-[18px] min-w-[22px] shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums"
-              :class="type.blocks_count === 0
-                ? 'text-(--ui-text-muted)'
-                : 'text-(--ui-primary)'"
-              :style="{
-                background: type.blocks_count === 0
-                  ? 'var(--ui-bg-muted)'
-                  : 'color-mix(in srgb, var(--ui-primary) 10%, transparent)',
-              }"
-            >
+            <span class="inline-flex h-[18px] min-w-[22px] shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums" :class="type.blocks_count === 0 ? 'text-(--ui-text-muted)' : 'text-(--ui-primary)'" :style="{ background: type.blocks_count === 0 ? 'var(--ui-bg-muted)' : 'color-mix(in srgb, var(--ui-primary) 10%, transparent)' }">
               {{ type.blocks_count }}
             </span>
           </button>
 
           <Transition name="struct-expand">
-            <div
-              v-if="openNodes.includes(type.id)"
-              class="flex flex-col gap-0.5 rounded-b-lg bg-(--ui-bg-elevated) p-1.5"
-            >
-              <div
-                v-if="!type.blocks?.length && !type.children?.length"
-                class="px-2 py-2.5 text-center text-xs text-(--ui-text-muted)"
-              >
+            <div v-if="openNodes.includes(type.id)" class="flex flex-col gap-0.5 rounded-b-lg bg-(--ui-bg-elevated) p-1.5">
+              <div v-if="!type.blocks?.length && !type.children?.length" class="px-2 py-2.5 text-center text-xs text-(--ui-text-muted)">
                 Пусто
               </div>
 
-              <!-- Блоки внутри текущего узла -->
               <template v-if="type.blocks?.length">
                 <div
                   v-for="block in type.blocks"
@@ -242,10 +203,7 @@ function onBlockDragEnd() {
                   @mouseenter="showTooltip($event, block.description)"
                   @mouseleave="hideTooltip"
                 >
-                  <UIcon
-                    :name="iconOfBlock(block)"
-                    class="h-3.5 w-3.5 shrink-0 text-(--ui-text-muted) group-hover:text-(--ui-primary)"
-                  />
+                  <UIcon :name="iconOfBlock(block)" class="h-3.5 w-3.5 shrink-0 text-(--ui-text-muted) group-hover:text-(--ui-primary)" />
                   <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
                     {{ block.title || `Блок №${block.id}` }}
                   </span>
@@ -255,27 +213,29 @@ function onBlockDragEnd() {
                 </div>
               </template>
 
-              <!-- Рекурсивный рендеринг дочерних узлов -->
-              <LessonBlocksIndex
-                v-if="type.children?.length"
-                :struct-items="type.children"
-                :depth="props.depth + 1"
-              />
+              <LessonBlocksIndex v-if="type.children?.length" :struct-items="type.children" :depth="props.depth + 1" />
             </div>
           </Transition>
+        </div>
+
+        <!-- НОВОЕ: Кнопка добавления задания из коллекции (последний пункт, только для корня) -->
+        <div
+          v-if="props.depth === 0"
+          draggable="true"
+          class="mt-2 flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-primary/40 bg-primary/5 px-3 py-2.5 text-[13px] font-medium text-primary cursor-grab transition-colors hover:bg-primary/10 active:cursor-grabbing select-none"
+          @dragstart="onCollectionTaskDragStart"
+          @dragend="onBlockDragEnd"
+        >
+          <UIcon name="i-lucide-package-plus" class="size-4 shrink-0" />
+          <span>Добавить задание из коллекции</span>
         </div>
       </div>
     </LoadingOverlay>
   </div>
 
-  <!-- Тултип -->
   <Teleport to="body">
     <Transition name="struct-tooltip-fade">
-      <div
-        v-if="tooltip.visible"
-        class="pointer-events-none fixed z-[9999] max-w-[260px] min-w-[80px] -translate-x-1/2 -translate-y-full rounded-md bg-gray-900/95 px-2.5 py-1.5 text-center text-[11px] leading-snug font-normal text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)]"
-        :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }"
-      >
+      <div v-if="tooltip.visible" class="pointer-events-none fixed z-[9999] max-w-[260px] min-w-[80px] -translate-x-1/2 -translate-y-full rounded-md bg-gray-900/95 px-2.5 py-1.5 text-center text-[11px] leading-snug font-normal text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)]" :style="{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }">
         {{ tooltip.text }}
         <span class="absolute top-full left-1/2 -translate-x-1/2 border-[5px] border-transparent border-t-gray-900/95" />
       </div>

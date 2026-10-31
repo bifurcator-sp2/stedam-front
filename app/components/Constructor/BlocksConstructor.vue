@@ -24,6 +24,7 @@ interface BlockItem {
   settings: SettingNode | null
   parent_block_index_ids: number[] | null
   published: boolean
+  is_test: boolean
 }
 
 interface BlockResource {
@@ -32,6 +33,7 @@ interface BlockResource {
   title: string | null
   description: string | null
   settings: SettingNode | null
+  is_test?: boolean | null
   created_at: string
   updated_at: string
 }
@@ -103,6 +105,7 @@ async function createBlockFromType(type: BlockType): Promise<BlockItem> {
     settings,
     parent_block_index_ids: [],
     published: false,
+    is_test: template?.is_test ?? false,
   }
 }
 
@@ -231,6 +234,7 @@ watch(
         settings: block.settings ?? null,
         parent_block_index_ids: block.parent_block_index_ids ?? [],
         published: block.published ?? false,
+        is_test: block.is_test ?? false,
       }
     } catch (e) {
       console.error('[load block by id] failed', e)
@@ -300,6 +304,7 @@ async function save() {
       settings:      block.settings,
       parent_block_index_ids: block.parent_block_index_ids ?? [],
       published:     block.published,
+      is_test:       block.is_test,
     }
 
     const res = isUpdate
@@ -315,6 +320,7 @@ async function save() {
       title:       saved.title ?? block.title,
       description: saved.description ?? '',
       settings:    saved.settings ?? null,
+      is_test:     saved.is_test ?? block.is_test,
     }
 
     router.replace({
@@ -356,14 +362,14 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
     :show-viewport-picker="!!editingBlock"
   >
     <template #left>
-      <div class="palette-list">
+      <div class="flex flex-col gap-1.5 p-3">
         <div
-          class="palette-item"
-          :class="{ 'palette-item-active': !listTypeCode && !editingBlock }"
+          class="flex items-center gap-1.5 p-1 rounded-md border border-default bg-elevated text-[13px] text-default transition-colors hover:border-primary hover:bg-default"
+          :class="{ 'border-primary bg-default shadow-[inset_0_0_0_2px_var(--ui-primary,#3b82f6)]': !listTypeCode && !editingBlock }"
         >
           <button
             type="button"
-            class="palette-name"
+            class="flex-1 min-w-0 inline-flex items-center gap-2.5 px-2 py-1.5 border-none bg-transparent text-left text-[13px] text-inherit cursor-pointer rounded-[5px] transition-colors hover:bg-primary/10 active:bg-primary/20"
             @click.stop="showAllBlocks"
           >
             <UIcon name="i-lucide-list" class="w-4 h-4 shrink-0" />
@@ -371,8 +377,8 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
           </button>
         </div>
 
-        <div v-if="pending" class="empty-state">Загрузка…</div>
-        <div v-else-if="error" class="empty-state">
+        <div v-if="pending" class="p-8 text-center text-[13px] text-muted">Загрузка…</div>
+        <div v-else-if="error" class="p-8 text-center text-[13px] text-muted">
           Не удалось загрузить типы блоков
         </div>
 
@@ -380,13 +386,13 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
           <div
             v-for="type in blockTypes ?? []"
             :key="type.code"
-            class="palette-item"
-            :class="{ 'palette-item-active': listTypeCode === type.code && !editingBlock }"
+            class="flex items-center gap-1.5 p-1 rounded-md border border-default bg-elevated text-[13px] text-default transition-colors hover:border-primary hover:bg-default"
+            :class="{ 'border-primary bg-default shadow-[inset_0_0_0_2px_var(--ui-primary,#3b82f6)]': listTypeCode === type.code && !editingBlock }"
             :title="type.description ?? type.name"
           >
             <button
               type="button"
-              class="palette-add"
+              class="shrink-0 inline-flex items-center justify-center size-[26px] rounded-[5px] border border-default bg-default text-default cursor-pointer transition-colors hover:border-primary hover:bg-primary hover:text-white active:translate-y-px"
               :aria-label="`Добавить блок «${type.name}»`"
               @click.stop="addBlock(type)"
             >
@@ -395,7 +401,7 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
 
             <button
               type="button"
-              class="palette-name"
+              class="flex-1 min-w-0 inline-flex items-center gap-2.5 px-2 py-1.5 border-none bg-transparent text-left text-[13px] text-inherit cursor-pointer rounded-[5px] transition-colors hover:bg-primary/10 active:bg-primary/20"
               @click.stop="openTypeList(type.code)"
             >
               <UIcon :name="iconOf(type)" class="w-4 h-4 shrink-0" />
@@ -407,14 +413,12 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
     </template>
 
     <template #main-header>
-      <div class="main-header-inner">
+      <div class="flex items-center gap-2 min-w-0">
         <span>{{ centerTitle }}</span>
-
       </div>
     </template>
 
     <template #main>
-
       <template v-if="editingBlock">
         <LoadingOverlay :loading="saving">
           <component
@@ -422,37 +426,38 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
             :is="resolveBlockComponent(editingBlock.code)"
             :key="`${editingBlock.id}-${editingBlock.code}-${blockKey}`"
             :mode="'body'"
+            :is-test="editingBlock.is_test"
             v-model="editingBlock.settings"
             :id="editingBlock.id || 0"
             :show-to-delete-images="true"
           />
-          <div v-else class="empty-state">
+          <div v-else class="p-8 text-center text-[13px] text-muted">
             Компонент «{{ editingBlock.code }}» не найден
           </div>
         </LoadingOverlay>
       </template>
 
       <template v-else>
-        <div v-if="listLoading" class="empty-state">Загрузка…</div>
+        <div v-if="listLoading" class="p-8 text-center text-[13px] text-muted">Загрузка…</div>
 
-        <div v-else-if="listError" class="empty-state">
+        <div v-else-if="listError" class="p-8 text-center text-[13px] text-muted">
           {{ listError }}
         </div>
 
         <div
           v-else-if="!blocksPage || blocksPage.data.length === 0"
-          class="empty-state"
+          class="p-8 text-center text-[13px] text-muted"
         >
           {{ listTypeCode ? 'Блоков этого типа пока нет' : 'Блоков пока нет' }}
         </div>
 
         <template v-else>
-          <div class="blocks-list">
+          <div class="flex flex-col gap-2 p-4 max-w-2xl mx-auto">
             <button
               v-for="item in blocksPage.data"
               :key="item.id"
               type="button"
-              class="block-card"
+              class="flex items-center gap-3 px-3.5 py-3 rounded-lg border border-default bg-default text-left cursor-pointer transition-colors hover:border-primary hover:shadow-sm"
               @click="openBlock(item.id)"
             >
               <UIcon
@@ -460,23 +465,30 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
                 class="size-16 shrink-0 text-muted"
               />
 
-              <div class="block-card-main">
-                <div class="block-card-title">
+              <div class="flex-1 min-w-0 flex flex-col gap-1">
+                <div class="text-sm font-medium text-highlighted truncate">
                   {{ item.title || item.name || `Блок №${item.id}` }}
                 </div>
-                <div v-if="item.description" class="block-card-desc">
+                <div v-if="item.description" class="text-xs text-muted truncate">
                   {{ item.description }}
                 </div>
-                <div class="block-card-meta">
-                  <span v-if="item.code" class="block-card-chip">{{ item.code }}</span>
-                  <span class="block-card-id">#{{ item.id }}</span>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span v-if="item.code" class="inline-flex items-center px-2 py-px rounded-full bg-elevated text-[11px] font-medium text-muted">
+                    {{ item.code }}
+                  </span>
+                  <span v-if="item.is_test" class="inline-flex items-center px-2 py-px rounded-full bg-warning/20 text-[11px] font-medium text-warning">
+                    задание
+                  </span>
+                  <span class="font-mono text-[11px] text-muted/70">
+                    #{{ item.id }}
+                  </span>
                 </div>
               </div>
-              <UIcon name="i-lucide-chevron-right" class="block-card-arrow" />
+              <UIcon name="i-lucide-chevron-right" class="shrink-0 text-muted" />
             </button>
           </div>
 
-          <div v-if="blocksPage.meta.last_page > 1" class="pagination">
+          <div v-if="blocksPage.meta.last_page > 1" class="flex items-center justify-center gap-3 px-3 pt-4 pb-6">
             <UButton
               icon="i-lucide-chevron-left"
               size="xs"
@@ -488,7 +500,7 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
               Назад
             </UButton>
 
-            <span class="pagination-info">
+            <span class="text-xs text-muted min-w-[60px] text-center">
               {{ blocksPage.meta.current_page }} / {{ blocksPage.meta.last_page }}
             </span>
 
@@ -524,7 +536,7 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
 
     <template #right>
       <LoadingOverlay :loading="saving">
-        <div v-if="!editingBlock" class="empty-state">
+        <div v-if="!editingBlock" class="p-8 text-center text-[13px] text-muted">
           Выберите блок в центре.
         </div>
 
@@ -534,6 +546,7 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
           v-model:id="editingBlock.id"
           v-model:title="editingBlock.title"
           v-model:description="editingBlock.description"
+          v-model:is-test="editingBlock.is_test"
           v-model:settings="editingBlock.settings"
           v-model:parent_block_index_ids="editingBlock.parent_block_index_ids"
           v-model:published="editingBlock.published"
@@ -542,197 +555,3 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
     </template>
   </ConstructPanels>
 </template>
-
-<style scoped>
-/* ... стили не меняются, оставляем как было ... */
-.main-header-inner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.palette-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-}
-
-.palette-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border-radius: 6px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg-elevated, #f9fafb);
-  font-size: 13px;
-  color: var(--ui-text, #111827);
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.palette-item:hover {
-  border-color: var(--ui-primary, #3b82f6);
-  background: var(--ui-bg, #ffffff);
-}
-
-.palette-item-active {
-  border-color: var(--ui-primary, #3b82f6);
-  background: var(--ui-bg, #ffffff);
-  box-shadow: 0 0 0 2px var(--ui-primary, #3b82f6) inset;
-}
-
-.palette-add {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-  color: var(--ui-text, #111827);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-}
-
-.palette-add:hover {
-  border-color: var(--ui-primary, #3b82f6);
-  background: var(--ui-primary, #3b82f6);
-  color: #ffffff;
-}
-
-.palette-add:active {
-  transform: translateY(1px);
-}
-
-.palette-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  border: none;
-  background: transparent;
-  text-align: left;
-  font-size: 13px;
-  color: inherit;
-  cursor: pointer;
-  border-radius: 5px;
-  transition: background 0.15s;
-}
-
-.palette-name:hover {
-  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.08));
-}
-
-.palette-name:active {
-  background: var(--ui-bg-muted, rgba(59, 130, 246, 0.14));
-}
-
-.blocks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  max-width: 720px;
-  margin: 0 auto;
-}
-
-.block-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--ui-border, #e5e7eb);
-  background: var(--ui-bg, #ffffff);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-}
-
-.block-card:hover {
-  border-color: var(--ui-primary, #3b82f6);
-  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.08);
-}
-
-.block-card-main {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.block-card-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--ui-text, #111827);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.block-card-desc {
-  font-size: 12px;
-  color: var(--ui-text-muted, #6b7280);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.block-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.block-card-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: var(--ui-bg-muted, rgba(107, 114, 128, 0.12));
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--ui-text-muted, #6b7280);
-}
-
-.block-card-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.block-card-arrow {
-  flex-shrink: 0;
-  color: var(--ui-text-muted, #9ca3af);
-}
-
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 16px 12px 24px;
-}
-
-.pagination-info {
-  font-size: 12px;
-  color: var(--ui-text-muted, #6b7280);
-  min-width: 60px;
-  text-align: center;
-}
-
-.empty-state {
-  padding: 32px 16px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--ui-text-muted, #9ca3af);
-}
-</style>

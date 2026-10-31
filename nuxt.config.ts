@@ -73,16 +73,20 @@ export default defineNuxtConfig({
 
   vite: {
     build: {
-      target: ['safari18', 'ios18'],
-      rolldownOptions: {
-        output: {
-          codeSplitting: false, // Отключает разделение кода на чанки
-        },
-      },
+      target: ['es2022'],
     },
     define: {
       __VUE_PROD_DEVTOOLS__: 'true'
-    }
+    },
+    $client: { // Важно: настройки для клиентского бандла
+      build: {
+        rolldownOptions: {
+          output: {
+            codeSplitting: false, // Отключает разделение на чанки
+          },
+        },
+      },
+    },
   },
 
   ssr: false,

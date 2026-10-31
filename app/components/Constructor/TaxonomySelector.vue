@@ -74,9 +74,7 @@ async function load() {
 
 onMounted(async () => {
   await load()
-  // Даём родителю один цикл рендера, чтобы v-model гарантированно привязался
   await nextTick()
-  // Открываем только если мы в режиме редактирования и ничего не выбрано
   if (lessonMode.value === 'edit' && !model.value?.length) {
     internalOpen.value = true
   }
@@ -108,7 +106,13 @@ const flatNodes = computed<FlatNode[]>(() => {
 
 const byId = computed(() => new Map(flatNodes.value.map((n) => [n.id, n])))
 const selectedIds = computed(() => model.value ?? [])
-const selectedNode = computed(() => selectedIds.value.length ? byId.value.get(selectedIds.value[0]) : null)
+
+// Возвращаем массив выбранных узлов (на будущее, если будет мультивыбор)
+const selectedNodes = computed(() => {
+  return selectedIds.value
+    .map(id => byId.value.get(id))
+    .filter((n): n is FlatNode => Boolean(n))
+})
 
 const filteredNodes = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -122,15 +126,12 @@ const filteredNodes = computed(() => {
 // Действия
 // ============================================================
 
-// Проверка: является ли узел листом (нет дочерних элементов)
 function isLeaf(node: TaxonomyNode): boolean {
   return !node.children || node.children.length === 0
 }
 
 function select(node: TaxonomyNode) {
-  // Защита: выбирать можно только листья
   if (!isLeaf(node)) return
-
   model.value = [node.id]
   internalOpen.value = false
 }
@@ -141,34 +142,40 @@ function clear() {
 </script>
 
 <template>
-  <!-- В режиме learn (ученик) показываем только статичный бейдж, без поповера -->
+  <!-- В режиме learn (ученик) -->
   <div
     v-if="lessonMode === 'learn'"
-    class="flex items-center gap-1.5 rounded-md border border-default bg-elevated px-2 py-1 text-[12px] font-medium text-highlighted"
+    class="flex items-start gap-1.5 rounded-md border border-default bg-elevated px-2 py-1 text-[12px] font-medium text-highlighted w-full"
   >
-    <UIcon name="i-lucide-folder-tree" class="size-3.5 text-primary/70" />
-    <span class="max-w-[150px] truncate">{{ selectedNode?.title || 'Без раздела' }}</span>
+    <UIcon name="i-lucide-folder-tree" class="size-3.5 shrink-0 text-primary/70 mt-[2px]" />
+    <div v-if="selectedNodes.length" class="flex-1 min-w-0 flex flex-col gap-0.5">
+      <span v-for="node in selectedNodes" :key="node.id" class="break-words leading-tight">{{ node.title || 'Без раздела' }}</span>
+    </div>
+    <span v-else class="flex-1 min-w-0">Без раздела</span>
   </div>
 
-  <!-- В режиме edit (редактор) показываем полноценный UPovover -->
+  <!-- В режиме edit (редактор) -->
   <UPopover
     v-else
     v-model:open="isOpen"
+    class="w-full"
     :content="{ side: 'bottom', align: 'end', sideOffset: 8 }"
   >
     <!-- Триггер (бейдж) -->
     <template #default>
-      <!-- Если раздел выбран: обычный бейдж -->
+      <!-- Если раздел выбран -->
       <div
-        v-if="selectedNode"
-        class="flex items-center gap-1.5 rounded-md border border-default bg-elevated px-2 py-1 text-[12px] font-medium text-highlighted cursor-pointer hover:bg-elevated/80 transition-colors"
+        v-if="selectedNodes.length"
+        class="flex items-start gap-1.5 rounded-md border border-default bg-elevated px-2 py-1 text-[12px] font-medium text-highlighted cursor-pointer hover:bg-elevated/80 transition-colors w-full"
         title="Изменить раздел"
       >
-        <UIcon name="i-lucide-folder-tree" class="size-3.5 text-primary/70" />
-        <span class="max-w-[150px] truncate">{{ selectedNode.title || 'Без названия' }}</span>
+        <UIcon name="i-lucide-folder-tree" class="size-3.5 shrink-0 text-primary/70 mt-[2px]" />
+        <div class="flex-1 min-w-0 flex flex-col gap-0.5">
+          <span v-for="node in selectedNodes" :key="node.id" class="break-words leading-tight">{{ node.title || 'Без названия' }}</span>
+        </div>
         <button
           type="button"
-          class="text-muted hover:text-error ml-0.5 transition-colors"
+          class="shrink-0 mt-[2px] text-muted hover:text-error transition-colors"
           @click.stop="clear"
         >
           <UIcon name="i-lucide-x" class="size-3.5" />
@@ -178,10 +185,10 @@ function clear() {
       <!-- Если раздел не выбран: красный пульсирующий бейдж -->
       <div
         v-else
-        class="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[12px] font-medium text-red-600 cursor-pointer animate-pulse"
+        class="flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-[12px] font-medium text-red-600 cursor-pointer animate-pulse w-full"
         title="Необходимо выбрать раздел"
       >
-        <UIcon name="i-lucide-alert-circle" class="size-3.5" />
+        <UIcon name="i-lucide-alert-circle" class="size-3.5 shrink-0" />
         <span>Выберите раздел</span>
       </div>
     </template>
@@ -189,7 +196,6 @@ function clear() {
     <!-- Выпадающий список -->
     <template #content>
       <div class="flex max-h-[320px] w-[320px] flex-col">
-        <!-- Поиск -->
         <div class="shrink-0 border-b border-default p-2">
           <UInput
             v-model="search"
@@ -200,7 +206,6 @@ function clear() {
           />
         </div>
 
-        <!-- Список -->
         <div class="min-h-0 flex-1 overflow-y-auto p-1">
           <LoadingOverlay :loading="loading">
             <div v-if="error" class="p-3 text-center text-[11px] text-error">
@@ -222,15 +227,12 @@ function clear() {
               }"
               @click="select(node)"
             >
-              <!-- Чекбокс: рисуем ТОЛЬКО для листьев -->
               <UIcon
                 v-if="isLeaf(node)"
                 :name="selectedIds.includes(node.id) ? 'i-lucide-check-square' : 'i-lucide-square'"
                 class="mt-0.5 size-3.5 shrink-0"
                 :class="selectedIds.includes(node.id) ? 'text-primary' : 'text-muted'"
               />
-
-              <!-- Иконка папки для родительских узлов (чтобы текст не прыгал) -->
               <UIcon
                 v-else
                 name="i-lucide-folder"
@@ -239,12 +241,12 @@ function clear() {
 
               <div class="min-w-0 flex-1">
                 <div
-                  class="truncate text-[12px] font-medium"
+                  class="text-[12px] font-medium leading-tight break-words"
                   :class="isLeaf(node) ? 'text-highlighted' : 'text-muted'"
                 >
                   {{ node.title || '—' }}
                 </div>
-                <div class="truncate font-mono text-[10px] text-muted/70">
+                <div class="font-mono text-[10px] text-muted/70 break-words leading-tight mt-0.5">
                   {{ node.path }}
                 </div>
               </div>

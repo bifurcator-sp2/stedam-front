@@ -1,4 +1,4 @@
-<!-- app/components/Constructor/Education.vue -->
+<!-- app/components/Constructor/TeacherLessons.vue -->
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
@@ -36,6 +36,7 @@ function onBreadcrumbOpen(id: number) {
 function createLesson() {
   const query: Record<string, string> = {}
   const tax = selectedTaxonomyId.value
+  // Если выбран валидный tax, прокидываем его в конструктор
   if (tax !== null && Number.isFinite(tax) && tax > 0) {
     query.tax = String(tax)
   }
@@ -60,6 +61,7 @@ function handleGlobalClick(event: MouseEvent) {
   const target = event.target as HTMLElement
   if (!target || !target.closest) return
 
+  if (target.closest('.cursor-col-resize')) return
   if (target.closest('.right-panel-content')) return
   if (target.closest('.lesson-card')) return
 
@@ -73,30 +75,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleGlobalClick)
 })
-
-
-// ==================== Валидность выбранного раздела ====================
-
-function findNodeById(nodes: any[], id: number): any | null {
-  for (const n of nodes) {
-    if (n.id === id) return n
-    if (n.children?.length) {
-      const found = findNodeById(n.children, id)
-      if (found) return found
-    }
-  }
-  return null
-}
-
-/** ?tax валиден, если узел существует и у него нет детей (лист) */
-const isSelectedTaxLeaf = computed<boolean>(() => {
-  const id = selectedTaxonomyId.value
-  if (id === null || !Number.isFinite(id) || id <= 0) return false
-  if (!taxonomyData.value?.length) return false
-  const node = findNodeById(taxonomyData.value, id)
-  if (!node) return false
-  return !node.children || node.children.length === 0
-})
 </script>
 
 <template>
@@ -104,13 +82,13 @@ const isSelectedTaxLeaf = computed<boolean>(() => {
     left-title="Программы обучения"
     main-title="Ваши уроки"
     right-title="Просмотр урока"
-    defaultLeftWidth="400"
-    maxLeftWidth="800"
-    minLeftWidth="300"
+    :defaultLeftWidth="450"
+    :maxLeftWidth="800"
+    :minLeftWidth="350"
 
-    defaultRightWidth="400"
-    maxRightWidth="600"
-    minRightWidth="300"
+    :defaultRightWidth="400"
+    :maxRightWidth="800"
+    :minRightWidth="300"
 
     :displayRight="true"
     :displayViewportSelector="false"
@@ -124,24 +102,22 @@ const isSelectedTaxLeaf = computed<boolean>(() => {
         @select="onTaxonomySelect"
       />
     </template>
+
     <template #main-header-right>
+      <!-- Убрали disabled и title, кнопка всегда активна -->
       <UButton
         icon="i-lucide-plus"
         size="sm"
         color="primary"
         variant="solid"
         class="normal-case tracking-normal font-semibold shadow-sm hover:shadow-md transition-all duration-200"
-        :disabled="!isSelectedTaxLeaf"
-        :title="isSelectedTaxLeaf
-      ? 'Создать урок в выбранном разделе'
-      : 'Выберите конечный раздел в дереве слева'"
         @click="createLesson"
       >
         Создать урок
       </UButton>
     </template>
+
     <template #main>
-      <!-- Передаем только существующие переменные -->
       <EducationLessonsSearch
         :selected-taxonomy-id="selectedTaxonomyId"
         :taxonomy-data="taxonomyData"

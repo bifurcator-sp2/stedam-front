@@ -10,6 +10,7 @@ interface Props {
   defaultViewportWidth?: number | null
   viewportStorageKey?: string
   showViewportPicker?: boolean
+  displayLeft?: boolean
   displayRight?: boolean
   displayViewportSelector?: boolean
   minLeftWidth?: number
@@ -27,6 +28,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultViewportWidth: 834,
   viewportStorageKey: 'constructor:viewport-width',
   showViewportPicker: true,
+  displayLeft: true,
   displayRight: true,
   displayViewportSelector: true,
   minLeftWidth: 180,
@@ -73,12 +75,16 @@ function onPointerMove(e: PointerEvent) {
   const winW = window.innerWidth
 
   if (resizing.value === 'left') {
-    const maxByWindow = winW - rightWidth.value - 4 - 4 - props.minRightWidth - 200
+    // Если правая панель скрыта, левая может растягиваться дальше
+    const rightSpace = props.displayRight ? rightWidth.value + 4 + 4 + props.minRightWidth + 200 : 0
+    const maxByWindow = winW - rightSpace
     const max = Math.max(props.minLeftWidth, Math.min(props.maxLeftWidth, maxByWindow))
 
     leftWidth.value = clamp(e.clientX - startOffset, props.minLeftWidth, max)
   } else {
-    const maxByWindow = winW - leftWidth.value - 4 - 4 - props.minLeftWidth - 200
+    // Если левая панель скрыта, правая может растягиваться дальше
+    const leftSpace = props.displayLeft ? leftWidth.value + 4 + 4 + props.minLeftWidth + 200 : 0
+    const maxByWindow = winW - leftSpace
     const max = Math.max(props.minRightWidth, Math.min(props.maxRightWidth, maxByWindow))
 
     rightWidth.value = clamp(winW - e.clientX - startOffset, props.minRightWidth, max)
@@ -110,13 +116,12 @@ onBeforeUnmount(() => {
 })
 
 const gridStyle = computed(() => {
-  if (!props.displayRight) {
-    return {
-      gridTemplateColumns: `${leftWidth.value}px 4px 1fr`,
-    }
-  }
+  // Гибкая сборка колонок в зависимости от видимости панелей
+  const leftCols = props.displayLeft ? `${leftWidth.value}px 4px ` : ''
+  const rightCols = props.displayRight ? ` 4px ${rightWidth.value}px` : ''
+
   return {
-    gridTemplateColumns: `${leftWidth.value}px 4px 1fr 4px ${rightWidth.value}px`,
+    gridTemplateColumns: `${leftCols}1fr${rightCols}`,
   }
 })
 
@@ -246,7 +251,7 @@ const panelScrollClasses =
   "[&::-webkit-scrollbar-track]:bg-transparent " +
   // WebKit (ползунок)
   "[&::-webkit-scrollbar-thumb]:bg-transparent " +
-  "[&::-webkit-scrollbar-thumb]:rounded-full " + // <- Закругление краев плашки
+  "[&::-webkit-scrollbar-thumb]:rounded-full " +
   "hover:[&::-webkit-scrollbar-thumb]:bg-[var(--ui-border,#e5e7eb)] " +
   "[&::-webkit-scrollbar-thumb:hover]:bg-[var(--ui-text-muted,#9ca3af)]"
 
@@ -266,7 +271,7 @@ defineExpose({
   <div class="w-full h-dvh overflow-hidden bg-[var(--ui-bg,#ffffff)]">
     <div class="grid h-full w-full" :style="gridStyle">
       <!-- === ЛЕВАЯ ПАНЕЛЬ === -->
-      <aside class="flex flex-col min-w-0 min-h-0 overflow-hidden border-r border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)]">
+      <aside v-if="props.displayLeft" class="flex flex-col min-w-0 min-h-0 overflow-hidden border-r border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)]">
         <header class="shrink-0 h-12 px-4 flex items-center text-xs font-semibold text-[var(--ui-text-muted,#6b7280)] uppercase tracking-wider border-b border-[var(--ui-border,#e5e7eb)]">
           <div class="flex items-center justify-between w-full gap-2">
             <slot name="left-header">
@@ -281,6 +286,7 @@ defineExpose({
 
       <!-- === ЛЕВЫЙ РЕСАЙЗЕР === -->
       <div
+        v-if="props.displayLeft"
         class="group relative w-1 cursor-col-resize bg-transparent flex items-center justify-center transition-colors select-none touch-none hover:bg-[var(--ui-primary,#3b82f6)] before:absolute before:inset-y-0 before:-left-1 before:-right-1 before:cursor-col-resize before:z-[1] before:content-['']"
         :class="{ 'bg-[var(--ui-primary,#3b82f6)]': resizing === 'left' }"
         @pointerdown="startResize('left', $event)"

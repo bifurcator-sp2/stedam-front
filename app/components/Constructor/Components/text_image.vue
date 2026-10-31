@@ -8,11 +8,13 @@ const value = defineModel<SettingNode | null>({default: null})
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
   id?: number
+  isTest?: boolean
   allowDragAndDrop?: boolean
   showToDeleteImages?: boolean
   initialImages?: any[]
   modelName?: string | null
 }>(), {
+  isTest: false,
   allowDragAndDrop: true,
   showToDeleteImages: false,
   initialImages: () => [],
@@ -81,10 +83,6 @@ const visibleBlocks = computed(() => {
 })
 
 // ==================== Тест ====================
-
-const isTestEnabled = computed(() => {
-  return layoutChildren.value.find((c: any) => c.key === 'isTest')?.default === true
-})
 
 const testNode = computed(() => {
   // Ищем test внутри content-blocks
@@ -248,7 +246,30 @@ function getActiveChild(block: any): SettingNode | null {
 
 function getGalleryNode(block: any): SettingNode | null {
   const galleryWrapper = block.children?.find((c: any) => c.key === 'gallery')
-  return galleryWrapper?.children?.find((c: any) => c.type === 'image') ?? null
+  if (!galleryWrapper?.children) return null
+
+  // Ищем все узлы, которые являются галереями (gallery1, gallery2, etc.)
+  // Добавили проверку по ключу, так как gallery2 может не иметь поля type: 'image'
+  const imageNodes = galleryWrapper.children.filter((c: any) =>
+    c.type === 'image' || c.key.startsWith('gallery') || c.params?.purpose?.startsWith('gallery')
+  )
+
+  if (!imageNodes.length) return null
+
+  // 1. Приоритет — ищем галерею, в которой реально есть загруженные картинки
+  const withImages = imageNodes.find((c: any) => Array.isArray(c.default) && c.default.length > 0)
+  if (withImages) return withImages
+
+  // 2. Если пусто везде, пытаемся сопоставить номер блока и галереи (block2 -> gallery2)
+  const blockIndexMatch = block.key.match(/\d+$/)
+  if (blockIndexMatch) {
+    const index = blockIndexMatch[0]
+    const matchedGallery = imageNodes.find((c: any) => c.key.endsWith(index))
+    if (matchedGallery) return matchedGallery
+  }
+
+  // 3. Фолбэк — берем первую попавшуюся
+  return imageNodes[0]
 }
 
 function getChildPath(block: any, blockIndex: number) {
@@ -320,8 +341,10 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
 
   <div v-else class="text-image-root min-h-[200px] w-full">
     <div :style="[layoutMarginStyle]">
+      <!-- ОБЩИЙ КОНТЕЙНЕР МАТЕРИАЛА И ЗАДАНИЯ -->
+      <div :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle]">
       <div
-        :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle, layoutContainerStyle]"
+        :style="[layoutContainerStyle]"
         :class="layoutClass"
       >
         <template v-for="(block, index) in visibleBlocks" :key="block.key">
@@ -353,7 +376,7 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
 
       <!-- БЛОК ТЕСТА -->
       <div
-        v-if="isTestEnabled && testNode && getContentComponent('test')"
+        v-if="props.isTest && testNode && getContentComponent('test')"
         class="w-full mt-4"
       >
         <component
@@ -365,6 +388,8 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
           @update="onUpdateTestNode"
         />
       </div>
+      </div>
+
     </div>
   </div>
 </template>

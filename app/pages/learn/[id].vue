@@ -68,6 +68,7 @@ watch(
       settings: b.settings,
       images: b.images || [],
       files: b.files || [],
+      isTest: b.is_test ?? false,
     }))
 
     lessonModel.value = {
