@@ -8,7 +8,7 @@ import { useSanitize } from '~/composables/useSanitize'
 interface SettingItem {
   key: string
   label: string
-  type: 'string' | 'select' | 'content-type' | 'layout' | 'int' | 'color' | 'bool' | 'icon' | 'image' | 'multiselect'
+  type: 'string' | 'select' | 'content-type' | 'layout' | 'int' | 'float' | 'color' | 'bool' | 'icon' | 'image' | 'multiselect'
   default?: any
   allowed?: any[]
   purpose?: string
@@ -97,6 +97,7 @@ const typeIcon = computed(() => {
     case 'content-type': return 'i-lucide-list'
     case 'layout': return 'i-lucide-layout'
     case 'int':    return 'i-lucide-hash'
+    case 'float':  return 'i-lucide-decimal'
     case 'color':  return 'i-lucide-palette'
     case 'bool':   return 'i-lucide-toggle-left'
     case 'icon':   return 'i-lucide-smile'
@@ -538,7 +539,7 @@ function updateParam(index: number, updated: SettingItem) {
     </template>
 
     <!-- ============ GRID TYPES ============ -->
-    <template v-else-if="['select', 'content-type', 'layout', 'color', 'int', 'bool', 'multiselect'].includes(model.type)">
+    <template v-else-if="['select', 'content-type', 'layout', 'color', 'int', 'float', 'bool', 'multiselect'].includes(model.type)">
       <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] items-center gap-2.5 rounded-md py-0.5 transition hover:bg-muted/40">
         <span class="flex min-w-0 items-center gap-1.5 pl-0.5">
           <span
@@ -588,6 +589,14 @@ function updateParam(index: number, updated: SettingItem) {
           <UInputNumber
             v-else-if="model.type === 'int'"
             :model-value="model.default"
+            size="xs"
+            class="min-w-0"
+            @update:model-value="updateDefault"
+          />
+          <UInputNumber
+            v-else-if="model.type === 'float'"
+            :model-value="model.default"
+            step="0.01"
             size="xs"
             class="min-w-0"
             @update:model-value="updateDefault"

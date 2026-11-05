@@ -1,30 +1,19 @@
 <script setup lang="ts">
 // app/components/Constructor/LessonBlockWrapper.vue
-//
-// Обёртка одного блока в уроке.
-// Задачи:
-//   1. Визуальное выделение активного блока.
-//   2. Hover-панель с действиями: drag-handle, вверх, вниз, дублировать, удалить.
-//   3. Клик/нажатие в любом месте (кроме панели действий) → активация.
-//   4. Слот для самого блока (BlockRenderer).
-
 import { ref, inject, type Ref } from 'vue'
 
-// ==================== Режим урока (из Lesson.vue) ====================
+// ==================== Режим урока ====================
 
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
 
 // ==================== Props ====================
 
 interface Props {
-  /** Активен ли блок сейчас */
   active?: boolean
-  /** Режим drag (включён ли drag-handle) */
   draggable?: boolean
-  /** Можно ли двигать вверх */
   canMoveUp?: boolean
-  /** Можно ли двигать вниз */
   canMoveDown?: boolean
+  canDuplicate?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -32,6 +21,7 @@ const props = withDefaults(defineProps<Props>(), {
   draggable: true,
   canMoveUp: false,
   canMoveDown: false,
+  canDuplicate: false,
 })
 
 // ==================== Эмиты ====================
@@ -54,7 +44,6 @@ function onWrapperEnter() {
 
 function onWrapperLeave(e: MouseEvent) {
   const next = e.relatedTarget
-  // Уходим в панель действий (или на её невидимый мост) — не сбрасываем
   if (next instanceof Element && next.closest('[data-block-action]')) return
   hovered.value = false
 }
@@ -65,7 +54,6 @@ function onPanelEnter() {
 
 function onPanelLeave(e: MouseEvent) {
   const next = e.relatedTarget
-  // Возвращаемся в блок — не сбрасываем
   if (next instanceof Element && next.closest('.block-wrapper')) return
   hovered.value = false
 }
@@ -76,7 +64,6 @@ function onActivate(e: MouseEvent) {
   const target = e.target as HTMLElement | null
   if (!target) return
 
-  // Клик по панели действий — не активируем
   if (target.closest('[data-block-action]')) return
 
   emit('activate')
@@ -134,8 +121,9 @@ function onActivate(e: MouseEvent) {
         <UIcon name="i-lucide-chevron-down" class="size-5" />
       </button>
 
-      <!-- Дублировать -->
+      <!-- Дублировать (только если передан флаг) -->
       <button
+        v-if="props.canDuplicate"
         type="button"
         class="inline-flex size-11 items-center justify-center rounded-md text-muted transition hover:bg-muted/60 hover:text-highlighted"
         title="Дублировать"

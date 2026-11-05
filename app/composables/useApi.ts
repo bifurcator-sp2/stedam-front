@@ -1,4 +1,5 @@
 // app/composables/useApi.ts
+import { getCurrentInstance } from 'vue'
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
@@ -8,8 +9,9 @@ interface RequestOptions<B = any> {
   credentials?: RequestCredentials
   params?: Record<string, any>
   signal?: AbortSignal
-  /** Отключить глобальный тост об ошибке. */
   silent?: boolean
+  /** Принудительно обновить данные (игнорировать кэш) */
+  refresh?: boolean
 }
 
 const DEFAULT_HEADERS: Record<string, string> = {
@@ -21,7 +23,6 @@ const DEFAULT_CREDENTIALS: RequestCredentials = 'include'
 // ============================================================
 // Справочник ошибок по HTTP-кодам
 // ============================================================
-
 interface ErrorMeta {
   title: string
   description: string
@@ -33,28 +34,12 @@ const HTTP_ERRORS: Record<number, ErrorMeta> = {
   401: { title: 'Не авторизован', description: 'Войдите в систему заново', color: 'warning' },
   403: { title: 'Доступ запрещён', description: 'У вас нет прав на это действие', color: 'error' },
   404: { title: 'Не найдено', description: 'Запрашиваемый ресурс не существует', color: 'warning' },
-  405: { title: 'Метод не разрешён', description: 'Этот HTTP-метод не поддерживается', color: 'error' },
-  408: { title: 'Тайм-аут', description: 'Сервер не ответил вовремя', color: 'warning' },
-  409: { title: 'Конфликт', description: 'Данные конфликтуют с текущим состоянием', color: 'error' },
-  410: { title: 'Удалено', description: 'Ресурс больше не доступен', color: 'warning' },
-  413: { title: 'Слишком большой запрос', description: 'Размер данных превышает допустимый', color: 'error' },
-  415: { title: 'Неподдерживаемый тип', description: 'Формат данных не поддерживается', color: 'error' },
   422: { title: 'Ошибка валидации', description: 'Проверьте правильность заполнения полей', color: 'warning' },
-  423: { title: 'Заблокировано', description: 'Ресурс заблокирован', color: 'warning' },
-  429: { title: 'Слишком много запросов', description: 'Попробуйте позже', color: 'warning' },
   500: { title: 'Ошибка сервера', description: 'Что-то пошло не так', color: 'error' },
-  501: { title: 'Не реализовано', description: 'Функция ещё не реализована', color: 'error' },
-  502: { title: 'Плохой шлюз', description: 'Сервер получил неверный ответ', color: 'error' },
-  503: { title: 'Сервис недоступен', description: 'Сервер временно не работает', color: 'warning' },
-  504: { title: 'Тайм-аут шлюза', description: 'Сервер не дождался ответа', color: 'warning' },
 }
 
 function getErrorMeta(status: number | undefined): ErrorMeta {
-  if (status && HTTP_ERRORS[status]) {
-    return HTTP_ERRORS[status]
-  }
-
-  return {
+  return HTTP_ERRORS[status || 0] || {
     title: 'Ошибка',
     description: 'Произошла неизвестная ошибка',
     color: 'error',
@@ -62,13 +47,21 @@ function getErrorMeta(status: number | undefined): ErrorMeta {
 }
 
 // ============================================================
+// Глобальный кэш запросов (вынесен за пределы функции)
+// ============================================================
+// Хранит выполняющиеся прямо сейчас запросы, чтобы не дублировать их
+const pendingRequests = new Map<string, Promise<any>>()
+
+// ============================================================
 // useApi
 // ============================================================
-
 export const useApi = () => {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBase
   const toast = useToast()
+
+  // Используем useState для SSR-совместимого кэша данных
+  const apiCache = useState<Record<string, any>>('api-get-cache', () => ({}))
 
   async function request<T = any, B = any>(
     method: HttpMethod,
@@ -84,17 +77,9 @@ export const useApi = () => {
       silent = false,
     } = options
 
-    const isFormData =
-      typeof FormData !== 'undefined' && body instanceof FormData
-
-    const finalHeaders: Record<string, string> = {
-      ...DEFAULT_HEADERS,
-      ...headers,
-    }
-
-    if (isFormData) {
-      delete finalHeaders['Content-Type']
-    }
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
+    const finalHeaders = { ...DEFAULT_HEADERS, ...headers }
+    if (isFormData) delete finalHeaders['Content-Type']
 
     try {
       return await $fetch<T>(url, {
@@ -107,76 +92,71 @@ export const useApi = () => {
         headers: finalHeaders,
       })
     } catch (error: any) {
-      if (!silent) {
-        showErrorToast(error)
-      }
+      if (!silent) showErrorToast(error)
       throw error
     }
   }
 
-  /**
-   * Показывает тост об ошибке.
-   * Если бэк вернул свой message — используем его как description.
-   */
   function showErrorToast(error: any) {
     const status: number | undefined = error?.status ?? error?.response?.status
-
     const meta = getErrorMeta(status)
+    const backendMessage = error?.data?.message ?? error?.data?.error ?? error?.message ?? null
+    const validationErrors = error?.data?.errors && typeof error.data.errors === 'object'
+      ? Object.values(error.data.errors).flat().filter(Boolean)
+      : null
 
-    // Сообщение от бэка (Laravel `message` в JSON, или текст от Nuxt)
-    const backendMessage =
-      error?.data?.message ??
-      error?.data?.error ??
-      error?.message ??
-      null
-
-    // Ошибки валидации (Laravel 422) — массив полей
-    const validationErrors =
-      error?.data?.errors && typeof error.data.errors === 'object'
-        ? Object.values(error.data.errors).flat().filter(Boolean)
-        : null
-
-    const description =
-      validationErrors && validationErrors.length
-        ? String(validationErrors[0])
-        : backendMessage || meta.description
+    const description = validationErrors && validationErrors.length
+      ? String(validationErrors[0])
+      : backendMessage || meta.description
 
     toast.add({
       title: meta.title,
       description,
       color: meta.color,
-      icon:
-        meta.color === 'error'
-          ? 'i-lucide-circle-x'
-          : 'i-lucide-triangle-alert',
+      icon: meta.color === 'error' ? 'i-lucide-circle-x' : 'i-lucide-triangle-alert',
     })
   }
 
-  function get<T = any>(url: string, options: Omit<RequestOptions, 'body'> = {}) {
-    return request<T>('GET', url, options)
+  function get<T = any>(url: string, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
+    const hasParams = options.params && Object.keys(options.params).length > 0
+    const key = hasParams ? `${url}?${JSON.stringify(options.params)}` : url
+
+    // 1. Проверяем кэш данных (если не просят принудительно обновить)
+    if (!options.refresh && apiCache.value[key] !== undefined) {
+      return Promise.resolve(apiCache.value[key] as T)
+    }
+
+    // 2. Проверяем, не выполняется ли этот запрос прямо сейчас (Mutex)
+    if (pendingRequests.has(key)) {
+      return pendingRequests.get(key)!
+    }
+
+    // 3. Делаем запрос и сохраняем Promise в Mutex
+    const promise = request<T>('GET', url, options)
+      .then((res) => {
+        // Сохраняем в кэш (для SSR и клиента)
+        apiCache.value[key] = res
+        pendingRequests.delete(key)
+        return res
+      })
+      .catch((err) => {
+        pendingRequests.delete(key)
+        throw err
+      })
+
+    pendingRequests.set(key, promise)
+    return promise
   }
 
-  function post<T = any, B = any>(
-    url: string,
-    body?: B,
-    options: Omit<RequestOptions<B>, 'body'> = {},
-  ) {
+  function post<T = any, B = any>(url: string, body?: B, options: Omit<RequestOptions<B>, 'body'> = {}) {
     return request<T, B>('POST', url, { ...options, body })
   }
 
-  function put<T = any, B = any>(
-    url: string,
-    body?: B,
-    options: Omit<RequestOptions<B>, 'body'> = {},
-  ) {
+  function put<T = any, B = any>(url: string, body?: B, options: Omit<RequestOptions<B>, 'body'> = {}) {
     return request<T, B>('PUT', url, { ...options, body })
   }
 
-  function patch<T = any, B = any>(
-    url: string,
-    body?: B,
-    options: Omit<RequestOptions<B>, 'body'> = {},
-  ) {
+  function patch<T = any, B = any>(url: string, body?: B, options: Omit<RequestOptions<B>, 'body'> = {}) {
     return request<T, B>('PATCH', url, { ...options, body })
   }
 

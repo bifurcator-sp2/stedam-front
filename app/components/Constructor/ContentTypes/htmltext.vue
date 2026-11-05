@@ -338,7 +338,7 @@ const toolbarItems: EditorToolbarItem[][] = [
       <div
         v-else
         v-html="renderedHtml"
-        class="htmltext-preview max-w-none min-h-[200px]"
+        class="htmltext-preview max-w-none min-h-[70px]"
       />
     </ClientOnly>
   </div>

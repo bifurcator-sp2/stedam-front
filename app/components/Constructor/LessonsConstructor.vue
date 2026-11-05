@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import katex from 'katex'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 import Lesson from '~/components/Constructor/Lesson.vue'
@@ -7,11 +7,13 @@ import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vu
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import LessonBlocksIndex from '~/components/Constructor/LessonBlocksIndex.vue'
 import TestsSearch from '~/components/Education/TestsSearch.vue'
+import TestListElement from '~/components/Education/TestListElement.vue'
 import { useAutosave } from '~/composables/useAutosave'
 import type {
   LessonModel,
   LessonBlockModel,
   BlockStructItem,
+  BlockStructBlock,
   LessonSavePayload,
   LessonResponse,
   DraggedBlockSource,
@@ -26,11 +28,12 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-// Получаем текущего пользователя для проверки владельца задания
 const { user } = useAuth()
 const currentUserId = computed(() => user.value?.id)
 
 const strictSaveMode = ref(false)
+
+const AUTOSAVE_ENABLED = false
 
 // ==================== Кастомный скроллбар для модалки ====================
 const modalScrollClasses =
@@ -81,6 +84,29 @@ function getValidTaxFromQuery(): number | null {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
+// ==================== Утилита: блоки из ответа сервера ====================
+
+function blocksFromResponse(rawBlocks: any[] | undefined | null): LessonBlockModel[] {
+  return (rawBlocks ?? []).map((b: any) => {
+    const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
+    const rawSettings = b.settings
+    const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
+      ? deepClone(rawSettings)
+      : deepClone(fallback)
+
+    return {
+      localId: crypto.randomUUID(),
+      id: b.id,
+      blockId: b.block_id ?? null,
+      blockTypeCode: b.block_type_code ?? '',
+      settings,
+      isTest: b.is_test ?? false,
+      isProc: b.is_proc ?? false,
+      userId: b.user_id ?? null,
+    } as LessonBlockModel & { isProc?: boolean }
+  })
+}
+
 // ==================== Модель урока ====================
 
 const lesson = ref<LessonModel>(createEmptyLesson())
@@ -94,6 +120,103 @@ const activeBlock = computed<LessonBlockModel | null>(() => {
   if (!activeBlockLocalId.value) return null
   return lesson.value.blocks.find((b) => b.localId === activeBlockLocalId.value) ?? null
 })
+
+// ==================== Превью из левой панели ====================
+
+type PreviewSelection =
+  | { kind: 'block'; type: BlockStructItem; block: BlockStructBlock }
+  | { kind: 'test'; test: any }
+  | null
+
+const previewSelection = ref<PreviewSelection>(null)
+
+const previewAsTest = computed(() => {
+  const sel = previewSelection.value
+  if (!sel) return null
+  if (sel.kind === 'test') return sel.test
+  const b = sel.block as any
+  return {
+    id: b.id,
+    block_type_code: b.block_type_code ?? b.code ?? b.blockTypeCode ?? '',
+    settings: b.settings ?? b.default_settings ?? null,
+    title: b.title ?? `Блок №${b.id}`,
+    is_test: b.is_test ?? false,
+  }
+})
+
+const previewTitle = computed(() => {
+  const sel = previewSelection.value
+  if (!sel) return ''
+  if (sel.kind === 'test') return `Задание #${sel.test.id}`
+  return sel.block.title || `Блок №${sel.block.id}`
+})
+
+const previewDescription = computed(() => {
+  const sel = previewSelection.value
+  if (!sel) return ''
+  if (sel.kind === 'test') return sel.test.description || ''
+  return (sel.block as any).description || ''
+})
+
+const previewIcon = computed(() => {
+  const sel = previewSelection.value
+  if (!sel) return 'i-lucide-square'
+  if (sel.kind === 'test') return 'i-lucide-clipboard-check'
+  const b = sel.block as any
+  return b.block_type_icon || 'i-lucide-layout-template'
+})
+
+const previewUsages = computed(() => {
+  const sel = previewSelection.value
+  if (!sel || sel.kind !== 'test') return null
+  return sel.test.usages ?? 0
+})
+
+const previewKey = computed(() => {
+  const sel = previewSelection.value
+  if (!sel) return 'none'
+  if (sel.kind === 'test') return `test-${sel.test.id}`
+  return `block-${sel.block.id}`
+})
+
+function onSelectBlockFromIndex(payload: { type: BlockStructItem; block: BlockStructBlock }) {
+  const cur = previewSelection.value
+  if (cur?.kind === 'block' && cur.block.id === payload.block.id) {
+    previewSelection.value = null
+    return
+  }
+  previewSelection.value = { kind: 'block', type: payload.type, block: payload.block }
+  activeBlockLocalId.value = null
+}
+
+function onSelectTestFromIndex(test: any) {
+  const cur = previewSelection.value
+  if (cur?.kind === 'test' && cur.test.id === test.id) {
+    previewSelection.value = null
+    return
+  }
+  previewSelection.value = { kind: 'test', test }
+  activeBlockLocalId.value = null
+}
+
+watch(activeBlockLocalId, (val) => {
+  if (val) previewSelection.value = null
+})
+
+function handleGlobalClickForPreview(event: MouseEvent) {
+  if (!previewSelection.value) return
+  const target = event.target as HTMLElement | null
+  if (!target || !target.closest) return
+
+  if (target.closest('.cursor-col-resize')) return
+  if (target.closest('.right-panel-content')) return
+  if (target.closest('[data-preview-source]')) return
+  if (target.closest('.test-card')) return
+  if (target.closest('.block-wrapper')) return
+  if (target.closest('.block-settings-panel')) return
+
+  previewSelection.value = null
+}
 
 // ==================== Заголовок ====================
 
@@ -111,6 +234,7 @@ const isReadOnly = computed(() => lesson.value.published)
 async function togglePublished() {
   if (lesson.value.published) {
     lesson.value = { ...lesson.value, published: false }
+    await save()
     return
   }
 
@@ -182,6 +306,7 @@ async function togglePublished() {
   }
 
   lesson.value = { ...lesson.value, published: true }
+  await save()
 }
 
 // ==================== Модалка предупреждения о задании ====================
@@ -211,20 +336,18 @@ function confirmTestWarning() {
 // ==================== Модалка выбора задания из коллекции ====================
 
 const isTaskCollectionOpen = ref(false)
-const pendingTestIndex = ref<number | null>(null) // <--- Храним индекс для вставки
+const pendingTestIndex = ref<number | null>(null)
 
 const modalTaxId = computed(() => {
   return lesson.value.taxonomy_ids?.[0] || null
 })
 
-// Принимаем индекс из Lesson.vue
 function handleOpenTaskCollection(index: number) {
   pendingTestIndex.value = index
   isTaskCollectionOpen.value = true
 }
 
 function onSelectTestFromCollection(test: any) {
-  // ПРОВЕРКА: запрещаем дублирование экземпляров из модалки
   const alreadyExists = lesson.value.blocks.some(
     b => b.isTest && b.id === test.id
   )
@@ -250,12 +373,11 @@ function onSelectTestFromCollection(test: any) {
     images: [],
     files: [],
     isTest: true,
+    isProc: test.is_proc ?? false,
     userId: test.user_id,
   }
 
   const next = lesson.value.blocks.slice()
-
-  // Вставляем строго туда, куда перетащили, либо в конец (если индекса нет)
   const insertIndex = pendingTestIndex.value !== null ? pendingTestIndex.value : next.length
   const safeIndex = Math.max(0, Math.min(insertIndex, next.length))
 
@@ -269,6 +391,117 @@ function onSelectTestFromCollection(test: any) {
     color: 'success',
     icon: 'i-lucide-check-circle',
   })
+}
+
+// ==================== Перегенерация процедурного задания ====================
+
+const regeneratingTask = ref(false)
+
+function findRandomNode(node: any): any {
+  if (!node) return null
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const found = findRandomNode(n)
+      if (found) return found
+    }
+    return null
+  }
+  if (node.key === 'random') return node
+  if (node.children) {
+    for (const child of node.children) {
+      const found = findRandomNode(child)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+async function regenerateTask() {
+  if (!activeBlock.value) return
+
+  const randomNode = findRandomNode(activeBlock.value.settings)
+  if (!randomNode) return
+
+  regeneratingTask.value = true
+  try {
+    // Загружаем таксономию для поиска test_resolver
+    const resTax = await api.get<{ data: any[] }>('/taxonomies/tree', { silent: true })
+    const taxonomyTree = resTax.data || []
+
+    const flatTaxonomyMap = new Map<number, any>()
+    const walk = (nodes: any[]) => {
+      for (const n of nodes) {
+        flatTaxonomyMap.set(n.id, n)
+        if (n.children?.length) walk(n.children)
+      }
+    }
+    walk(taxonomyTree)
+
+    const taxId = lesson.value.taxonomy_ids?.[0]
+    let testResolver = null
+
+    // СТРОГО ищем резолвер в таксономии
+    if (taxId) {
+      let current = flatTaxonomyMap.get(taxId)
+      while (current) {
+        if (current.test_resolver) {
+          testResolver = current.test_resolver
+          break
+        }
+        if (current.parent_id === null || current.parent_id < 0) break
+        current = flatTaxonomyMap.get(current.parent_id)
+      }
+    }
+
+    if (!testResolver) {
+      throw new Error('Не найден резолвер для таксономии этого урока')
+    }
+
+    // СТРОГО берем сложность из урока
+    const difficulty = lesson.value.complexity ?? 0.5
+
+    const params: Record<string, any> = {
+      subject: 'math',
+      test_resolver: testResolver,
+      difficulty,
+      _t: Date.now()
+    }
+
+    const res = await api.get<any>('/tasks/random', { params, silent: true })
+    const payload = res?.data ?? res
+
+    if (payload && typeof payload.question === 'string') {
+      randomNode.default = payload.question
+      if (!randomNode.params) randomNode.params = {}
+      randomNode.params.task = payload
+
+      // Триггерим реактивность и принудительно перемонтируем блок
+      if (activeBlock.value) {
+        activeBlock.value.settings = deepClone(activeBlock.value.settings)
+
+        const newLocalId = crypto.randomUUID()
+        activeBlock.value.localId = newLocalId
+        activeBlockLocalId.value = newLocalId
+      }
+
+      toast.add({
+        title: 'Успешно',
+        description: 'Задание обновлено',
+        color: 'success',
+        icon: 'i-lucide-check-circle',
+      })
+    }
+  } catch (e: any) {
+    console.error('[regenerateTask] failed', e)
+    toast.add({
+      title: 'Ошибка',
+      description: e.message || 'Не удалось обновить задание',
+      color: 'error',
+      icon: 'i-lucide-triangle-alert',
+    })
+  } finally {
+    regeneratingTask.value = false
+  }
 }
 
 // ==================== Утилиты клонирования ====================
@@ -324,23 +557,7 @@ async function loadLesson(id: number) {
     const res = await api.get<{ data: LessonResponse } | LessonResponse>(`/lessons/${id}`)
     const data = (res as any).data ?? res
 
-    const blocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-      const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
-      const rawSettings = b.settings
-      const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
-        ? deepClone(rawSettings)
-        : deepClone(fallback)
-
-      return {
-        localId: crypto.randomUUID(),
-        id: b.id,
-        blockId: b.block_id ?? null,
-        blockTypeCode: b.block_type_code ?? '',
-        settings,
-        isTest: b.is_test ?? false,
-        userId: b.user_id ?? null,
-      } as LessonBlockModel
-    })
+    const blocks = blocksFromResponse(data.blocks)
 
     const taxFromQuery = getValidTaxFromQuery()
     const hasSavedTaxonomies = Array.isArray(data.taxonomy_ids) && data.taxonomy_ids.length > 0
@@ -357,6 +574,7 @@ async function loadLesson(id: number) {
       saved: data.saved ?? false,
       published: data.published ?? false,
       taxonomy_ids: taxonomyIds,
+      complexity: data.complexity ?? null,
       blocks,
     }
 
@@ -396,7 +614,9 @@ async function createAndRedirect() {
 
 const saving = ref(false)
 
-const isInitialLoading = computed(() => loading.value || creating.value)
+const isServerLoading = computed(() =>
+  loading.value || creating.value || saving.value,
+)
 
 const busy = computed(() =>
   loading.value || creating.value || saving.value,
@@ -447,32 +667,18 @@ async function save() {
           saved: data.saved ?? true,
           taxonomy_ids: data.taxonomy_ids ?? [],
           published: data.published ?? lesson.value.published,
+          complexity: data.complexity ?? lesson.value.complexity ?? null,
         }
         scheduleRetrySave()
       } else {
-        const updatedBlocks: LessonBlockModel[] = (data.blocks ?? []).map((b: any) => {
-          const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
-          const rawSettings = b.settings
-          const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
-            ? deepClone(rawSettings)
-            : deepClone(fallback)
-
-          return {
-            localId: crypto.randomUUID(),
-            id: b.id,
-            blockId: b.block_id ?? null,
-            blockTypeCode: b.block_type_code ?? '',
-            settings,
-            isTest: b.is_test ?? false,
-            userId: b.user_id ?? null,
-          } as LessonBlockModel
-        })
+        const updatedBlocks = blocksFromResponse(data.blocks)
 
         isProgrammatic.value = true
         lesson.value = {
           ...lesson.value,
           saved: data.saved ?? true,
           published: data.published ?? lesson.value.published,
+          complexity: data.complexity ?? lesson.value.complexity ?? null,
           blocks: updatedBlocks,
         }
 
@@ -482,11 +688,21 @@ async function save() {
         lastSavedSnapshot = snapshotLesson()
       }
     } else {
-      // --- БЫСТРЫЙ РЕЖИМ (по умолчанию) ---
+      const updatedBlocks = blocksFromResponse(data.blocks)
+
       isProgrammatic.value = true
-      lesson.value.saved = data.saved ?? true
-      lesson.value.published = data.published ?? lesson.value.published
-      lesson.value.taxonomy_ids = data.taxonomy_ids ?? lesson.value.taxonomy_ids
+      lesson.value = {
+        ...lesson.value,
+        saved: data.saved ?? true,
+        published: data.published ?? lesson.value.published,
+        complexity: data.complexity ?? lesson.value.complexity ?? null,
+        taxonomy_ids: data.taxonomy_ids ?? lesson.value.taxonomy_ids,
+        blocks: updatedBlocks,
+      }
+
+      activeBlockLocalId.value =
+        updatedBlocks.find((b) => b.id === prevActiveId)?.localId ?? null
+
       lastSavedSnapshot = snapshotLesson()
     }
 
@@ -499,12 +715,13 @@ async function save() {
   }
 }
 
-// ==================== Автосохранение ====================
+// ==================== Автосохранение (временно отключено) ====================
 
 const { remaining: autosaveRemaining, cancel: cancelAutosave } = useAutosave({
   delaySec: 5,
   canRun: () =>
-    !!lesson.value.id
+    AUTOSAVE_ENABLED
+    && !!lesson.value.id
     && lesson.value.blocks.length > 0
     && !busy.value
     && !isReadOnly.value,
@@ -579,11 +796,16 @@ const activeBlockSettingsModel = computed({
 
 // ==================== Lifecycle ====================
 
+onMounted(() => {
+  document.addEventListener('pointerdown', handleGlobalClickForPreview)
+})
+
 onBeforeUnmount(() => {
   if (retrySaveTimer) {
     clearTimeout(retrySaveTimer)
     retrySaveTimer = null
   }
+  document.removeEventListener('pointerdown', handleGlobalClickForPreview)
 })
 </script>
 
@@ -599,6 +821,9 @@ onBeforeUnmount(() => {
         :struct-items="structItems"
         :pending="structPending"
         :error="structError"
+        :taxonomy-ids="lesson.taxonomy_ids ?? []"
+        @select-block="onSelectBlockFromIndex"
+        @select-test="onSelectTestFromIndex"
       />
     </template>
 
@@ -609,7 +834,7 @@ onBeforeUnmount(() => {
     </template>
 
     <template #main>
-      <LoadingOverlay :loading="isInitialLoading">
+      <LoadingOverlay :loading="isServerLoading">
         <Lesson
           ref="lessonRef"
           v-model="lesson"
@@ -673,9 +898,45 @@ onBeforeUnmount(() => {
     </template>
 
     <template #right>
-      <LoadingOverlay :loading="isInitialLoading">
+      <LoadingOverlay :loading="isServerLoading">
+        <!-- Превью блока/задания из левой панели -->
         <div
-          v-if="isReadOnly"
+          v-if="previewSelection && previewAsTest"
+          class="right-panel-content flex flex-col h-full bg-default overflow-y-auto"
+        >
+          <div class="p-4 border-b border-default bg-elevated/30 flex items-center gap-3 shrink-0">
+            <div class="size-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <UIcon :name="previewIcon" class="size-5" />
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <h3 class="text-base font-bold text-highlighted truncate">
+                {{ previewTitle }}
+              </h3>
+              <p
+                v-if="previewDescription"
+                class="text-xs text-muted truncate mt-0.5"
+              >
+                {{ previewDescription }}
+              </p>
+              <p
+                v-else-if="previewUsages !== null"
+                class="text-xs text-muted flex items-center gap-1.5 mt-0.5"
+              >
+                <UIcon name="i-lucide-activity" class="size-3" />
+                Использований: {{ previewUsages }}
+              </p>
+            </div>
+          </div>
+
+          <div class="p-4 w-full min-w-0">
+            <TestListElement :key="previewKey" :test="previewAsTest" />
+          </div>
+        </div>
+
+        <!-- Readonly -->
+        <div
+          v-else-if="isReadOnly"
           class="flex h-full flex-col items-center justify-center p-6 text-center text-(--ui-text-muted)"
         >
           <div class="mb-3 flex size-12 items-center justify-center rounded-full bg-warning/10">
@@ -687,12 +948,12 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
+        <!-- Существующая логика настроек -->
         <template v-else>
           <div v-if="!activeBlock" class="px-4 py-8 text-center text-[13px] text-(--ui-text-muted)">
             Выберите блок в центре.
           </div>
 
-          <!-- Упрощенная блокировка для заданий -->
           <div
             v-else-if="activeBlock.isTest"
             class="block-settings-panel flex h-full flex-col items-center justify-center p-6 text-center"
@@ -702,11 +963,25 @@ onBeforeUnmount(() => {
             </div>
             <p class="text-sm font-medium text-(--ui-text-highlighted) mb-2">Редактирование заблокировано</p>
             <p class="text-xs text-(--ui-text-muted) leading-snug max-w-[240px]">
-              Редактировать задания можно только в разделе <NuxtLink @pointerdown.stop to="/teacher-tests" class="text-primary hover:underline font-semibold">Задания</NuxtLink>
+              Редактировать задания можно только в разделе
+              <NuxtLink @pointerdown.stop to="/teacher-tests" class="text-primary hover:underline font-semibold">Задания</NuxtLink>
             </p>
+
+            <!-- ВОССТАНОВЛЕННАЯ КНОПКА ОБНОВЛЕНИЯ -->
+            <UButton
+              v-if="(activeBlock as any).isProc"
+              icon="i-lucide-dices"
+              size="sm"
+              color="primary"
+              variant="soft"
+              class="mt-5"
+              :loading="regeneratingTask"
+              @click="regenerateTask"
+            >
+              Обновить задание
+            </UButton>
           </div>
 
-          <!-- Обычные настройки -->
           <BlocksSettingsPanel
             v-else
             model-name="lesson_blocks"
@@ -719,7 +994,7 @@ onBeforeUnmount(() => {
     </template>
   </ConstructPanels>
 
-  <!-- 1. Модалка предупреждения о создании задания -->
+  <!-- Модалка предупреждения о создании задания -->
   <UModal
     v-model:open="isTestWarningOpen"
     title="Информация!"
@@ -756,7 +1031,7 @@ onBeforeUnmount(() => {
     </template>
   </UModal>
 
-  <!-- 2. Модалка добавления задания из коллекции -->
+  <!-- Модалка добавления задания из коллекции -->
   <UModal
     v-model:open="isTaskCollectionOpen"
     title="Добавление задания из коллекции"
@@ -766,7 +1041,6 @@ onBeforeUnmount(() => {
     }"
   >
     <template #body>
-      <!-- Оборачиваем в скроллируемый контейнер с ограничением по высоте и кастомным скроллом -->
       <div :class="['max-h-[75vh] min-w-[600px] min-h-[300px]', modalScrollClasses]">
         <TestsSearch
           :selected-taxonomy-id="modalTaxId"

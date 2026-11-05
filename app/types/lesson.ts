@@ -12,6 +12,7 @@ export interface LessonModel {
   saved: boolean
   published: boolean
   taxonomy_ids: number[] | null
+  complexity?: number | null      // ← добавлено
   blocks: LessonBlockModel[]
 }
 
@@ -27,6 +28,7 @@ export interface LessonBlockModel {
   files: any[]
   userId?: number | null
   isTest?: boolean
+  complexity?: number | null      // ← добавлено (пригодится позже)
 }
 
 // ==================== Источник для drag ====================
@@ -34,7 +36,6 @@ export interface LessonBlockModel {
 export interface DraggedBlockSource {
   type?: BlockStructItem
   block?: BlockStructBlock
-  /** Флаг для специального элемента "Добавить задание из коллекции" */
   isCollectionTask?: boolean
 }
 
@@ -77,6 +78,7 @@ export interface LessonResponse {
   saved: boolean
   published: boolean
   taxonomy_ids: number[] | null
+  complexity?: number | null      // ← добавлено
   blocks: LessonBlockResponse[]
 }
 
@@ -90,6 +92,7 @@ export interface LessonBlockResponse {
   order: number
   is_test?: boolean
   user_id?: number | null
+  complexity?: number | null      // ← добавлено
 }
 
 // ==================== API: payload для save ====================
@@ -109,6 +112,7 @@ export interface LessonBlockSavePayload {
   settings: SettingNode | null
   images: any[]
   files: any[]
+  complexity?: number | null      // ← добавлено
 }
 
 // ==================== Утилита ====================
@@ -122,11 +126,11 @@ export function createEmptyLesson(id: number | null = null): LessonModel {
     saved: false,
     published: false,
     taxonomy_ids: null,
+    complexity: null,
     blocks: [],
   }
 }
 
-/** Один узел хлебной крошки (таксономия) */
 export interface LessonBreadcrumb {
   id: number
   title: string

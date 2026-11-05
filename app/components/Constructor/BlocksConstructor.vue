@@ -25,6 +25,7 @@ interface BlockItem {
   parent_block_index_ids: number[] | null
   published: boolean
   is_test: boolean
+  is_proc: boolean
 }
 
 interface BlockResource {
@@ -34,6 +35,7 @@ interface BlockResource {
   description: string | null
   settings: SettingNode | null
   is_test?: boolean | null
+  is_proc?: boolean | null
   created_at: string
   updated_at: string
 }
@@ -106,6 +108,7 @@ async function createBlockFromType(type: BlockType): Promise<BlockItem> {
     parent_block_index_ids: [],
     published: false,
     is_test: template?.is_test ?? false,
+    is_proc: template?.is_proc ?? false,
   }
 }
 
@@ -235,6 +238,7 @@ watch(
         parent_block_index_ids: block.parent_block_index_ids ?? [],
         published: block.published ?? false,
         is_test: block.is_test ?? false,
+        is_proc: block.is_proc ?? false,
       }
     } catch (e) {
       console.error('[load block by id] failed', e)
@@ -305,6 +309,7 @@ async function save() {
       parent_block_index_ids: block.parent_block_index_ids ?? [],
       published:     block.published,
       is_test:       block.is_test,
+      is_proc:       block.is_proc,
     }
 
     const res = isUpdate
@@ -321,6 +326,7 @@ async function save() {
       description: saved.description ?? '',
       settings:    saved.settings ?? null,
       is_test:     saved.is_test ?? block.is_test,
+      is_proc:     saved.is_proc ?? block.is_proc,
     }
 
     router.replace({
@@ -332,7 +338,6 @@ async function save() {
     saving.value = false
   }
 }
-
 
 // ==================== Динамический резолв компонентов блоков ====================
 
@@ -479,6 +484,9 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
                   <span v-if="item.is_test" class="inline-flex items-center px-2 py-px rounded-full bg-warning/20 text-[11px] font-medium text-warning">
                     задание
                   </span>
+                  <span v-if="item.is_proc" class="inline-flex items-center px-2 py-px rounded-full bg-primary/20 text-[11px] font-medium text-primary">
+                    процедурное
+                  </span>
                   <span class="font-mono text-[11px] text-muted/70">
                     #{{ item.id }}
                   </span>
@@ -547,6 +555,7 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
           v-model:title="editingBlock.title"
           v-model:description="editingBlock.description"
           v-model:is-test="editingBlock.is_test"
+          v-model:is-proc="editingBlock.is_proc"
           v-model:settings="editingBlock.settings"
           v-model:parent_block_index_ids="editingBlock.parent_block_index_ids"
           v-model:published="editingBlock.published"

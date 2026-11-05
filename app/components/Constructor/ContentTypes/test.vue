@@ -24,6 +24,14 @@ const emit = defineEmits<{
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
 const canEdit = computed(() => props.editable && lessonMode.value === 'edit')
 
+// ==================== Shared: solution из random.vue ====================
+
+const randomTaskSolution = inject<Ref<string | null>>('random-task-solution', ref(null))
+
+const hasRandomSolution = computed(() =>
+  !!randomTaskSolution.value && randomTaskSolution.value.trim().length > 0,
+)
+
 // ==================== Хелперы ====================
 
 function child(node: SettingNode | null | undefined, key: string): SettingNode | undefined {
@@ -51,6 +59,18 @@ function toPxRadius(v: unknown): string | undefined {
 const ethalonNode = computed(() => child(props.node, 'ethalon'))
 const answerNode = computed(() => child(props.node, 'answer'))
 const answerTitleNode = computed(() => child(answerNode.value, 'answer-tilte'))
+
+// ==================== Эффективный «Эталонный ответ» ====================
+// Если random.vue сгенерировал задачу — показываем его solution.
+// Иначе — оригинальный ethalon из настроек блока.
+const effectiveEthalonNode = computed<SettingNode | null>(() => {
+  if (!ethalonNode.value) return null
+  if (!hasRandomSolution.value) return ethalonNode.value
+  return {
+    ...ethalonNode.value,
+    default: randomTaskSolution.value as string,
+  }
+})
 
 // ==================== Layout (Корневой уровень) ====================
 
@@ -268,19 +288,28 @@ function onUpdateChildNode(updatedNode: SettingNode) {
     <!-- Контейнер с шириной (block-cols) -->
     <div class="min-w-0 flex flex-col gap-6" :style="{ width: blockWidth }">
 
-      <!-- Эталон -->
-      <div v-if="canEdit && ethalonNode" class="ethalon-wrapper flex flex-col gap-2">
+      <!-- Эталонный ответ -->
+      <div v-if="canEdit && effectiveEthalonNode" class="ethalon-wrapper flex flex-col gap-2">
         <div class="flex items-center gap-2 pl-1">
           <div class="w-1.5 h-1.5 rounded-full bg-success"></div>
           <span class="text-[12px] font-bold uppercase tracking-widest text-success">Эталонный ответ</span>
+
+          <!-- Индикатор, что ответ сгенерирован random.vue -->
+          <span
+            v-if="hasRandomSolution"
+            class="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-wider text-primary"
+            title="Ответ сгенерирован автоматически. Перегенерируйте задание, чтобы обновить."
+          >
+            <UIcon name="i-lucide-wand-2" class="size-3" />
+            авто
+          </span>
         </div>
 
-        <!-- Убрали обертку с border/bg, перенесли всё на TextNode -->
         <TextNode
-          :node="ethalonNode"
+          :node="effectiveEthalonNode"
           :settings="settings"
           :style-path="undefined"
-          :editable="canEdit"
+          :editable="canEdit && !hasRandomSolution"
           class="border-2 border-success/30 bg-success/5 rounded-lg shadow-sm p-3 min-h-[16rem] focus:outline-none"
           @update="onUpdateChildNode"
         />
@@ -289,10 +318,8 @@ function onUpdateChildNode(updatedNode: SettingNode) {
       <!-- Ответ ученика -->
       <div class="flex flex-col gap-2">
 
-
         <!-- Заголовок -->
         <div v-if="answerTitleNode" >
-          <!-- Режим редактирования -->
           <component
             v-if="canEdit"
             :is="answerTitleContainer"
@@ -300,7 +327,6 @@ function onUpdateChildNode(updatedNode: SettingNode) {
             v-inline-edit="titleBinding"
           ></component>
 
-          <!-- Режим обучения (или редактирование запрещено) -->
           <component
             v-else
             :is="answerTitleContainer"

@@ -41,7 +41,8 @@ async function fetchTemplates() {
       title: item.title,
       description: item.description,
       created_at: item.created_at,
-      usages: item.usages ?? 0, // <--- ДОБАВЛЕНО
+      usages: item.usages ?? 0,
+      is_proc: Boolean(item.is_proc),
     }))
 
     hasMore.value = res.meta?.has_more_pages ?? false

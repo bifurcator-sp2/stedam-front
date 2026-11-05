@@ -11,6 +11,7 @@ const id = defineModel<number | null>('id')
 const title = defineModel<string | null>('title')
 const description = defineModel<string | null>('description')
 const isTest = defineModel<boolean>('isTest', { default: false })
+const isProc = defineModel<boolean>('isProc', { default: false })
 const settings = defineModel<SettingNode | null>('settings', { default: null })
 const parentBlockIndexIds = defineModel<number[] | null>('parent_block_index_ids', {
   default: null,
@@ -181,13 +182,22 @@ const published = defineModel<boolean>('published', { default: false })
           />
         </div>
 
-        <!-- НОВОЕ: Блок-задание -->
+        <!-- Блок-задание -->
         <div class="flex items-center justify-between rounded-md border border-default bg-default px-2.5 py-2 mt-1">
           <div class="flex flex-col gap-0.5">
             <span class="text-[11px] font-semibold text-highlighted">Блок-задание</span>
             <span class="text-[10px] text-muted leading-tight">Может использоваться в нескольких уроках</span>
           </div>
           <USwitch v-model="isTest" size="sm" />
+        </div>
+
+        <!-- Процедурное задание -->
+        <div class="flex items-center justify-between rounded-md border border-default bg-default px-2.5 py-2 mt-1">
+          <div class="flex flex-col gap-0.5">
+            <span class="text-[11px] font-semibold text-highlighted">Процедурное задание</span>
+            <span class="text-[10px] text-muted leading-tight">Генерируется динамически по правилам</span>
+          </div>
+          <USwitch v-model="isProc" size="sm" />
         </div>
       </section>
     </template>

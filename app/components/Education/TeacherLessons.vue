@@ -133,6 +133,7 @@ onBeforeUnmount(() => {
       </div>
 
       <EducationLessonDetailPanel
+        :key="selectedLessonId"
         v-else
         :lesson-id="selectedLessonId"
       />

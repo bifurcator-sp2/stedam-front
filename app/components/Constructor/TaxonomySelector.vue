@@ -16,6 +16,7 @@ interface TaxonomyNode {
   parent_id: number | null
   title: string | null
   description: string | null
+  test_resolver?: string | null // <-- Добавлено поле для резолвера
   children: TaxonomyNode[]
 }
 
@@ -35,10 +36,6 @@ const model = defineModel<number[] | null>({ default: null })
 // ============================================================
 
 const api = useApi()
-const loading = ref(false)
-const error = ref<string | null>(null)
-const tree = ref<TaxonomyNode[]>([])
-const loaded = ref(false)
 const search = ref('')
 
 // Принудительное открытие, если пусто
@@ -53,25 +50,32 @@ const isOpen = computed({
 })
 
 // ============================================================
-// Загрузка дерева
+// Загрузка дерева через useAsyncData (общий кеш Nuxt)
 // ============================================================
 
-async function load() {
-  if (loading.value || loaded.value) return
-  loading.value = true
-  error.value = null
-
-  try {
+const {
+  data: treeData,
+  pending: loading,
+  error: fetchError,
+  refresh: load
+} = await useAsyncData<TaxonomyNode[]>(
+  'taxonomy-tree',
+  async () => {
     const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
-    tree.value = res.data ?? []
-    loaded.value = true
-  } catch (e: any) {
-    error.value = e?.data?.message ?? e?.message ?? 'Ошибка загрузки'
-  } finally {
-    loading.value = false
-  }
-}
+    return res.data ?? []
+  },
+  { lazy: true, immediate: false }
+)
 
+// Оборачиваем в computed для удобства использования в шаблоне
+const tree = computed(() => treeData.value ?? [])
+const error = computed(() => {
+  if (!fetchError.value) return null
+  return fetchError.value.data?.message ?? fetchError.value.message ?? 'Ошибка загрузки'
+})
+const loaded = computed(() => !!treeData.value)
+
+// Запускаем загрузку при монтировании
 onMounted(async () => {
   await load()
   await nextTick()
@@ -107,7 +111,7 @@ const flatNodes = computed<FlatNode[]>(() => {
 const byId = computed(() => new Map(flatNodes.value.map((n) => [n.id, n])))
 const selectedIds = computed(() => model.value ?? [])
 
-// Возвращаем массив выбранных узлов (на будущее, если будет мультивыбор)
+// Возвращаем массив выбранных узлов
 const selectedNodes = computed(() => {
   return selectedIds.value
     .map(id => byId.value.get(id))

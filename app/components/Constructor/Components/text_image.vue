@@ -1,9 +1,15 @@
 <!-- components/Constructor/Components/text_image.vue -->
 <script setup lang="ts">
-import {computed, inject, ref, type Component, type Ref} from 'vue'
+import {computed, inject, provide, ref, type Component, type Ref} from 'vue'
 import type {SettingNode} from '~/utils/constructors'
 
 const value = defineModel<SettingNode | null>({default: null})
+
+// ==================== Shared: random task solution ====================
+// random.vue пишет сюда solution сгенерированной задачи,
+// test.vue читает его, чтобы показать в «Эталонном ответе».
+const randomTaskSolution = ref<string | null>(null)
+provide('random-task-solution', randomTaskSolution)
 
 const props = withDefaults(defineProps<{
   mode?: 'form' | 'body'
@@ -85,7 +91,6 @@ const visibleBlocks = computed(() => {
 // ==================== Тест ====================
 
 const testNode = computed(() => {
-  // Ищем test внутри content-blocks
   return contentBlocksNode.value?.children?.find((c: any) => c.key === 'test')
 })
 
@@ -94,23 +99,19 @@ function onUpdateTestNode(updatedNode: SettingNode) {
   const root = value.value as any
   if (!root || !root.children) return
 
-  // Находим content-blocks в корне
   const cbIdx = root.children.findIndex((c: any) => c.key === 'content-blocks')
   if (cbIdx === -1) return
 
   const newContentBlocks = {...root.children[cbIdx]}
   if (!newContentBlocks.children) return
 
-  // Находим test внутри content-blocks
   const testIdx = newContentBlocks.children.findIndex((c: any) => c.key === 'test')
   if (testIdx === -1) return
 
-  // Обновляем test
   const newBlocks = [...newContentBlocks.children]
   newBlocks[testIdx] = updatedNode
   newContentBlocks.children = newBlocks
 
-  // Собираем корень обратно
   const newChildren = [...root.children]
   newChildren[cbIdx] = newContentBlocks
   value.value = {...root, children: newChildren}
@@ -248,19 +249,15 @@ function getGalleryNode(block: any): SettingNode | null {
   const galleryWrapper = block.children?.find((c: any) => c.key === 'gallery')
   if (!galleryWrapper?.children) return null
 
-  // Ищем все узлы, которые являются галереями (gallery1, gallery2, etc.)
-  // Добавили проверку по ключу, так как gallery2 может не иметь поля type: 'image'
   const imageNodes = galleryWrapper.children.filter((c: any) =>
     c.type === 'image' || c.key.startsWith('gallery') || c.params?.purpose?.startsWith('gallery')
   )
 
   if (!imageNodes.length) return null
 
-  // 1. Приоритет — ищем галерею, в которой реально есть загруженные картинки
   const withImages = imageNodes.find((c: any) => Array.isArray(c.default) && c.default.length > 0)
   if (withImages) return withImages
 
-  // 2. Если пусто везде, пытаемся сопоставить номер блока и галереи (block2 -> gallery2)
   const blockIndexMatch = block.key.match(/\d+$/)
   if (blockIndexMatch) {
     const index = blockIndexMatch[0]
@@ -268,7 +265,6 @@ function getGalleryNode(block: any): SettingNode | null {
     if (matchedGallery) return matchedGallery
   }
 
-  // 3. Фолбэк — берем первую попавшуюся
   return imageNodes[0]
 }
 
@@ -341,55 +337,50 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
 
   <div v-else class="text-image-root min-h-[200px] w-full">
     <div :style="[layoutMarginStyle]">
-      <!-- ОБЩИЙ КОНТЕЙНЕР МАТЕРИАЛА И ЗАДАНИЯ -->
       <div :style="[layoutBcgStyle, layoutBorderStyle, layoutPaddingStyle]">
-      <div
-        :style="[layoutContainerStyle]"
-        :class="layoutClass"
-      >
-        <template v-for="(block, index) in visibleBlocks" :key="block.key">
-          <div
-            v-if="getContentComponent(block.default) && getActiveChild(block)"
-            :style="getBlockStyle(index)"
-            class="min-w-0"
-          >
-            <component
-              :is="getContentComponent(block.default)!"
-              :node="getActiveChild(block)!"
-              :gallery="getGalleryNode(block)!"
-              :settings="value"
-              :style-path="getChildPath(block, index)"
-              :allow-drag-and-drop="allowDrag"
-              :show-to-delete-images="allowDelete"
-              @update="onUpdateChild(index, $event)"
-            />
-          </div>
-          <div v-else class="p-4 text-xs text-red-500 bg-red-50 rounded">
-            Блок "{{ block.key }}" (default: {{ block.default }}) не найден
-          </div>
-        </template>
+        <div :style="[layoutContainerStyle]" :class="layoutClass">
+          <template v-for="(block, index) in visibleBlocks" :key="block.key">
+            <div
+              v-if="getContentComponent(block.default) && getActiveChild(block)"
+              :style="getBlockStyle(index)"
+              class="min-w-0"
+            >
+              <component
+                :is="getContentComponent(block.default)!"
+                :node="getActiveChild(block)!"
+                :gallery="getGalleryNode(block)!"
+                :settings="value"
+                :style-path="getChildPath(block, index)"
+                :allow-drag-and-drop="allowDrag"
+                :show-to-delete-images="allowDelete"
+                @update="onUpdateChild(index, $event)"
+              />
+            </div>
+            <div v-else class="p-4 text-xs text-red-500 bg-red-50 rounded">
+              Блок "{{ block.key }}" (default: {{ block.default }}) не найден
+            </div>
+          </template>
 
-        <div v-if="!visibleBlocks.length" class="p-4 text-xs text-yellow-600 bg-yellow-50 rounded">
-          Массив visibleBlocks пуст. Проверьте наличие content-blocks.
+          <div v-if="!visibleBlocks.length" class="p-4 text-xs text-yellow-600 bg-yellow-50 rounded">
+            Массив visibleBlocks пуст. Проверьте наличие content-blocks.
+          </div>
+        </div>
+
+        <!-- БЛОК ТЕСТА -->
+        <div
+          v-if="props.isTest && testNode && getContentComponent('test')"
+          class="w-full mt-4"
+        >
+          <component
+            :is="getContentComponent('test')!"
+            :node="testNode"
+            :settings="value"
+            :style-path="`type.content-blocks.test`"
+            :editable="isEditable"
+            @update="onUpdateTestNode"
+          />
         </div>
       </div>
-
-      <!-- БЛОК ТЕСТА -->
-      <div
-        v-if="props.isTest && testNode && getContentComponent('test')"
-        class="w-full mt-4"
-      >
-        <component
-          :is="getContentComponent('test')!"
-          :node="testNode"
-          :settings="value"
-          :style-path="`type.content-blocks.test`"
-          :editable="isEditable"
-          @update="onUpdateTestNode"
-        />
-      </div>
-      </div>
-
     </div>
   </div>
 </template>

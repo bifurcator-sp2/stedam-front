@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount, onMounted, toRaw, provide } from 'vue'
-import { VueDraggable } from 'vue-draggable-plus'
+import {computed, ref, onBeforeUnmount, onMounted, toRaw, provide} from 'vue'
+import {VueDraggable} from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
 import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
 import ReadOnlyWrapper from '~/components/Constructor/ReadOnlyWrapper.vue'
-import { useContentStats } from '~/composables/useContentStats'
+import ComplexitySelector from '~/components/Constructor/ComplexitySelector.vue'
+
+import {useContentStats} from '~/composables/useContentStats'
 import type {
   LessonModel,
   LessonBlockModel,
@@ -35,7 +37,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 // ==================== Модель ====================
 
-const lesson = defineModel<LessonModel>({ required: true })
+const lesson = defineModel<LessonModel>({required: true})
 
 // ==================== Эмиты ====================
 
@@ -50,6 +52,10 @@ const emit = defineEmits<{
 
 const lessonMode = computed(() => props.mode)
 provide('lesson-mode', lessonMode)
+const lessonTaxonomyIds = computed(() => lesson.value.taxonomy_ids || [])
+provide('lesson-taxonomy-ids', lessonTaxonomyIds)
+const lessonComplexity = computed(() => lesson.value.complexity ?? null)
+provide('task-complexity', lessonComplexity)
 
 // ==================== Утилита поиска блока в дереве ====================
 
@@ -90,7 +96,7 @@ function removeBlock(localId: string) {
 
   const next = lesson.value.blocks.slice()
   next.splice(idx, 1)
-  lesson.value = { ...lesson.value, blocks: next }
+  lesson.value = {...lesson.value, blocks: next}
 
   if (props.activeBlockLocalId === localId) {
     deactivate()
@@ -103,11 +109,32 @@ async function duplicateBlock(localId: string) {
   if (idx < 0) return
 
   const original = lesson.value.blocks[idx]
+
+  // Дублировать коллекционные задания запрещено (isTest = true, но isProc = false)
+  if (original.isTest && !(original as any).isProc) {
+    return
+  }
+
+  // --- Логика для ДИНАМИЧЕСКИХ (процедурных) заданий ---
+  if (original.isTest && (original as any).isProc) {
+    const copy: LessonBlockModel = {
+      ...original,
+      localId: crypto.randomUUID(),
+      settings: original.settings ? structuredClone(toRaw(original.settings)) : null,
+    }
+
+    const next = lesson.value.blocks.slice()
+    next.splice(idx + 1, 0, copy)
+    lesson.value = {...lesson.value, blocks: next}
+
+    setActive(copy.localId)
+    return
+  }
+  // ------------------------------------------------------
+
+  // --- Логика для ОБЫЧНЫХ блоков ---
   if (!original.blockId) return
   if (!lesson.value.id) return
-
-  // Запрещаем дублировать задания
-  if (original.isTest) return
 
   try {
     const res = await api.post<{ data: any } | any>(
@@ -136,7 +163,7 @@ async function duplicateBlock(localId: string) {
 
     const next = lesson.value.blocks.slice()
     next.splice(idx + 1, 0, copy)
-    lesson.value = { ...lesson.value, blocks: next }
+    lesson.value = {...lesson.value, blocks: next}
 
     setActive(copy.localId)
   } catch (e) {
@@ -152,7 +179,7 @@ function moveBlockUp(localId: string) {
   const next = lesson.value.blocks.slice()
   const [moved] = next.splice(idx, 1)
   next.splice(idx - 1, 0, moved)
-  lesson.value = { ...lesson.value, blocks: next }
+  lesson.value = {...lesson.value, blocks: next}
 }
 
 function moveBlockDown(localId: string) {
@@ -163,7 +190,7 @@ function moveBlockDown(localId: string) {
   const next = lesson.value.blocks.slice()
   const [moved] = next.splice(idx, 1)
   next.splice(idx + 1, 0, moved)
-  lesson.value = { ...lesson.value, blocks: next }
+  lesson.value = {...lesson.value, blocks: next}
 }
 
 // ==================== Drag-and-drop ====================
@@ -175,17 +202,44 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
   if (!source) return
   if (!lesson.value.id) return
 
-  // Проверка на вызов коллекции заданий
+  // ── Коллекция из модалки (drag-кнопка «Добавить задание из коллекции») ──
   if (source.isCollectionTask) {
     emit('open-task-collection', index)
     return
   }
 
-  // Проверка на задание (если это не принудительное добавление)
+  // ── Задание из inline TestsSearch (drag карточки) ──
+  if ((source as any).fromSearch && source.block) {
+    const test = source.block as any
+    const rawSettings = test.settings ?? null
+    const newBlock: LessonBlockModel = {
+      localId: crypto.randomUUID(),
+      id: test.id,
+      blockId: null,
+      blockTypeCode: test.block_type_code,
+      settings: rawSettings ? structuredClone(toRaw(rawSettings)) : null,
+      images: [],
+      files: [],
+      isTest: true,
+      isProc: test.is_proc ?? false,
+    }
+
+    const next = lesson.value.blocks.slice()
+    const safeIndex = Math.max(0, Math.min(index, next.length))
+    next.splice(safeIndex, 0, newBlock)
+    lesson.value = {...lesson.value, blocks: next}
+
+    setActive(newBlock.localId)
+    return
+  }
+
+  // ── Обычный блок из дерева (в т.ч. шаблон задания) ──
   if (source.block?.is_test && !force) {
-    const accepted = import.meta.client ? localStorage.getItem('lesson_test_warning_accepted') === 'true' : false
+    const accepted = import.meta.client
+      ? localStorage.getItem('lesson_test_warning_accepted') === 'true'
+      : false
     if (!accepted) {
-      emit('test-warning', { index, source })
+      emit('test-warning', {index, source})
       return
     }
   }
@@ -215,12 +269,13 @@ async function handleDropAtIndex(index: number, source: DraggedBlockSource | nul
       images: data.images ?? [],
       files: data.files ?? [],
       isTest: data.is_test ?? source.block.is_test ?? false,
+      isProc: data.is_proc ?? source.block.is_proc ?? false,
     }
 
     const next = lesson.value.blocks.slice()
     const safeIndex = Math.max(0, Math.min(index, next.length))
     next.splice(safeIndex, 0, newBlock)
-    lesson.value = { ...lesson.value, blocks: next }
+    lesson.value = {...lesson.value, blocks: next}
 
     setActive(newBlock.localId)
   } catch (e) {
@@ -293,19 +348,19 @@ function onRegisterFiles(block: LessonBlockModel, inst: any) {
 
 function updateTitle(v: string) {
   if (props.mode === 'learn' || props.isReadOnly) return
-  lesson.value = { ...lesson.value, title: v }
+  lesson.value = {...lesson.value, title: v}
 }
 
 function updateDescription(v: string) {
   if (props.mode === 'learn' || props.isReadOnly) return
-  lesson.value = { ...lesson.value, description: v }
+  lesson.value = {...lesson.value, description: v}
 }
 
 // ==================== Статистика ====================
 
 const contentRef = ref<HTMLElement | null>(null)
 
-const { totalChars, readingTimeText } = useContentStats({
+const {totalChars, readingTimeText} = useContentStats({
   container: contentRef,
   headText: () => `${lesson.value.title ?? ''} ${lesson.value.description ?? ''}`,
   charsPerMinute: 1000,
@@ -399,8 +454,8 @@ function clearDragOver() {
 defineExpose({
   removeBlock,
   duplicateBlock,
-  handleDropAtIndex, // Экспортируем для вызова из родителя
-  contentRef, // Экспорт DOM-контейнера для родителя
+  handleDropAtIndex,
+  contentRef,
 })
 </script>
 
@@ -433,21 +488,29 @@ defineExpose({
     >
       <div class="flex items-center gap-3.5">
         <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
-          <UIcon name="i-lucide-type" />
+          <UIcon name="i-lucide-type"/>
           {{ totalChars }}
         </span>
         <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
-          <UIcon name="i-lucide-clock" />
+          <UIcon name="i-lucide-clock"/>
           {{ readingTimeText }}
         </span>
         <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
-          <UIcon name="i-lucide-layers" />
+          <UIcon name="i-lucide-layers"/>
           {{ lesson.blocks.length }}
+        </span>
+        <!-- Сложность урока -->
+        <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
+          <ComplexitySelector
+            readonly
+            compact
+            :model-value="lesson.complexity ?? null"
+          />
         </span>
       </div>
 
       <div class="flex items-center gap-4">
-        <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" v-if="lesson.id" />
+        <ConstructorTaxonomySelector v-model="lesson.taxonomy_ids" v-if="lesson.id"/>
       </div>
     </div>
 
@@ -458,7 +521,7 @@ defineExpose({
       @dragover.prevent
       @drop="onDropEmpty"
     >
-      <UIcon name="i-lucide-download" class="w-9 h-9 opacity-50" />
+      <UIcon name="i-lucide-download" class="w-9 h-9 opacity-50"/>
       <span class="text-sm font-medium text-[var(--ui-text,#334155)]">
         Перетащите блок из левой панели
       </span>
@@ -503,6 +566,7 @@ defineExpose({
               :draggable="true"
               :can-move-up="index > 0"
               :can-move-down="index < lesson.blocks.length - 1"
+              :can-duplicate="!(block as any).isTest || !!(block as any).isProc"
               @activate="activateBlock(block.localId)"
               @remove="removeBlock(block.localId)"
               @duplicate="duplicateBlock(block.localId)"
@@ -541,7 +605,7 @@ defineExpose({
               </div>
             </LessonBlockWrapper>
 
-            <!-- Клик-зона для выбора блока (скрываем в learn) -->
+            <!-- Клик-зона для выбора блока -->
             <div
               v-if="mode === 'edit' && !isReadOnly"
               class="absolute top-0 left-full ml-[5px] h-[calc(100%-50px)] w-[75px] rounded-r-md cursor-pointer transition-colors z-0 bg-gradient-to-r from-transparent"
@@ -567,7 +631,7 @@ defineExpose({
       </template>
     </VueDraggable>
 
-    <!-- Оверлей для isReadOnly (публикация) -->
+    <!-- Оверлей для isReadOnly -->
     <div
       v-if="isReadOnly"
       class="absolute inset-0 z-50 bg-transparent cursor-not-allowed"
