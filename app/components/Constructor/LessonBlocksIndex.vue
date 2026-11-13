@@ -32,6 +32,18 @@ const showTestsSearch = ref(false)
 const showProcSearch = ref(false)
 const panelStyle = ref<Record<string, string>>({})
 
+// Функция для отслеживания позиции при скролле
+function updatePanelPosition() {
+  if (!activeType.value && !showTestsSearch.value && !showProcSearch.value) return
+  if (!containerRef.value) return
+
+  const containerRect = containerRef.value.getBoundingClientRect()
+  panelStyle.value = {
+    ...panelStyle.value,
+    top: `${containerRect.top}px`
+  }
+}
+
 // ==================== Данные для процедурных заданий ====================
 
 const procTests = ref<any[]>([])
@@ -157,6 +169,10 @@ onMounted(() => {
 
   document.addEventListener('pointerdown', handleOutsideClick)
   window.addEventListener('drop', handleDrop)
+
+  // Добавляем слушатели для скролла и ресайза
+  window.addEventListener('scroll', updatePanelPosition, true)
+  window.addEventListener('resize', updatePanelPosition)
 })
 
 // Сохранение колонок при изменении
@@ -182,13 +198,13 @@ function toggleType(type: BlockStructItem, e: MouseEvent) {
     return
   }
 
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const top = Math.max(8, Math.min(rect.top, window.innerHeight - 400))
+  const containerRect = containerRef.value?.getBoundingClientRect()
+  const targetRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
 
   panelStyle.value = {
-    top: `${top}px`,
-    left: `${rect.right + 4}px`,
-    bottom: '8px',
+    top: `${containerRect?.top ?? 0}px`,
+    left: `${targetRect.right + 4}px`,
+    bottom: '0px',
   }
 
   activeType.value = type
@@ -204,13 +220,13 @@ function openCollection(e: MouseEvent) {
     return
   }
 
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const top = Math.max(8, Math.min(rect.top, window.innerHeight - 400))
+  const containerRect = containerRef.value?.getBoundingClientRect()
+  const targetRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
 
   panelStyle.value = {
-    top: `${top}px`,
-    left: `${rect.right + 4}px`,
-    bottom: '8px',
+    top: `${containerRect?.top ?? 0}px`,
+    left: `${targetRect.right + 4}px`,
+    bottom: '0px',
   }
 
   activeType.value = null
@@ -226,13 +242,13 @@ function openProcSearch(e: MouseEvent) {
     return
   }
 
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  const top = Math.max(8, Math.min(rect.top, window.innerHeight - 400))
+  const containerRect = containerRef.value?.getBoundingClientRect()
+  const targetRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
 
   panelStyle.value = {
-    top: `${top}px`,
-    left: `${rect.right + 4}px`,
-    bottom: '8px',
+    top: `${containerRect?.top ?? 0}px`,
+    left: `${targetRect.right + 4}px`,
+    bottom: '0px',
   }
 
   activeType.value = null
@@ -259,6 +275,8 @@ function handleDrop() {
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleOutsideClick)
   window.removeEventListener('drop', handleDrop)
+  window.removeEventListener('scroll', updatePanelPosition, true)
+  window.removeEventListener('resize', updatePanelPosition)
   stopResize()
 })
 
@@ -530,7 +548,7 @@ function onTestClick(test: any) {
       <div
         v-if="activeType || showTestsSearch || showProcSearch"
         ref="flyoutRef"
-        class="group fixed z-[100] flex flex-col bg-(--ui-bg) border border-(--ui-border) shadow-2xl overflow-hidden"
+        class="group fixed z-[100] flex flex-col bg-(--ui-bg) border border-(--ui-border) overflow-hidden"
         :style="{ ...panelStyle, width: `${panelWidth}px` }"
         @click.stop
       >

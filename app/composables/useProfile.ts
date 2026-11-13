@@ -49,7 +49,7 @@ export const useProfile = () => {
   }
 
   /**
-   * Хелпер для обновления только куска settings (например, ink)
+   * Хелпер для обновления только куска settings (например, Ink)
    */
   async function updateInkSettings(inkData: Record<string, any>) {
     if (!userData.value) return

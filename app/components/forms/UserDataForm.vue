@@ -3,6 +3,22 @@
 import type { FormError, FormSubmitEvent } from '#ui/types'
 import Whiteboard from '~/components/Education/Whiteboard/Whiteboard.vue'
 import VideoCalibrate from '~/components/video/Calibrate.vue'
+import InkRecognizer from '~/components/Ink/InkRecognizer.vue'
+
+// ★ Дубликат типа из Whiteboard.vue (см. комментарий там)
+interface InkSettings {
+  penSize?: number
+  eraserSize?: number
+  bg?: 'none' | 'lined' | 'grid' | 'dots'
+  bgOpacity?: number
+  bgScale?: number
+  bgColor?: string
+  pressureEnabled?: boolean
+  minPressureWidth?: number
+  maxPressureWidth?: number
+  smoothingEnabled?: boolean
+  stabilizer?: number
+}
 
 const { t } = useI18n()
 const { countries } = useUserDataApi()
@@ -24,6 +40,10 @@ const bgOptions = [
 
 const presetColors = ['#d1d5db', '#93c5fd', '#86efac', '#fde047', '#fca5a5', '#c4b5fd']
 
+// ★ Снимок Ink-настроек из стора с дефолтами для старых профилей.
+// Тип-каст безопасен: старые профили не имеют новых полей, `??` подставит дефолты.
+const ink0 = (userData.value?.settings?.ink ?? {}) as InkSettings
+
 // Локальный стейт формы (инициализируется из глобального профиля)
 const state = reactive({
   first_name: userData.value?.first_name ?? '',
@@ -36,15 +56,33 @@ const state = reactive({
 
   settings: {
     ink: {
-      penSize: userData.value?.settings?.ink?.penSize ?? 3,
-      eraserSize: userData.value?.settings?.ink?.eraserSize ?? 30,
-      bg: userData.value?.settings?.ink?.bg ?? 'none',
-      bgOpacity: userData.value?.settings?.ink?.bgOpacity ?? 1,
-      bgScale: userData.value?.settings?.ink?.bgScale ?? 1,
-      bgColor: userData.value?.settings?.ink?.bgColor ?? '#d1d5db',
-    }
-  }
+      // существующие
+      penSize: ink0.penSize ?? 3,
+      eraserSize: ink0.eraserSize ?? 30,
+      bg: (ink0.bg ?? 'none') as 'none' | 'lined' | 'grid' | 'dots',
+      bgOpacity: ink0.bgOpacity ?? 1,
+      bgScale: ink0.bgScale ?? 1,
+      bgColor: ink0.bgColor ?? '#d1d5db',
+      // ★ новые — поведение пера
+      pressureEnabled: ink0.pressureEnabled ?? true,
+      minPressureWidth: ink0.minPressureWidth ?? 0.5,
+      maxPressureWidth: ink0.maxPressureWidth ?? 2,
+      smoothingEnabled: ink0.smoothingEnabled ?? true,
+      stabilizer: ink0.stabilizer ?? 0,
+    },
+  },
 })
+
+const inkRef = ref<any>(null)
+const wbRef = ref<any>(null)
+
+// Обработчик события от Whiteboard
+function onStrokeEnd(strokes: any[]) {
+  // Передаём штрихи в распознаватель
+  if (inkRef.value) {
+    inkRef.value.recognizeNow(strokes)
+  }
+}
 
 const genderOptions = computed(() => [
   { label: t('profile.gender.male'), value: 'male' },
@@ -74,6 +112,9 @@ const toast = useToast()
 async function onSubmit(event: FormSubmitEvent<typeof state>) {
   loading.value = true
   try {
+    // ★ settings: event.data.settings содержит все поля, включая новые.
+    // saveUserData обновляет глобальный стор → все Whiteboard без props
+    // реактивно получают новые настройки.
     await saveUserData({
       first_name: event.data.first_name || null,
       last_name: event.data.last_name || null,
@@ -82,7 +123,7 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
       gender: event.data.gender || null,
       country_id: event.data.country_id || null,
       direction: event.data.direction || 'ltr',
-      settings: event.data.settings
+      settings: event.data.settings,
     })
 
     toast.add({ title: t('profile.messages.saved'), color: 'success' })
@@ -161,7 +202,6 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
 
         <USeparator />
 
-
         <!-- Блок рукописного ввода (Whiteboard) -->
         <div class="space-y-5">
           <div class="flex items-center gap-2">
@@ -169,7 +209,7 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
             <h4 class="text-base font-semibold text-highlighted">Настройки рукописного ввода</h4>
           </div>
 
-          <!-- Настройки -->
+          <!-- Внешний вид / размеры -->
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end bg-elevated/50 p-4 rounded-lg border border-default">
             <UFormField label="Толщина пера (px)">
               <USlider v-model="state.settings.ink.penSize" :min="1" :max="20" />
@@ -208,16 +248,87 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
             </UFormField>
           </div>
 
-          <!-- Превью (под настройками) -->
+          <!-- ★ Поведение пера (новое) -->
+          <div class="bg-elevated/50 p-4 rounded-lg border border-default space-y-4">
+            <div class="flex items-center gap-2">
+              <UIcon name="i-lucide-sliders-horizontal" class="w-4 h-4 text-muted" />
+              <h5 class="text-sm font-semibold text-highlighted">Поведение пера</h5>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <UFormField
+                label="Чувствительность к давлению"
+                help="Толщина зависит от силы нажатия пера"
+              >
+                <USwitch v-model="state.settings.ink.pressureEnabled" />
+              </UFormField>
+
+              <UFormField
+                label="Сглаживание линий"
+                help="Квадратичные кривые вместо прямых сегментов"
+              >
+                <USwitch v-model="state.settings.ink.smoothingEnabled" />
+              </UFormField>
+
+              <UFormField
+                label="Мин. толщина (×)"
+                help="Множитель при нулевом давлении"
+              >
+                <USlider
+                  v-model="state.settings.ink.minPressureWidth"
+                  :min="0.1" :max="1" :step="0.05"
+                  :disabled="!state.settings.ink.pressureEnabled"
+                />
+              </UFormField>
+
+              <UFormField
+                label="Макс. толщина (×)"
+                help="Множитель при максимальном давлении"
+              >
+                <USlider
+                  v-model="state.settings.ink.maxPressureWidth"
+                  :min="1" :max="3" :step="0.05"
+                  :disabled="!state.settings.ink.pressureEnabled"
+                />
+              </UFormField>
+
+              <UFormField
+                label="Стабилизатор"
+                help="Дополнительное сглаживание ввода (0 — выкл., 100 — максимум)"
+                class="md:col-span-2"
+              >
+                <USlider
+                  v-model="state.settings.ink.stabilizer"
+                  :min="0" :max="100" :step="5"
+                />
+              </UFormField>
+            </div>
+          </div>
+
+          <!-- Превью -->
           <div class="flex flex-col gap-2">
             <span class="text-sm font-medium text-muted">Предпросмотр</span>
             <div class="w-full h-[300px] border border-default rounded-lg overflow-hidden relative bg-default shadow-inner">
-              <!-- Передаем локальный стейт настроек для живого предпросмотра -->
+              <!-- Передаём локальный стейт настроек для живого предпросмотра.
+                   Изменения в слайдерах/свитчах мгновенно видны в превью. -->
               <Whiteboard
                 :settings="state.settings.ink"
+                ref="wbRef"
                 hide-toolbar
+                @stroke-end="onStrokeEnd"
+              />
+
+            </div>
+
+            <div class="min-h-[100px] border border-default rounded-lg p-4 bg-elevated/30">
+              <InkRecognizer
+                ref="inkRef"
+                :mode="'auto'"
+                :debounce-ms="600"
               />
             </div>
+
+
           </div>
         </div>
 

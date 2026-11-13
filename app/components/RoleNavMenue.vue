@@ -32,15 +32,19 @@ const navItemsByRoles: Record<string, NavItem[]> = {
   admin: [
     { label: 'Конструктор блоков', icon: 'i-lucide-blocks', to: '/construct' },
   ],
+
   student: [
-    { label: 'Текущее занятие', icon: 'i-lucide-circle-play', to: '/learn/select-lesson' },
-    { label: 'Программы обучения', icon: 'i-lucide-graduation-cap', to: '/learn' },
-    { label: 'Пройденый материал', icon: 'i-lucide-book-check', to: '/learned' },
+    { label: 'Текущие занятия',   icon: 'i-lucide-circle-play',    to: '/learn/select-lesson' },
+    { label: 'Учебные курсы',     icon: 'i-lucide-graduation-cap', to: '/learn' },
+    { label: 'Пройденный материал', icon: 'i-lucide-book-check',   to: '/learned' },
+    { label: 'Мои оценки',        icon: 'i-lucide-award',          to: '/grades' },
   ],
   teacher: [
-    { label: 'Мои уроки', icon: 'i-lucide-presentation', to: '/teacher-lessons' },
-    { label: 'Задания', icon: 'i-lucide-clipboard-check', to: '/teacher-tests' },
+    { label: 'Курсы',    icon: 'i-lucide-library',          to: '/teacher-courses' },
+    { label: 'Уроки',    icon: 'i-lucide-presentation',     to: '/teacher-lessons' },
+    { label: 'Задания',  icon: 'i-lucide-clipboard-check',  to: '/teacher-tests' },
   ],
+
   parent: [
     { label: 'Я - родитель', icon: 'i-lucide-users', to: '/parent' },
   ],

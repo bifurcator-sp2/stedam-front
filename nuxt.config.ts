@@ -67,11 +67,15 @@ export default defineNuxtConfig({
       confirm: 'Обновить сейчас',
     },
   },
-  /*render: {
-    crossorigin: 'use-credentials'
-  },*/
 
   vite: {
+    // ★ ДОБАВЛЕНО: Заголовки для SharedArrayBuffer в dev-режиме (нужно для ONNX)
+    server: {
+      headers: {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
+      }
+    },
     build: {
       target: ['es2022'],
     },
@@ -91,6 +95,7 @@ export default defineNuxtConfig({
 
   ssr: false,
   spaLoadingTemplate: resolve(__dirname, 'app/spa-loading-template.html'),
+
   nitro: {
     debug: true,
     preset: 'static',
@@ -102,6 +107,15 @@ export default defineNuxtConfig({
       crawlLinks: false
     },
     minify: true,
+    // ★ Заголовки для SharedArrayBuffer в production (уже были у вас)
+    routeRules: {
+      '/**': {
+        headers: {
+          'Cross-Origin-Opener-Policy': 'same-origin',
+          'Cross-Origin-Embedder-Policy': 'require-corp',
+        },
+      },
+    },
   },
 
   eslint: {

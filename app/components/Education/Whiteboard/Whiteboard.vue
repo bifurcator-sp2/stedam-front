@@ -1,17 +1,39 @@
 <!-- components/Education/Whiteboard/Whiteboard.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useProfile } from '~/composables/useProfile'
 
+// Тип настроек
+interface InkSettings {
+  penSize?: number
+  eraserSize?: number
+  bg?: 'none' | 'lined' | 'grid' | 'dots'
+  bgOpacity?: number
+  bgScale?: number
+  bgColor?: string
+  pressureEnabled?: boolean
+  minPressureWidth?: number
+  maxPressureWidth?: number
+  smoothingEnabled?: boolean
+  stabilizer?: number
+}
+
+const INK_DEFAULTS: Required<InkSettings> = {
+  penSize: 3,
+  eraserSize: 30,
+  bg: 'none',
+  bgOpacity: 1,
+  bgScale: 1,
+  bgColor: '#d1d5db',
+  pressureEnabled: true,
+  minPressureWidth: 0.5,
+  maxPressureWidth: 2,
+  smoothingEnabled: true,
+  stabilizer: 0,
+}
+
 const props = withDefaults(defineProps<{
-  settings?: {
-    penSize?: number
-    eraserSize?: number
-    bg?: 'none' | 'lined' | 'grid' | 'dots'
-    bgOpacity?: number
-    bgScale?: number
-    bgColor?: string
-  }
+  settings?: InkSettings
   color?: string
   hideToolbar?: boolean
 }>(), {
@@ -19,32 +41,37 @@ const props = withDefaults(defineProps<{
   hideToolbar: false,
 })
 
+// События
+const emit = defineEmits<{
+  (e: 'stroke-end', strokes: Stroke[]): void
+  // ★ Новое событие для управления паузой ИИ-инференса
+  (e: 'interaction', active: boolean): void
+}>()
+
 const { userData } = useProfile()
 
-// Приоритет: 1) Пропс (для предпросмотра в форме), 2) Глобальный профиль, 3) Дефолт
-const effectiveSettings = computed(() => {
-  if (props.settings) return props.settings
-  if (userData.value?.settings?.ink) return userData.value.settings.ink
-  return {
-    penSize: 3,
-    eraserSize: 30,
-    bg: 'none',
-    bgOpacity: 1,
-    bgScale: 1,
-    bgColor: '#d1d5db'
-  }
+const effectiveSettings = computed<Required<InkSettings>>(() => {
+  const source = (props.settings
+    ?? (userData.value?.settings?.ink as InkSettings | undefined)
+    ?? {}) as Partial<InkSettings>
+  return { ...INK_DEFAULTS, ...source }
 })
 
 const currentMode = ref<'pen' | 'eraser'>('pen')
-const currentPenSize = computed(() => effectiveSettings.value.penSize ?? 3)
-const currentEraserSize = computed(() => effectiveSettings.value.eraserSize ?? 30)
-const currentBg = computed(() => effectiveSettings.value.bg ?? 'none')
-const bgOpacity = computed(() => effectiveSettings.value.bgOpacity ?? 1)
-const bgScale = computed(() => effectiveSettings.value.bgScale ?? 1)
-const bgColor = computed(() => effectiveSettings.value.bgColor ?? '#d1d5db')
+const currentPenSize = computed(() => effectiveSettings.value.penSize)
+const currentEraserSize = computed(() => effectiveSettings.value.eraserSize)
+const pressureEnabled = computed(() => effectiveSettings.value.pressureEnabled)
+const minPressureWidth = computed(() => effectiveSettings.value.minPressureWidth)
+const maxPressureWidth = computed(() => effectiveSettings.value.maxPressureWidth)
+const smoothingEnabled = computed(() => effectiveSettings.value.smoothingEnabled)
+const stabilizerStrength = computed(() => effectiveSettings.value.stabilizer)
+
+const currentBg = computed(() => effectiveSettings.value.bg)
+const bgOpacity = computed(() => effectiveSettings.value.bgOpacity)
+const bgScale = computed(() => effectiveSettings.value.bgScale)
+const bgColor = computed(() => effectiveSettings.value.bgColor)
 
 // ==================== Стили фона ====================
-
 const bgStyle = computed(() => {
   if (currentBg.value === 'none') return { display: 'none' }
 
@@ -71,28 +98,246 @@ const bgStyle = computed(() => {
   }
 })
 
-// ==================== Состояние холста ====================
+// ==================== Модель штрихов ====================
+interface StrokePoint {
+  x: number
+  y: number
+  pressure: number
+  isPen: boolean
+}
 
+interface Stroke {
+  points: StrokePoint[]
+  color: string
+  size: number
+  eraser: boolean
+  smooth: boolean
+  usePressure: boolean
+  minPw: number
+  maxPw: number
+  stabilizer: number
+}
+
+const strokes: Stroke[] = []
+const redoStack: Stroke[] = []
+
+// ==================== Состояние канвы ====================
 const containerRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 let ctx: CanvasRenderingContext2D | null = null
 let resizeObserver: ResizeObserver | null = null
+let dpr = 1
 
 let drawing = false
-let isErasing = false
+let currentStroke: Stroke | null = null
+let lastMid: { x: number; y: number } | null = null
 let currentPointerId: number | null = null
-
-let lastX = 0
-let lastY = 0
+let currentIsErasing = false
+let stabilizerState: { x: number; y: number } | null = null
 
 const cursorPos = ref({ x: -100, y: -100 })
 const showEraserCursor = ref(false)
 const isPointerInside = ref(false)
 const isCtrlPressed = ref(false)
 
-// ==================== Инициализация ====================
+// ★ Логика управления состоянием взаимодействия (для паузы ИИ)
+let interactionActive = false
+function setInteraction(active: boolean) {
+  if (interactionActive === active) return
+  interactionActive = active
+  emit('interaction', active)
+}
 
+// ==================== Геометрия и ширина ====================
+function midpoint(a: StrokePoint, b: StrokePoint) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+}
+
+function segmentWidth(pt: StrokePoint, stroke: Stroke): number {
+  if (stroke.eraser || !pt.isPen || !stroke.usePressure) return stroke.size
+  const p = Math.max(0, Math.min(1, pt.pressure ?? 0.5))
+  const lo = Math.min(stroke.minPw, stroke.maxPw)
+  const hi = Math.max(stroke.minPw, stroke.maxPw)
+  return Math.max(0.5, stroke.size * (lo + p * (hi - lo)))
+}
+
+function setStrokeStyle(stroke: Stroke) {
+  if (!ctx) return
+  if (stroke.eraser) {
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.strokeStyle = '#000'
+    ctx.fillStyle = '#000'
+  } else {
+    ctx.globalCompositeOperation = 'source-over'
+    ctx.strokeStyle = stroke.color
+    ctx.fillStyle = stroke.color
+  }
+}
+
+function drawDot(pt: StrokePoint, stroke: Stroke) {
+  if (!ctx) return
+  setStrokeStyle(stroke)
+  const w = segmentWidth(pt, stroke)
+  ctx.beginPath()
+  ctx.arc(pt.x, pt.y, w / 2, 0, Math.PI * 2)
+  ctx.fill()
+}
+
+// ==================== Стабилизатор (EMA) ====================
+function applyStabilizer(raw: StrokePoint, strength: number): StrokePoint {
+  if (strength <= 0) return raw
+  if (!stabilizerState) {
+    stabilizerState = { x: raw.x, y: raw.y }
+    return raw
+  }
+  const alpha = Math.max(0.1, 1 - (strength / 100) * 0.9)
+  const x = stabilizerState.x + (raw.x - stabilizerState.x) * alpha
+  const y = stabilizerState.y + (raw.y - stabilizerState.y) * alpha
+  stabilizerState = { x, y }
+  return { x, y, pressure: raw.pressure, isPen: raw.isPen }
+}
+
+// ==================== Инкрементальное рисование ====================
+function drawCurrentSegment() {
+  if (!ctx || !currentStroke || !lastMid) return
+  const pts = currentStroke.points
+  setStrokeStyle(currentStroke)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  if (!currentStroke.smooth) {
+    if (pts.length < 2) return
+    const prev = pts[pts.length - 2]
+    const curr = pts[pts.length - 1]
+    ctx.lineWidth = segmentWidth(curr, currentStroke)
+    ctx.beginPath()
+    ctx.moveTo(prev.x, prev.y)
+    ctx.lineTo(curr.x, curr.y)
+    ctx.stroke()
+    lastMid = { x: curr.x, y: curr.y }
+    return
+  }
+
+  if (pts.length === 2) {
+    const mid = midpoint(pts[0], pts[1])
+    ctx.lineWidth = segmentWidth(pts[0], currentStroke)
+    ctx.beginPath()
+    ctx.moveTo(lastMid.x, lastMid.y)
+    ctx.lineTo(mid.x, mid.y)
+    ctx.stroke()
+    lastMid = mid
+    return
+  }
+
+  if (pts.length >= 3) {
+    const prev = pts[pts.length - 2]
+    const curr = pts[pts.length - 1]
+    const mid = midpoint(prev, curr)
+    ctx.lineWidth = segmentWidth(curr, currentStroke)
+    ctx.beginPath()
+    ctx.moveTo(lastMid.x, lastMid.y)
+    ctx.quadraticCurveTo(prev.x, prev.y, mid.x, mid.y)
+    ctx.stroke()
+    lastMid = mid
+  }
+}
+
+function finishStroke() {
+  if (!ctx || !currentStroke) return
+  const pts = currentStroke.points
+  if (pts.length >= 2 && lastMid && currentStroke.smooth) {
+    const last = pts[pts.length - 1]
+    setStrokeStyle(currentStroke)
+    ctx.lineWidth = segmentWidth(last, currentStroke)
+    ctx.beginPath()
+    ctx.moveTo(lastMid.x, lastMid.y)
+    ctx.lineTo(last.x, last.y)
+    ctx.stroke()
+  }
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+// ==================== Полный redraw (undo/resize) ====================
+function redrawStroke(stroke: Stroke) {
+  if (!ctx) return
+  const pts = stroke.points
+  if (pts.length === 0) return
+
+  setStrokeStyle(stroke)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  if (pts.length === 1) {
+    drawDot(pts[0], stroke)
+    ctx.globalCompositeOperation = 'source-over'
+    return
+  }
+
+  if (!stroke.smooth) {
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineWidth = segmentWidth(pts[i], stroke)
+      ctx.beginPath()
+      ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
+      ctx.lineTo(pts[i].x, pts[i].y)
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = 'source-over'
+    return
+  }
+
+  const mid01 = midpoint(pts[0], pts[1])
+  ctx.lineWidth = segmentWidth(pts[0], stroke)
+  ctx.beginPath()
+  ctx.moveTo(pts[0].x, pts[0].y)
+  ctx.lineTo(mid01.x, mid01.y)
+  ctx.stroke()
+
+  let last = mid01
+  for (let i = 1; i < pts.length - 1; i++) {
+    const mid = midpoint(pts[i], pts[i + 1])
+    ctx.lineWidth = segmentWidth(pts[i], stroke)
+    ctx.beginPath()
+    ctx.moveTo(last.x, last.y)
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y)
+    ctx.stroke()
+    last = mid
+  }
+
+  const tail = pts[pts.length - 1]
+  ctx.lineWidth = segmentWidth(tail, stroke)
+  ctx.beginPath()
+  ctx.moveTo(last.x, last.y)
+  ctx.lineTo(tail.x, tail.y)
+  ctx.stroke()
+
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+function recomputeLastMid() {
+  if (!currentStroke) { lastMid = null; return }
+  const pts = currentStroke.points
+  if (pts.length === 0) { lastMid = null; return }
+  if (pts.length === 1) { lastMid = { x: pts[0].x, y: pts[0].y }; return }
+  lastMid = midpoint(pts[pts.length - 2], pts[pts.length - 1])
+}
+
+function redrawAll() {
+  if (!ctx || !canvasRef.value) return
+  ctx.save()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
+  ctx.restore()
+
+  for (const s of strokes) redrawStroke(s)
+  if (currentStroke) {
+    redrawStroke(currentStroke)
+    recomputeLastMid()
+  }
+  ctx.globalCompositeOperation = 'source-over'
+}
+
+// ==================== Инициализация / resize ====================
 function initCanvas() {
   if (!canvasRef.value) return
   ctx = canvasRef.value.getContext('2d', { alpha: true })
@@ -107,96 +352,81 @@ function handleResize() {
   if (!containerRef.value || !canvasRef.value || !ctx) return
 
   const rect = containerRef.value.getBoundingClientRect()
+  const newDpr = window.devicePixelRatio || 1
+  const w = Math.max(1, Math.round(rect.width * newDpr))
+  const h = Math.max(1, Math.round(rect.height * newDpr))
 
-  const tempCanvas = document.createElement('canvas')
-  tempCanvas.width = canvasRef.value.width
-  tempCanvas.height = canvasRef.value.height
-  const tempCtx = tempCanvas.getContext('2d')
-  if (tempCtx) {
-    tempCtx.imageSmoothingEnabled = true
-    tempCtx.drawImage(canvasRef.value, 0, 0)
-  }
+  if (canvasRef.value.width === w && canvasRef.value.height === h) return
 
-  canvasRef.value.width = rect.width
-  canvasRef.value.height = rect.height
+  dpr = newDpr
+  canvasRef.value.width = w
+  canvasRef.value.height = h
 
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.imageSmoothingEnabled = true
-  ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
-  if (tempCanvas.width > 0 && tempCanvas.height > 0) {
-    ctx.drawImage(tempCanvas, 0, 0)
-  }
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  redrawAll()
 }
 
 function getCoordinates(e: PointerEvent) {
   if (!canvasRef.value) return { x: 0, y: 0 }
   const rect = canvasRef.value.getBoundingClientRect()
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+function pointerToPoint(e: PointerEvent): StrokePoint {
+  const { x, y } = getCoordinates(e)
   return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top
+    x,
+    y,
+    pressure: e.pressure ?? 0.5,
+    isPen: e.pointerType === 'pen',
   }
 }
 
-// ==================== Рисование ====================
-
-function drawSmoothLine(x1: number, y1: number, x2: number, y2: number) {
-  if (!ctx) return
-
-  const dx = x2 - x1
-  const dy = y2 - y1
-  const distance = Math.sqrt(dx * dx + dy * dy)
-
-  const step = 1.5
-  const steps = Math.ceil(distance / step)
-
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    const x = x1 + dx * t
-    const y = y1 + dy * t
-
-    ctx.beginPath()
-    ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2)
-    ctx.fillStyle = isErasing ? '#000' : (ctx.strokeStyle as string)
-    ctx.fill()
-  }
-}
-
+// ==================== Pointer-события ====================
 function onPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest('.wb-toolbar')) return
   if (!canvasRef.value || !ctx) return
   e.preventDefault()
+
+  setInteraction(true) // ★ Пользователь начал взаимодействие
 
   if (currentPointerId !== null) return
 
   currentPointerId = e.pointerId
   canvasRef.value.setPointerCapture(e.pointerId)
   drawing = true
+  currentIsErasing = currentMode.value === 'eraser' || e.ctrlKey || e.metaKey
 
-  isErasing = currentMode.value === 'eraser' || e.ctrlKey || e.metaKey
-
-  if (isErasing) {
-    ctx.globalCompositeOperation = 'destination-out'
-    ctx.lineWidth = currentEraserSize.value
-  } else {
-    ctx.globalCompositeOperation = 'source-over'
-    ctx.fillStyle = props.color
-    ctx.strokeStyle = props.color
-    ctx.lineWidth = currentPenSize.value
+  const pt = pointerToPoint(e)
+  currentStroke = {
+    points: [pt],
+    color: props.color,
+    size: currentIsErasing ? currentEraserSize.value : currentPenSize.value,
+    eraser: currentIsErasing,
+    smooth: smoothingEnabled.value,
+    usePressure: pressureEnabled.value,
+    minPw: minPressureWidth.value,
+    maxPw: maxPressureWidth.value,
+    stabilizer: stabilizerStrength.value,
   }
+  lastMid = { x: pt.x, y: pt.y }
+  stabilizerState = { x: pt.x, y: pt.y }
 
-  const { x, y } = getCoordinates(e)
-  lastX = x
-  lastY = y
-
-  ctx.beginPath()
-  ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2)
-  ctx.fill()
+  drawDot(pt, currentStroke)
+  ctx.globalCompositeOperation = 'source-over'
 }
 
 function onPointerMove(e: PointerEvent) {
   if (!canvasRef.value) return
-
   const { x, y } = getCoordinates(e)
   cursorPos.value = { x, y }
+
+  // Если перо двигается — значит взаимодействие продолжается
+  setInteraction(true)
 
   if (currentMode.value === 'eraser' || isCtrlPressed.value || e.ctrlKey || e.metaKey) {
     showEraserCursor.value = true
@@ -204,31 +434,44 @@ function onPointerMove(e: PointerEvent) {
     showEraserCursor.value = false
   }
 
-  if (!drawing || !ctx) return
+  if (!drawing || !ctx || !currentStroke) return
   if (e.pointerId !== currentPointerId) return
-
   e.preventDefault()
 
-  if (!isErasing) {
-    if (e.pointerType === 'pen' && e.pressure > 0) {
-      ctx.lineWidth = currentPenSize.value * (0.5 + e.pressure * 1.5)
-    } else {
-      ctx.lineWidth = currentPenSize.value
-    }
-  }
+  const coalesced = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : null
+  const events = coalesced && coalesced.length > 0 ? coalesced : [e]
 
-  drawSmoothLine(lastX, lastY, x, y)
-  lastX = x
-  lastY = y
+  const pts = currentStroke.points
+  for (const ev of events) {
+    const raw = pointerToPoint(ev)
+    const pt = applyStabilizer(raw, currentStroke.stabilizer)
+    const last = pts[pts.length - 1]
+    const dx = pt.x - last.x
+    const dy = pt.y - last.y
+    if (dx * dx + dy * dy < 0.01) continue
+    pts.push(pt)
+    drawCurrentSegment()
+  }
 }
 
 function onPointerUp(e: PointerEvent) {
   if (!canvasRef.value || !ctx) return
   if (e.pointerId !== currentPointerId) return
 
+  finishStroke()
+
+  if (currentStroke) {
+    strokes.push(currentStroke)
+    redoStack.length = 0
+    emit('stroke-end', [...strokes])
+  }
+
   drawing = false
-  isErasing = false
+  currentIsErasing = false
   currentPointerId = null
+  currentStroke = null
+  lastMid = null
+  stabilizerState = null
   ctx.globalCompositeOperation = 'source-over'
 
   try {
@@ -237,22 +480,38 @@ function onPointerUp(e: PointerEvent) {
 }
 
 function onPointerCancel(e: PointerEvent) {
-  if (e.pointerId === currentPointerId) {
-    drawing = false
-    isErasing = false
-    currentPointerId = null
-    if (ctx) ctx.globalCompositeOperation = 'source-over'
+  if (e.pointerId !== currentPointerId) return
+
+  finishStroke()
+  if (currentStroke) {
+    strokes.push(currentStroke)
+    redoStack.length = 0
+    emit('stroke-end', [...strokes])
   }
+
+  drawing = false
+  currentIsErasing = false
+  currentPointerId = null
+  currentStroke = null
+  lastMid = null
+  stabilizerState = null
+  if (ctx) ctx.globalCompositeOperation = 'source-over'
+
+  // Отмена жеста — считаем, что взаимодействие прекращено
+  setInteraction(false)
 }
 
 function onPointerEnter(e: PointerEvent) {
   isPointerInside.value = true
+  setInteraction(true) // ★ Курсор зашел на холст (даже без клика)
   onPointerMove(e)
 }
 
 function onPointerLeave() {
   isPointerInside.value = false
   showEraserCursor.value = false
+  // ★ Курсор покинул холст — можно запускать ИИ
+  setInteraction(false)
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -271,6 +530,7 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
+// ==================== Lifecycle ====================
 onMounted(() => {
   initCanvas()
   handleResize()
@@ -290,6 +550,40 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  currentStroke = null
+  lastMid = null
+  stabilizerState = null
+})
+
+// ==================== Публичный API ====================
+defineExpose({
+  getStrokes: () => strokes,
+  clear: () => {
+    strokes.length = 0
+    redoStack.length = 0
+    currentStroke = null
+    lastMid = null
+    stabilizerState = null
+    redrawAll()
+    emit('stroke-end', [])
+  },
+  undo: () => {
+    const s = strokes.pop()
+    if (!s) return false
+    redoStack.push(s)
+    redrawAll()
+    emit('stroke-end', [...strokes])
+    return true
+  },
+  redo: () => {
+    const s = redoStack.pop()
+    if (!s) return false
+    strokes.push(s)
+    redrawAll()
+    emit('stroke-end', [...strokes])
+    return true
+  },
+  toDataURL: () => canvasRef.value?.toDataURL() ?? '',
 })
 </script>
 
