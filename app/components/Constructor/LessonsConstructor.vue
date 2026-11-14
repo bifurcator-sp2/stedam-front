@@ -814,7 +814,6 @@ onBeforeUnmount(() => {
     left-title="Блоки"
     :main-title="centerTitle"
     right-title="Свойства"
-    :show-viewport-picker="true"
   >
     <template #left>
       <LessonBlocksIndex

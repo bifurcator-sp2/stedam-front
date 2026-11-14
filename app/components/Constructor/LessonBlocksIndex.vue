@@ -12,11 +12,11 @@ const props = withDefaults(defineProps<{
   taxonomyIds?: number[] | null
 }>(), {
   depth: 0,
-  taxonomyIds: () => [],
+  taxonomyIds: () => []
 })
 
 const emit = defineEmits<{
-  (e: 'select-block', payload: { type: BlockStructItem; block: BlockStructBlock }): void
+  (e: 'select-block', payload: { type: BlockStructItem, block: BlockStructBlock }): void
   (e: 'select-test', test: any): void
 }>()
 
@@ -98,8 +98,8 @@ watch([showProcSearch, procTests], () => {
 
     setTimeout(() => {
       const target: Record<number, number> = {}
-      procTests.value.forEach(t => {
-        target[t.id] = (getProcProgressValue(t.complexity) / 50) * 100
+      procTests.value.forEach((t) => {
+        target[t.id] = (getProcProgressValue(t.complexity) / MAX_COMPLEXITY_N) * 100
       })
       animatedWidths.value = target
     }, 50)
@@ -204,7 +204,7 @@ function toggleType(type: BlockStructItem, e: MouseEvent) {
   panelStyle.value = {
     top: `${containerRect?.top ?? 0}px`,
     left: `${targetRect.right + 4}px`,
-    bottom: '0px',
+    bottom: '0px'
   }
 
   activeType.value = type
@@ -226,7 +226,7 @@ function openCollection(e: MouseEvent) {
   panelStyle.value = {
     top: `${containerRect?.top ?? 0}px`,
     left: `${targetRect.right + 4}px`,
-    bottom: '0px',
+    bottom: '0px'
   }
 
   activeType.value = null
@@ -248,7 +248,7 @@ function openProcSearch(e: MouseEvent) {
   panelStyle.value = {
     top: `${containerRect?.top ?? 0}px`,
     left: `${targetRect.right + 4}px`,
-    bottom: '0px',
+    bottom: '0px'
   }
 
   activeType.value = null
@@ -306,7 +306,7 @@ function blockToTest(block: BlockStructBlock): any {
     title: b.title ?? `Блок №${b.id}`,
     description: b.description ?? null,
     is_test: b.is_test ?? false,
-    block_type_icon: b.block_type_icon ?? null,
+    block_type_icon: b.block_type_icon ?? null
   }
 }
 
@@ -314,37 +314,26 @@ function tooltipTextOf(block: BlockStructBlock): string {
   return block.description || block.title || `Блок №${block.id}`
 }
 
-// Стили для процедурных заданий
+// Стили для процедурных заданий — градация в app/utils/complexity.ts
 function getProcCardClass(complexity: number | null | undefined) {
-  const v = complexity ?? 0
-  if (v <= 0.3) return 'border-emerald-500/40 hover:border-emerald-500'
-  if (v <= 0.6) return 'border-amber-500/40 hover:border-amber-500'
-  return 'border-rose-500/40 hover:border-rose-500'
+  const level = complexityLevel(complexity)
+  return `${level.border} ${level.borderHover}`
 }
 
 function getProcProgressColor(complexity: number | null | undefined): string {
-  const v = complexity ?? 0
-  if (v <= 0.3) return 'var(--ui-success)'
-  if (v <= 0.6) return 'var(--ui-warning)'
-  return 'var(--ui-error)'
+  return complexityLevel(complexity).progress
 }
 
 function getProcProgressValue(complexity: number | null | undefined): number {
-  return Math.max(1, Math.round((complexity ?? 0) * 50))
+  return complexitySliderValue(complexity)
 }
 
 function getProcIcon(complexity: number | null | undefined): string {
-  const v = complexity ?? 0
-  if (v <= 0.3) return 'i-lucide-book-open'
-  if (v <= 0.6) return 'i-lucide-zap'
-  return 'i-lucide-trophy'
+  return complexityLevel(complexity).icon
 }
 
 function getProcIconClass(complexity: number | null | undefined): string {
-  const v = complexity ?? 0
-  if (v <= 0.3) return 'text-emerald-500'
-  if (v <= 0.6) return 'text-amber-500'
-  return 'text-rose-500'
+  return complexityLevel(complexity).text
 }
 
 // ==================== Тултип ====================
@@ -361,7 +350,7 @@ function showTooltip(e: MouseEvent, text: string | null | undefined) {
     visible: true,
     text,
     x: rect.left + rect.width / 2,
-    y: rect.top - TOOLTIP_OFFSET,
+    y: rect.top - TOOLTIP_OFFSET
   }
 }
 
@@ -409,8 +398,8 @@ function onProcTaskDragStart(e: DragEvent, test: any) {
       id: test.id,
       block_type_code: test.block_type_code ?? test.code ?? '',
       settings,
-      is_test: true,
-    },
+      is_test: true
+    }
   }
 
   e.dataTransfer.effectAllowed = 'copy'
@@ -439,13 +428,22 @@ function onTestClick(test: any) {
 <template>
   <div ref="containerRef">
     <LoadingOverlay :loading="props.pending && props.depth === 0">
-      <div v-if="props.pending && props.depth === 0" class="px-1 py-2 text-center text-[13px] text-(--ui-text-muted)">
+      <div
+        v-if="props.pending && props.depth === 0"
+        class="px-1 py-2 text-center text-[13px] text-(--ui-text-muted)"
+      >
         Загрузка…
       </div>
-      <div v-else-if="props.error && props.depth === 0" class="px-1 py-2 text-center text-[13px] text-(--ui-text-muted)">
+      <div
+        v-else-if="props.error && props.depth === 0"
+        class="px-1 py-2 text-center text-[13px] text-(--ui-text-muted)"
+      >
         Не удалось загрузить структуру
       </div>
-      <div v-else-if="props.structItems.length === 0 && props.depth === 0" class="px-1 py-2 text-center text-[13px] text-(--ui-text-muted)">
+      <div
+        v-else-if="props.structItems.length === 0 && props.depth === 0"
+        class="px-1 py-2 text-center text-[13px] text-(--ui-text-muted)"
+      >
         Пока ничего нет
       </div>
 
@@ -570,7 +568,10 @@ function onTestClick(test: any) {
                 title="Одна колонка"
                 @click="columns = 1"
               >
-                <UIcon name="i-lucide-rectangle-vertical" class="size-3" />
+                <UIcon
+                  name="i-lucide-rectangle-vertical"
+                  class="size-3"
+                />
               </button>
               <button
                 type="button"
@@ -581,7 +582,10 @@ function onTestClick(test: any) {
                 title="Две колонки"
                 @click="columns = 2"
               >
-                <UIcon name="i-lucide-layout-grid" class="size-3" />
+                <UIcon
+                  name="i-lucide-layout-grid"
+                  class="size-3"
+                />
               </button>
             </div>
 
@@ -591,23 +595,30 @@ function onTestClick(test: any) {
               class="p-0.5 text-(--ui-text-muted) hover:bg-(--ui-bg) hover:text-(--ui-text) transition-colors"
               @click="closeFlyout"
             >
-              <UIcon name="i-lucide-x" class="size-4" />
+              <UIcon
+                name="i-lucide-x"
+                class="size-4"
+              />
             </button>
           </div>
         </div>
 
         <!-- Контент панели со скроллом -->
-        <div class="flex-1 overflow-y-auto p-1 min-h-0
+        <div
+          class="flex-1 overflow-y-auto p-1 min-h-0
           [scrollbar-width:thin] [scrollbar-color:transparent_transparent]
           hover:[scrollbar-color:var(--ui-border)_transparent]
           [&::-webkit-scrollbar]:w-1
           [&::-webkit-scrollbar-track]:bg-transparent
           [&::-webkit-scrollbar-thumb]:bg-transparent
           hover:[&::-webkit-scrollbar-thumb]:bg-[var(--ui-border)]
-          [&::-webkit-scrollbar-thumb]:rounded-none">
-
+          [&::-webkit-scrollbar-thumb]:rounded-none"
+        >
           <!-- Если открыт TestsSearch -->
-          <div v-if="showTestsSearch" class="w-full min-w-0 h-full">
+          <div
+            v-if="showTestsSearch"
+            class="w-full min-w-0 h-full"
+          >
             <TestsSearch
               :autonomous="true"
               :selected-taxonomy-id="primaryTaxonomyId"
@@ -618,11 +629,20 @@ function onTestClick(test: any) {
           </div>
 
           <!-- Если открыт список процедурных заданий -->
-          <div v-else-if="showProcSearch" class="flex flex-col gap-1 w-full min-w-0">
-            <div v-if="procLoading" class="px-2 py-4 text-center text-xs text-(--ui-text-muted)">
+          <div
+            v-else-if="showProcSearch"
+            class="flex flex-col gap-1 w-full min-w-0"
+          >
+            <div
+              v-if="procLoading"
+              class="px-2 py-4 text-center text-xs text-(--ui-text-muted)"
+            >
               Загрузка...
             </div>
-            <div v-else-if="procTests.length === 0" class="px-2 py-4 text-center text-xs text-(--ui-text-muted)">
+            <div
+              v-else-if="procTests.length === 0"
+              class="px-2 py-4 text-center text-xs text-(--ui-text-muted)"
+            >
               Нет доступных заданий
             </div>
             <div
@@ -657,7 +677,7 @@ function onTestClick(test: any) {
                         width: `${animatedWidths[test.id] || 0}%`,
                         backgroundColor: getProcProgressColor(test.complexity)
                       }"
-                    ></div>
+                    />
                   </div>
 
                   <span class="shrink-0 text-[10px] text-(--ui-text-muted) font-mono w-4 text-right">

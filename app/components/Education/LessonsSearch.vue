@@ -25,17 +25,26 @@ const emit = defineEmits<{
   (e: 'select-lesson', id: number): void
 }>()
 
-const currentTaxId = computed<number | undefined>(() => {
-  const raw = route.query.tax
+// Таксономия из пропса имеет приоритет над query
+function getTaxFromQuery(): number | undefined {
+  const raw = route.query.tax as string | string[] | undefined
   const v = Array.isArray(raw) ? raw[0] : raw
+  if (!v) return undefined
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : undefined
-})
+}
 
-const currentSearch = computed<string>(() => {
-  const raw = route.query.search
-  return Array.isArray(raw) ? raw[0] : raw || ''
-})
+const currentTaxId = computed<number | undefined>(() =>
+  // Приоритет: пропс (таксономия курса) → query.tax
+  props.selectedTaxonomyId || getTaxFromQuery()
+)
+
+function getSearchFromQuery(): string {
+  const raw = route.query.search as string | string[] | undefined
+  return (Array.isArray(raw) ? raw[0] : raw) || ''
+}
+
+const currentSearch = computed<string>(() => getSearchFromQuery())
 
 const PER_PAGE = 20
 const currentPage = computed<number>({
@@ -128,7 +137,7 @@ function clearSearch() {
 // ==================== Загрузка Уроков ====================
 
 const { data, pending, error } = await useAsyncData<LessonsPage>(
-  () => `lessons-list-${currentPage.value}-${currentTaxId.value}-${currentSearch.value}`,
+  () => `lessons-list-${props.selectedTaxonomyId ?? 'query'}-${currentPage.value}-${currentTaxId.value}-${currentSearch.value}`,
   () =>
     api.get<LessonsPage>('lessons', {
       params: {
@@ -138,7 +147,7 @@ const { data, pending, error } = await useAsyncData<LessonsPage>(
         search: currentSearch.value || undefined,
       },
     }),
-  { watch: [currentPage, currentTaxId, currentSearch] },
+  { watch: [() => props.selectedTaxonomyId, currentPage, currentTaxId, currentSearch] },
 )
 
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
@@ -165,7 +174,7 @@ function goToPage(page: number) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-5 p-6 max-w-3xl mx-auto w-full">
+  <div class="flex flex-col gap-2 p-2 max-w-3xl mx-auto w-full">
 
     <!-- === Хлебные крошки над поиском === -->
     <div v-if="breadcrumbsText" class="mb-1 max-w-full">
@@ -177,6 +186,7 @@ function goToPage(page: number) {
         <span class="break-all min-w-0 leading-snug">{{ breadcrumbsText }}</span>
 
         <button
+          v-if="props.selectedTaxonomyId === undefined || props.selectedTaxonomyId === null"
           type="button"
           class="ml-1 mt-[2px] p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0"
           title="Сбросить фильтр по разделу"

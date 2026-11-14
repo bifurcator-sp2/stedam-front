@@ -22,7 +22,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   columnsCount: 3,
   draggable: false,
-  autonomous: undefined,
+  autonomous: undefined
 })
 
 const api = useApi()
@@ -49,16 +49,14 @@ function complexityCardClass(complexity: number | null | undefined): string {
   if (complexity == null || !Number.isFinite(Number(complexity))) {
     return 'border-default hover:border-primary/50'
   }
-  const v = Math.max(0, Math.min(1, Number(complexity)))
-  if (v <= 0.3) return 'border-emerald-500/40 hover:border-emerald-500'
-  if (v <= 0.6) return 'border-amber-500/40 hover:border-amber-500'
-  return 'border-rose-500/40 hover:border-rose-500'
+  const level = complexityLevel(complexity)
+  return `${level.border} ${level.borderHover}`
 }
 
 // ==================== Колонки ====================
 
 const resolvedColumns = computed<number>(() =>
-  props.columns != null ? props.columns : props.columnsCount,
+  props.columns != null ? props.columns : props.columnsCount
 )
 
 // ==================== Автономность ====================
@@ -80,9 +78,11 @@ const isVeryCompact = computed(() => rootWidth.value > 0 && rootWidth.value < 32
 
 // Уменьшенные отступы для соответствия новому дизайну без скруглений
 const padClass = computed(() =>
-  isVeryCompact.value ? 'p-1'
-    : isCompact.value ? 'p-2'
-    : 'p-3',
+  isVeryCompact.value
+    ? 'p-1'
+    : isCompact.value
+      ? 'p-2'
+      : 'p-3'
 )
 
 const gapClass = computed(() => isCompact.value ? 'gap-1.5' : 'gap-3')
@@ -90,29 +90,29 @@ const gapClass = computed(() => isCompact.value ? 'gap-1.5' : 'gap-3')
 const headerRowClass = computed(() =>
   isCompact.value
     ? 'flex flex-col items-stretch gap-1 w-full'
-    : 'flex flex-wrap items-center gap-2 w-full',
+    : 'flex flex-wrap items-center gap-2 w-full'
 )
 
 const switchRowClass = computed(() =>
   isCompact.value
     ? 'flex items-center gap-3 w-full'
-    : 'flex items-center gap-3 shrink-0',
+    : 'flex items-center gap-3 shrink-0'
 )
 
 const searchWrapClass = computed(() =>
   isCompact.value
     ? 'relative w-full'
-    : 'relative flex-1 min-w-[180px]',
+    : 'relative flex-1 min-w-[180px]'
 )
 
 const effectiveColumns = computed(() =>
-  isVeryCompact.value ? 1 : resolvedColumns.value,
+  isVeryCompact.value ? 1 : resolvedColumns.value
 )
 
 const breadcrumbClass = computed(() =>
   isCompact.value
     ? 'inline-flex flex-wrap items-start gap-1 px-1 py-0.5 border border-default bg-elevated text-[11px] font-medium text-muted max-w-full'
-    : 'inline-flex flex-wrap items-start gap-1 px-1.5 py-1 border border-default bg-elevated text-xs font-medium text-muted max-w-full',
+    : 'inline-flex flex-wrap items-start gap-1 px-1.5 py-1 border border-default bg-elevated text-xs font-medium text-muted max-w-full'
 )
 
 // ==================== Локальное состояние ====================
@@ -156,7 +156,7 @@ const { data: internalTaxonomyData } = await useAsyncData<TaxonomyNode[]>(
     const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
     return res.data
   },
-  { lazy: true, immediate: !props.taxonomyData },
+  { lazy: true, immediate: !props.taxonomyData }
 )
 
 const resolvedTaxonomy = computed<TaxonomyNode[]>(() => {
@@ -201,7 +201,7 @@ watch(searchInput, (val) => {
 
       if (!isAutonomous.value) {
         router.push({
-          query: { ...route.query, search: val || undefined, page: undefined },
+          query: { ...route.query, search: val || undefined, page: undefined }
         })
       }
     }
@@ -217,7 +217,7 @@ function clearSearch() {
 
   if (!isAutonomous.value) {
     router.push({
-      query: { ...route.query, search: undefined, page: undefined },
+      query: { ...route.query, search: undefined, page: undefined }
     })
   }
 }
@@ -235,10 +235,10 @@ const { data, pending, error, refresh } = await useAsyncData<any>(
         tax: currentTaxId.value,
         search: localSearch.value || undefined,
         all: localAll.value ? 'true' : undefined,
-        ...(isAdmin.value ? { is_proc: localIsProc.value ? 'true' : 'false' } : {}),
-      },
+        ...(isAdmin.value ? { is_proc: localIsProc.value ? 'true' : 'false' } : {})
+      }
     }),
-  { watch: [localPage, currentTaxId, localSearch, localAll, localIsProc] },
+  { watch: [localPage, currentTaxId, localSearch, localAll, localIsProc] }
 )
 
 const tests = computed(() => data.value?.data ?? [])
@@ -255,8 +255,8 @@ function toggleAll() {
       query: {
         ...route.query,
         all: localAll.value ? 'true' : undefined,
-        page: undefined,
-      },
+        page: undefined
+      }
     })
   } else {
     refresh()
@@ -272,8 +272,8 @@ function toggleProc() {
       query: {
         ...route.query,
         is_proc: localIsProc.value ? 'true' : 'false',
-        page: undefined,
-      },
+        page: undefined
+      }
     })
   } else {
     refresh()
@@ -300,8 +300,8 @@ function onTestDragStart(e: DragEvent, test: any) {
       id: test.id,
       block_type_code: test.block_type_code ?? test.code ?? '',
       settings,
-      is_test: true,
-    },
+      is_test: true
+    }
   }
 
   e.dataTransfer.effectAllowed = 'copy'
@@ -381,9 +381,15 @@ onBeforeUnmount(() => {
     :class="[padClass, gapClass]"
   >
     <!-- Хлебные крошки -->
-    <div v-if="breadcrumbsText" class="w-full max-w-full min-w-0">
+    <div
+      v-if="breadcrumbsText"
+      class="w-full max-w-full min-w-0"
+    >
       <div :class="breadcrumbClass">
-        <UIcon name="i-lucide-folder-tree" class="w-4 h-4 shrink-0 text-slate-400 mt-[1px]" />
+        <UIcon
+          name="i-lucide-folder-tree"
+          class="w-4 h-4 shrink-0 text-slate-400 mt-[1px]"
+        />
         <span class="break-all min-w-0 leading-snug">{{ breadcrumbsText }}</span>
 
         <button
@@ -393,7 +399,10 @@ onBeforeUnmount(() => {
           title="Сбросить фильтр по разделу"
           @click="router.push({ query: { ...route.query, tax: undefined, page: undefined } })"
         >
-          <UIcon name="i-lucide-x" class="w-3.5 h-3.5" />
+          <UIcon
+            name="i-lucide-x"
+            class="w-3.5 h-3.5"
+          />
         </button>
       </div>
     </div>
@@ -402,16 +411,29 @@ onBeforeUnmount(() => {
     <div :class="headerRowClass">
       <div :class="switchRowClass">
         <!-- Только мои -->
-        <div class="flex items-center gap-1.5 cursor-pointer select-none shrink-0" @click="toggleAll">
-          <USwitch :model-value="localAll" color="primary" />
+        <div
+          class="flex items-center gap-1.5 cursor-pointer select-none shrink-0"
+          @click="toggleAll"
+        >
+          <USwitch
+            :model-value="localAll"
+            color="primary"
+          />
           <span class="text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
             {{ localAll ? 'Все' : 'Только мои' }}
           </span>
         </div>
 
         <!-- Уникальные / Процедурные (только для админов) -->
-        <div v-if="isAdmin" class="flex items-center gap-1.5 cursor-pointer select-none shrink-0" @click="toggleProc">
-          <USwitch :model-value="localIsProc" color="neutral" />
+        <div
+          v-if="isAdmin"
+          class="flex items-center gap-1.5 cursor-pointer select-none shrink-0"
+          @click="toggleProc"
+        >
+          <USwitch
+            :model-value="localIsProc"
+            color="neutral"
+          />
           <span class="text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
             {{ localIsProc ? 'Процедурные' : 'Уникальные' }}
           </span>
@@ -428,7 +450,7 @@ onBeforeUnmount(() => {
           type="text"
           placeholder="Поиск по заданиям..."
           class="w-full border border-slate-200 bg-white py-1 pl-7 pr-7 text-xs text-slate-900 placeholder:text-slate-400 focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-white dark:placeholder:text-slate-500 dark:focus:ring-indigo-900"
-        />
+        >
         <button
           v-if="searchInput.length > 0"
           type="button"
@@ -436,21 +458,33 @@ onBeforeUnmount(() => {
           title="Очистить поиск"
           @click="clearSearch"
         >
-          <UIcon name="i-lucide-x" class="h-3.5 w-3.5" />
+          <UIcon
+            name="i-lucide-x"
+            class="h-3.5 w-3.5"
+          />
         </button>
       </div>
     </div>
 
     <!-- Контент -->
     <LoadingOverlay :loading="pending">
-      <div v-if="error" class="py-4 text-center text-xs text-[var(--ui-text-muted,#9ca3af)]">
+      <div
+        v-if="error"
+        class="py-4 text-center text-xs text-[var(--ui-text-muted,#9ca3af)]"
+      >
         Не удалось загрузить задания
       </div>
-      <div v-else-if="!pending && tests.length === 0" class="py-4 text-center text-xs text-[var(--ui-text-muted,#9ca3af)]">
+      <div
+        v-else-if="!pending && tests.length === 0"
+        class="py-4 text-center text-xs text-[var(--ui-text-muted,#9ca3af)]"
+      >
         Задания не найдены
       </div>
 
-      <div v-else class="flex flex-col gap-3">
+      <div
+        v-else
+        class="flex flex-col gap-3"
+      >
         <div
           class="grid gap-2 items-start w-full min-w-0"
           :style="{ gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }"
@@ -463,7 +497,7 @@ onBeforeUnmount(() => {
             class="test-card w-full min-w-0 flex flex-col text-left border-l-[3px] transition-all duration-200 overflow-hidden group h-full hover:opacity-90"
             :class="[
               complexityCardClass(test.complexity),
-              props.draggable ? 'cursor-grab active:cursor-grabbing' : '',
+              props.draggable ? 'cursor-grab active:cursor-grabbing' : ''
             ]"
             @dragstart="onTestDragStart($event, test)"
             @dragend="onTestDragEnd"
@@ -474,7 +508,10 @@ onBeforeUnmount(() => {
             <div class="pl-1.5 pr-1 py-1 flex items-center justify-between gap-1">
               <div class="flex items-center gap-1 min-w-0">
                 <div class="flex size-5 shrink-0 items-center justify-center text-primary">
-                  <UIcon name="i-lucide-clipboard-check" class="size-3.5" />
+                  <UIcon
+                    name="i-lucide-clipboard-check"
+                    class="size-3.5"
+                  />
                 </div>
 
                 <div class="min-w-0 flex flex-col justify-center">
@@ -496,7 +533,10 @@ onBeforeUnmount(() => {
                 class="shrink-0 flex items-center justify-center size-4 text-primary"
                 title="Мое задание"
               >
-                <UIcon name="i-lucide-user" class="size-3" />
+                <UIcon
+                  name="i-lucide-user"
+                  class="size-3"
+                />
               </div>
             </div>
 
@@ -508,7 +548,10 @@ onBeforeUnmount(() => {
             <!-- Футер карточки (без верхней рамки и фона) -->
             <div class="pl-1.5 pr-1 pb-1 flex items-center justify-between shrink-0">
               <span class="text-[10px] font-medium text-muted flex items-center gap-1">
-                <UIcon name="i-lucide-activity" class="size-3" />
+                <UIcon
+                  name="i-lucide-activity"
+                  class="size-3"
+                />
                 Использований: {{ test.usages ?? 0 }}
               </span>
             </div>
@@ -522,8 +565,8 @@ onBeforeUnmount(() => {
             variant="outline"
             size="xs"
             :disabled="localPage <= 1"
-            @click="goToPage(localPage - 1)"
             class="rounded-none"
+            @click="goToPage(localPage - 1)"
           >
             Назад
           </UButton>
@@ -539,8 +582,8 @@ onBeforeUnmount(() => {
             variant="outline"
             size="xs"
             :disabled="!meta?.has_more_pages"
-            @click="goToPage(localPage + 1)"
             class="rounded-none"
+            @click="goToPage(localPage + 1)"
           >
             Вперед
           </UButton>

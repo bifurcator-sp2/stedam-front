@@ -33,39 +33,39 @@ function onBreadcrumbOpen(id: number) {
   router.push({ query: { tax: id } })
 }
 
-function createLesson() {
+function createCourse() {
   const query: Record<string, string> = {}
   const tax = selectedTaxonomyId.value
   // Если выбран валидный tax, прокидываем его в конструктор
   if (tax !== null && Number.isFinite(tax) && tax > 0) {
     query.tax = String(tax)
   }
-  router.push({ path: '/construct-lesson', query })
+  router.push({ path: '/construct-course', query })
 }
 
-// ==================== Выбранный урок ====================
-const selectedLessonId = ref<number | null>(null)
+// ==================== Выбранный курс ====================
+const selectedCourseId = ref<number | null>(null)
 
-function onSelectLesson(id: number) {
-  if (selectedLessonId.value === id) {
-    selectedLessonId.value = null
+function onSelectCourse(id: number) {
+  if (selectedCourseId.value === id) {
+    selectedCourseId.value = null
   } else {
-    selectedLessonId.value = id
+    selectedCourseId.value = id
   }
 }
 
 // ==================== Клик вне правой панели ====================
 function handleGlobalClick(event: MouseEvent) {
-  if (selectedLessonId.value === null) return
+  if (selectedCourseId.value === null) return
 
   const target = event.target as HTMLElement
   if (!target || !target.closest) return
 
   if (target.closest('.cursor-col-resize')) return
   if (target.closest('.right-panel-content')) return
-  if (target.closest('.lesson-card')) return
+  if (target.closest('.course-card')) return
 
-  selectedLessonId.value = null
+  selectedCourseId.value = null
 }
 
 onMounted(() => {
@@ -111,25 +111,25 @@ onBeforeUnmount(() => {
         color="primary"
         variant="solid"
         class="normal-case tracking-normal font-semibold shadow-sm hover:shadow-md transition-all duration-200"
-        @click="createLesson"
+        @click="createCourse"
       >
         Создать курс
       </UButton>
     </template>
 
     <template #main>
-      <EducationLessonsSearch
+      <EducationCoursesSearch
         :selected-taxonomy-id="selectedTaxonomyId"
         :taxonomy-data="taxonomyData"
         @open-taxonomy="onBreadcrumbOpen"
-        @select-lesson="onSelectLesson"
+        @select-course="onSelectCourse"
       />
     </template>
 
     <template #right>
-      <div v-if="!selectedLessonId" class="flex flex-col items-center justify-center h-full p-6 text-center text-slate-400">
+      <div v-if="!selectedCourseId" class="flex flex-col items-center justify-center h-full p-6 text-center text-slate-400">
         <UIcon name="i-lucide-book-open" class="w-10 h-10 mb-3 opacity-20" />
-        <p class="text-sm">Выберите урок для просмотра</p>
+        <p class="text-sm">Выберите курс для просмотра</p>
       </div>
 
 

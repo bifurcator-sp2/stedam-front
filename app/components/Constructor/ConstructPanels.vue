@@ -9,7 +9,6 @@ interface Props {
   rightTitle?: string
   defaultViewportWidth?: number | null
   viewportStorageKey?: string
-  showViewportPicker?: boolean
   displayLeft?: boolean
   displayRight?: boolean
   displayViewportSelector?: boolean
@@ -27,7 +26,6 @@ const props = withDefaults(defineProps<Props>(), {
   rightTitle: '',
   defaultViewportWidth: 834,
   viewportStorageKey: 'constructor:viewport-width',
-  showViewportPicker: true,
   displayLeft: true,
   displayRight: true,
   displayViewportSelector: true,

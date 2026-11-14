@@ -21,8 +21,8 @@ const props = withDefaults(
     stylePath: '',
     id: 0,
     isTest: false,
-    mode: 'body',
-  },
+    mode: 'body'
+  }
 )
 
 const emit = defineEmits<{
@@ -79,7 +79,7 @@ const config = computed(() => {
     subject: typeof params.subject === 'string' ? params.subject : 'math',
     testResolver: typeof params.test_resolver === 'string' ? params.test_resolver : null,
     difficulty: typeof params.difficulty === 'number' ? params.difficulty : null,
-    taxonomyId: typeof params.taxonomy_id === 'number' ? params.taxonomy_id : null,
+    taxonomyId: typeof params.taxonomy_id === 'number' ? params.taxonomy_id : null
   }
 })
 
@@ -116,18 +116,13 @@ const effectiveDifficulty = computed(() => {
   return config.value.difficulty ?? 0.5
 })
 
-const difficultyInfo = computed(() => {
-  const d = effectiveDifficulty.value
-  if (d < 0.3) return { label: 'Базовый', icon: 'i-lucide-book-open', color: '#10b981', cls: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' }
-  if (d < 0.6) return { label: 'Продвинутый', icon: 'i-lucide-zap', color: '#f59e0b', cls: 'bg-amber-500/10 text-amber-600 border-amber-500/20' }
-  return { label: 'Сложный', icon: 'i-lucide-trophy', color: '#f43f5e', cls: 'bg-rose-500/10 text-rose-600 border-rose-500/20' }
-})
+const difficultyInfo = computed(() => complexityLevel(effectiveDifficulty.value))
 
 const sliderStyle = computed(() => {
-  const p = Math.max(0, Math.min(1, effectiveDifficulty.value))
+  const p = clampComplexity(effectiveDifficulty.value)
   return {
-    '--_slider-color': difficultyInfo.value.color,
-    background: `linear-gradient(to right, ${difficultyInfo.value.color} 0%, ${difficultyInfo.value.color} ${p * 100}%, var(--ui-bg-elevated, #f1f5f9) ${p * 100}%, var(--ui-bg-elevated, #f1f5f9) 100%)`
+    '--_slider-color': difficultyInfo.value.hex,
+    'background': `linear-gradient(to right, ${difficultyInfo.value.hex} 0%, ${difficultyInfo.value.hex} ${p * 100}%, var(--ui-bg-elevated, #f1f5f9) ${p * 100}%, var(--ui-bg-elevated, #f1f5f9) 100%)`
   }
 })
 
@@ -158,7 +153,7 @@ async function fetchResolvers() {
   try {
     const res = await api.get<any>('/tasks/resolvers', {
       params: { subject: config.value.subject },
-      silent: true,
+      silent: true
     })
     const payload = res?.data ?? res
     if (Array.isArray(payload?.resolvers)) {
@@ -171,10 +166,10 @@ async function fetchResolvers() {
 
 const resolverItems = computed(() => [
   { label: 'Случайная тема', value: '' },
-  ...resolvers.value.map((r) => ({
+  ...resolvers.value.map(r => ({
     label: r.label_full,
-    value: r.value,
-  })),
+    value: r.value
+  }))
 ])
 
 const selectedResolver = computed(() => config.value.testResolver ?? '')
@@ -209,7 +204,7 @@ async function generateTask() {
     const params: Record<string, any> = {
       subject: config.value.subject,
       test_resolver: contextTestResolver.value || config.value.testResolver || undefined,
-      difficulty: effectiveDifficulty.value,
+      difficulty: effectiveDifficulty.value
     }
 
     const res = await api.get<any>('/tasks/random', { params, silent: true })
@@ -298,7 +293,7 @@ watch(
     const prepared = solution ? prepareTextForHtmltext(solution) : ''
     randomTaskSolution.value = prepared || null
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 onBeforeUnmount(() => {
@@ -310,12 +305,12 @@ onBeforeUnmount(() => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const testLabelNode = computed<SettingNode | undefined>(() =>
-  props.node.children?.find((c) => c.key === 'testLabel'),
+  props.node.children?.find(c => c.key === 'testLabel')
 )
 
 function onUpdateTestLabelNode(updatedNode: SettingNode) {
   if (!canEdit.value) return
-  const nextChildren = props.node.children?.map((c) =>
+  const nextChildren = props.node.children?.map(c =>
     c.key === updatedNode.key ? updatedNode : c
   ) ?? []
   emit('update', { ...props.node, children: nextChildren })
@@ -347,11 +342,11 @@ function toPxRadius(v: unknown): string | undefined {
 }
 
 const contentBoxNode = computed(() => {
-  return props.node.children?.find((c) => c.key === 'contentbox')
+  return props.node.children?.find(c => c.key === 'contentbox')
 })
 
 const contentSettingsNode = computed(() => {
-  return contentBoxNode.value?.children?.find((c) => c.key === 'settings')
+  return contentBoxNode.value?.children?.find(c => c.key === 'settings')
 })
 
 const contentContainer = computed(() => {
@@ -456,18 +451,19 @@ const contentBorderStyle = computed(() => {
 
 <template>
   <div class="flex w-full flex-col">
-
     <!-- ═══════════════ НАСТРОЙКИ (только в редакторах) ═══════════════ -->
     <div
       v-if="canEdit"
       class="flex flex-col gap-4  border-2 border-dashed border-primary/25 bg-primary/[0.02] p-4 mb-4"
     >
-
       <div
         v-if="contextTestResolver"
         class="flex items-center gap-2  bg-blue-50 border border-blue-100 px-3 py-2 text-blue-700 dark:bg-blue-900/20 dark:border-blue-800 dark:text-blue-300"
       >
-        <UIcon name="i-lucide-folder-tree" class="size-4 shrink-0" />
+        <UIcon
+          name="i-lucide-folder-tree"
+          class="size-4 shrink-0"
+        />
         <span class="text-xs font-semibold">Резолвер таксономии: {{ contextTestResolver }}</span>
       </div>
 
@@ -475,7 +471,10 @@ const contentBorderStyle = computed(() => {
         <div class="flex flex-col gap-1.5">
           <div class="flex items-center justify-between">
             <label class="text-[11px] font-semibold uppercase tracking-wider text-muted">Тема</label>
-            <span v-if="!config.testResolver" class="text-[10px] italic text-muted">случайная</span>
+            <span
+              v-if="!config.testResolver"
+              class="text-[10px] italic text-muted"
+            >случайная</span>
           </div>
           <USelect
             :model-value="selectedResolver"
@@ -491,8 +490,11 @@ const contentBorderStyle = computed(() => {
           <div class="flex items-center justify-between">
             <label class="text-[11px] font-semibold uppercase tracking-wider text-muted">Сложность</label>
             <div class="flex items-center gap-2">
-              <span :class="['inline-flex items-center gap-1  border px-2 py-0.5 text-[10px] font-semibold', difficultyInfo.cls]">
-                <UIcon :name="difficultyInfo.icon" class="size-3" />
+              <span :class="['inline-flex items-center gap-1  border px-2 py-0.5 text-[10px] font-semibold', difficultyInfo.badge]">
+                <UIcon
+                  :name="difficultyInfo.icon"
+                  class="size-3"
+                />
                 {{ difficultyInfo.label }}
               </span>
               <span class="font-mono text-[10px] text-muted">{{ effectiveDifficulty.toFixed(2) }}</span>
@@ -502,21 +504,30 @@ const contentBorderStyle = computed(() => {
                 class="text-muted hover:text-error transition-colors"
                 @click="resetDifficulty"
               >
-                <UIcon name="i-lucide-x" class="size-3.5" />
+                <UIcon
+                  name="i-lucide-x"
+                  class="size-3.5"
+                />
               </button>
             </div>
           </div>
           <input
             v-if="!isDifficultyLocked"
-            type="range" min="0" max="1" step="0.05"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
             :value="effectiveDifficulty"
             :style="sliderStyle"
             class="w-full h-1.5 appearance-none  outline-none cursor-pointer mt-1
                    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[var(--ui-bg,#fff)] [&::-webkit-slider-thumb]:bg-[var(--_slider-color)] [&::-webkit-slider-thumb]:shadow-sm [&::-webkit-slider-thumb]:cursor-grab
                    [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-[var(--ui-bg,#fff)] [&::-moz-range-thumb]:bg-[var(--_slider-color)] [&::-moz-range-thumb]:shadow-sm [&::-moz-range-thumb]:cursor-grab"
             @input="onDifficultyInput"
-          />
-          <div v-else class="text-[10px] text-muted mt-1 italic">
+          >
+          <div
+            v-else
+            class="text-[10px] text-muted mt-1 italic"
+          >
             Управляется настройками задания
           </div>
         </div>
@@ -534,13 +545,18 @@ const contentBorderStyle = computed(() => {
     </div>
 
     <!-- ═══════════════ ОШИБКА ═══════════════ -->
-    <div v-if="error" class=" border border-error/30 bg-error/5 p-4 text-center text-sm text-error">
+    <div
+      v-if="error"
+      class=" border border-error/30 bg-error/5 p-4 text-center text-sm text-error"
+    >
       {{ error }}
     </div>
 
     <!-- ═══════════════ ЗАДАНИЕ ═══════════════ -->
-    <div v-else-if="effectiveQuestion" class="flex flex-col">
-
+    <div
+      v-else-if="effectiveQuestion"
+      class="flex flex-col"
+    >
       <!-- Заголовок условия задачи (testLabel) -->
       <TextNode
         v-if="testLabelNode"
@@ -553,22 +569,21 @@ const contentBorderStyle = computed(() => {
 
       <!-- 1. Внешняя обертка (только Margin) -->
       <div :style="contentMarginStyle">
-
         <!-- 2. Визуальная коробка (Background, Border, Padding) -->
         <div :style="[contentBcgStyle, contentBorderStyle, contentPaddingStyle]">
-
           <!-- 3. Контейнер с колонками и самим текстом -->
           <component
             :is="contentContainer"
             :class="[contentAlignClass, contentSizeClass]"
             :style="{ columnCount: contentCols }"
           >
-            <Htmltext :node="questionNode" :editable="false" />
+            <Htmltext
+              :node="questionNode"
+              :editable="false"
+            />
           </component>
-
         </div>
       </div>
-
     </div>
   </div>
 </template>
