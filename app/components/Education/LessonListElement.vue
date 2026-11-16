@@ -1,6 +1,6 @@
 <!-- app/components/Education/LessonListElement.vue -->
 <script setup lang="ts">
-import type { LessonListItem } from '~/types/lesson'
+import type { LessonListItem, LessonTypeOption } from '~/types/lesson'
 
 interface TaxonomyNode {
   id: number
@@ -18,10 +18,12 @@ const props = withDefaults(
   defineProps<{
     lesson: LessonWithTaxonomies
     taxonomyTree?: TaxonomyNode[]
+    lessonTypes?: LessonTypeOption[]
     emitOpenOn?: 'click' | 'dblclick'
   }>(),
   {
     taxonomyTree: () => [],
+    lessonTypes: () => [],
     emitOpenOn: 'click',
   }
 )
@@ -63,6 +65,12 @@ const chains = computed(() => {
 
 const hasBreadcrumbs = computed(() => chains.value.length > 0)
 
+const lessonType = computed<LessonTypeOption | null>(() => {
+  const code = props.lesson.type
+  if (!code) return null
+  return props.lessonTypes.find((t) => t.code === code) ?? null
+})
+
 const openEvent = computed(() => props.emitOpenOn)
 
 function displayTitle(l: LessonWithTaxonomies): string {
@@ -88,6 +96,7 @@ function formatDate(iso: string | null): string {
 }
 
 function onCardClick(): void {
+  if (dragActive) return
   emit('open', props.lesson.id)
 }
 
@@ -108,13 +117,47 @@ function onCardKeydown(ev: KeyboardEvent): void {
     onCardClick()
   }
 }
+
+// ==================== Drag урока ====================
+
+let dragActive = false
+
+function onCardDragStart(ev: DragEvent): void {
+  if (!ev.dataTransfer) return
+  dragActive = true
+
+  const source = {
+    id: props.lesson.id,
+    title: props.lesson.title ?? null,
+    description: props.lesson.description ?? null,
+    type: props.lesson.type ?? null,
+    blocks_count: props.lesson.blocks_count ?? 0,
+    saved: props.lesson.saved ?? false,
+    published: props.lesson.published ?? false,
+    created_at: props.lesson.created_at ?? null,
+    updated_at: props.lesson.updated_at ?? null,
+    taxonomy_ids: props.lesson.taxonomy_ids ?? [],
+  }
+
+  ;(window as any).__draggedLessonSource = source
+  ev.dataTransfer.effectAllowed = 'copy'
+  ev.dataTransfer.setData('text/plain', String(props.lesson.id))
+}
+
+function onCardDragEnd(): void {
+  ;(window as any).__draggedLessonSource = null
+  setTimeout(() => {
+    dragActive = false
+  }, 50)
+}
 </script>
 
 <template>
   <div
     role="button"
     tabindex="0"
-    class="lesson-card group w-full text-left rounded-lg border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] transition-colors hover:border-[var(--ui-primary,#3b82f6)] cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary,#3b82f6)] overflow-hidden border-l-4"
+    draggable="true"
+    class="lesson-card group w-full text-left rounded-lg border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] transition-colors hover:border-[var(--ui-primary,#3b82f6)] cursor-grab active:cursor-grabbing select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary,#3b82f6)] overflow-hidden border-l-4"
     :class="lesson.published
       ? 'border-l-emerald-500'
       : 'border-l-slate-300 dark:border-l-slate-600'"
@@ -122,6 +165,8 @@ function onCardKeydown(ev: KeyboardEvent): void {
     @[openEvent]="onCardClick"
     @dblclick="onCardDblClick"
     @keydown="onCardKeydown"
+    @dragstart="onCardDragStart"
+    @dragend="onCardDragEnd"
   >
     <div
       class="p-3.5 transition-opacity duration-200"
@@ -134,6 +179,21 @@ function onCardKeydown(ev: KeyboardEvent): void {
         <span class="inline-flex items-center gap-1">
           <UIcon name="i-lucide-layers" class="w-3 h-3" />
           {{ lesson.blocks_count }}
+        </span>
+        <!-- Тип урока -->
+        <span class="text-[var(--ui-border,#e5e7eb)]">·</span>
+        <span
+          v-if="lessonType"
+          class="inline-flex items-center gap-1 rounded-full border px-1.5 leading-tight whitespace-nowrap"
+          :style="{ borderColor: lessonType.color || undefined, color: lessonType.color || undefined }"
+          :title="lessonType.description || undefined"
+        >
+          <UIcon name="i-lucide-tag" class="w-3 h-3" />
+          {{ lessonType.title }}
+        </span>
+        <span v-else class="inline-flex items-center gap-1 opacity-70">
+          <UIcon name="i-lucide-tag" class="w-3 h-3" />
+          —
         </span>
         <span class="ml-auto">{{ formatDate(lesson.created_at) }}</span>
       </div>

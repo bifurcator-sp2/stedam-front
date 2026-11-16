@@ -107,7 +107,10 @@ function onCardKeydown(ev: KeyboardEvent): void {
     @[openEvent]="onCardClick"
     @keydown="onCardKeydown"
   >
-    <div class="p-3.5">
+    <div
+      class="p-3.5 transition-opacity duration-200"
+      :class="course.published ? 'opacity-100' : 'opacity-60 hover:opacity-100'"
+    >
       <!-- Верхняя строка: ID, счётчик уроков, бейдж, дата -->
       <div class="flex items-center gap-2 mb-1.5 text-[11px] font-mono text-[var(--ui-text-muted,#9ca3af)]">
         <span>#{{ course.id }}</span>
@@ -122,6 +125,16 @@ function onCardKeydown(ev: KeyboardEvent): void {
           class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium font-sans bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300"
         >
           Системный
+        </span>
+
+        <span
+          class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium font-sans"
+          :class="course.published
+            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+            : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'"
+        >
+          <UIcon :name="course.published ? 'i-lucide-lock' : 'i-lucide-pencil'" class="w-3 h-3" />
+          {{ course.published ? 'Опубликован' : 'Черновик' }}
         </span>
 
         <span class="ml-auto">{{ formatDate(course.updated_at) }}</span>

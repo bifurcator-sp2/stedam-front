@@ -16,6 +16,7 @@ import type {
   BlockStructBlock,
   LessonSavePayload,
   LessonResponse,
+  LessonTypeOption,
   DraggedBlockSource,
 } from '~/types/lesson'
 import { createEmptyLesson } from '~/types/lesson'
@@ -111,6 +112,9 @@ function blocksFromResponse(rawBlocks: any[] | undefined | null): LessonBlockMod
 
 const lesson = ref<LessonModel>(createEmptyLesson())
 const lessonRef = ref<InstanceType<typeof Lesson> | null>(null)
+
+// Типы урока приходят с сервера вместе с уроком (lesson_types)
+const lessonTypes = ref<LessonTypeOption[]>([])
 
 // ==================== Активный блок ====================
 
@@ -518,6 +522,7 @@ function snapshotLesson(): string {
     title: lesson.value.title,
     description: lesson.value.description,
     locale: lesson.value.locale,
+    type: lesson.value.type,
     published: lesson.value.published,
     taxonomy_ids: lesson.value.taxonomy_ids,
     blocks: lesson.value.blocks.map((b) => ({
@@ -565,12 +570,17 @@ async function loadLesson(id: number) {
       ? data.taxonomy_ids
       : (taxFromQuery !== null ? [taxFromQuery] : [])
 
+    lessonTypes.value = ((data.lesson_types ?? []) as LessonTypeOption[])
+      .slice()
+      .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+
     isProgrammatic.value = true
     lesson.value = {
       id: data.id,
       title: data.title ?? '',
       description: data.description ?? '',
       locale: data.locale ?? 'ru',
+      type: data.type ?? null,
       saved: data.saved ?? false,
       published: data.published ?? false,
       taxonomy_ids: taxonomyIds,
@@ -640,6 +650,7 @@ async function save() {
       title: lesson.value.title,
       description: lesson.value.description,
       locale: lesson.value.locale,
+      type: lesson.value.type ?? null,
       saved: true,
       published: lesson.value.published,
       taxonomy_ids: deepClone(lesson.value.taxonomy_ids ?? []),
@@ -665,6 +676,7 @@ async function save() {
         lesson.value = {
           ...lesson.value,
           saved: data.saved ?? true,
+          type: data.type ?? lesson.value.type ?? null,
           taxonomy_ids: data.taxonomy_ids ?? [],
           published: data.published ?? lesson.value.published,
           complexity: data.complexity ?? lesson.value.complexity ?? null,
@@ -677,6 +689,7 @@ async function save() {
         lesson.value = {
           ...lesson.value,
           saved: data.saved ?? true,
+          type: data.type ?? lesson.value.type ?? null,
           published: data.published ?? lesson.value.published,
           complexity: data.complexity ?? lesson.value.complexity ?? null,
           blocks: updatedBlocks,
@@ -694,6 +707,7 @@ async function save() {
       lesson.value = {
         ...lesson.value,
         saved: data.saved ?? true,
+        type: data.type ?? lesson.value.type ?? null,
         published: data.published ?? lesson.value.published,
         complexity: data.complexity ?? lesson.value.complexity ?? null,
         taxonomy_ids: data.taxonomy_ids ?? lesson.value.taxonomy_ids,
@@ -839,6 +853,7 @@ onBeforeUnmount(() => {
           v-model="lesson"
           v-model:active-block-local-id="activeBlockLocalId"
           :struct-items="structItems"
+          :lesson-types="lessonTypes"
           :is-read-only="isReadOnly"
           @test-warning="handleTestWarning"
           @open-task-collection="handleOpenTaskCollection"
@@ -936,7 +951,7 @@ onBeforeUnmount(() => {
         <!-- Readonly -->
         <div
           v-else-if="isReadOnly"
-          class="flex h-full flex-col items-center justify-center p-6 text-center text-(--ui-text-muted)"
+          class="flex h-full flex-col items-center justify-center text-center text-(--ui-text-muted)"
         >
           <div class="mb-3 flex size-12 items-center justify-center rounded-full bg-warning/10">
             <UIcon name="i-lucide-lock" class="size-6 text-warning" />

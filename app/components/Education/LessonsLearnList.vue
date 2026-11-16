@@ -41,6 +41,7 @@ const { data, pending, error } = await useAsyncData<LessonsPage>(
 )
 
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
+const lessonTypes = computed(() => data.value?.lesson_types ?? [])
 const meta = computed(() => data.value?.meta ?? null)
 
 // ==================== Переходы ====================
@@ -95,6 +96,7 @@ function pageTo(page: number) {
         >
           <EducationLessonListElement
             :lesson="l"
+            :lesson-types="lessonTypes"
             @open="openLesson"
           />
         </li>

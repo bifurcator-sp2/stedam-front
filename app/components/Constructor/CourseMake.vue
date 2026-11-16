@@ -3,7 +3,6 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
 import TaxonomySelector from '~/components/Constructor/TaxonomySelector.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
-import CourseEdit from '~/components/Constructor/CourseEdit.vue'
 
 // ==================== Зависимости ====================
 
@@ -23,12 +22,20 @@ const LOCALES = [
 const TITLE_MAX = 255
 const DESCRIPTION_MAX = 5000
 
+// Множитель порога (threshold_multipler): в API — доля > 0, дефолт 1.0.
+// В UI показываем его как есть (не проценты), допустимый ввод: [0, 100).
+const THRESHOLD_MIN = 0
+const THRESHOLD_MAX = 100
+const THRESHOLD_STEP = 0.1
+const THRESHOLD_DEFAULT = 1.0
+
 // ==================== Модель формы ====================
 
 interface CourseForm {
   title: string
   description: string
   locale: string
+  threshold_multipler: number
   taxonomy_ids: number[]
 }
 
@@ -37,23 +44,12 @@ function createEmptyForm(): CourseForm {
     title: '',
     description: '',
     locale: locale.value || 'ru',
+    threshold_multipler: THRESHOLD_DEFAULT,
     taxonomy_ids: []
   }
 }
 
 const form = ref<CourseForm>(createEmptyForm())
-
-// ==================== Режим: создание или редактирование по ?id ====================
-
-const courseId = computed<number | null>(() => {
-  const raw = route.query.id
-  const v = Array.isArray(raw) ? raw[0] : raw
-  if (v == null || v === '') return null
-  const n = Number(v)
-  return Number.isFinite(n) && n > 0 ? n : null
-})
-
-const isEditMode = computed(() => courseId.value !== null)
 
 // ==================== Утилита: валидный ?tax из query ====================
 
@@ -85,6 +81,15 @@ const taxonomyError = computed(() =>
   form.value.taxonomy_ids.length === 0 ? 'Выберите раздел' : null
 )
 
+const thresholdError = computed(() => {
+  const v = form.value.threshold_multipler
+  if (!Number.isFinite(v)) return 'Введите число'
+  if (v < THRESHOLD_MIN || v >= THRESHOLD_MAX) {
+    return `Значение не меньше ${THRESHOLD_MIN} и меньше ${THRESHOLD_MAX}`
+  }
+  return null
+})
+
 // ==================== Статус отправки ====================
 
 const creating = ref(false)
@@ -94,11 +99,11 @@ const centerTitle = 'Новый курс'
 
 // ==================== Создание курса ====================
 
-// Пока форма невалидна — статус по первой незаполненной группе полей
 const validationHint = computed(() => {
   if (taxonomyError.value) return 'Выберите раздел курса'
   if (titleError.value) return 'Укажите название курса'
   if (descriptionError.value) return 'Укажите описание курса'
+  if (thresholdError.value) return 'Проверьте множитель порога допуска'
   return null
 })
 
@@ -108,10 +113,9 @@ const requestPayload = computed(() => ({
   title: form.value.title.trim(),
   description: form.value.description.trim(),
   locale: form.value.locale,
+  threshold_multipler: form.value.threshold_multipler,
   tax_id: form.value.taxonomy_ids[0] ?? null
 }))
-
-const requestPreview = computed(() => JSON.stringify(requestPayload.value, null, 2))
 
 async function createCourse() {
   if (creating.value) return
@@ -135,7 +139,7 @@ async function createCourse() {
       requestPayload.value,
       { silent: true }
     )
-    const courseId = res?.data?.id ?? res?.id
+    const newCourseId = res?.data?.id ?? res?.id
 
     toast.add({
       title: 'Курс создан',
@@ -144,8 +148,8 @@ async function createCourse() {
       icon: 'i-lucide-check-circle'
     })
 
-    if (courseId) {
-      router.push({ path: route.path, query: { id: String(courseId) } })
+    if (newCourseId) {
+      await router.push({ path: '/construct-course', query: { id: String(newCourseId) } })
     }
   } catch (e: unknown) {
     console.error('[createCourse] failed', e)
@@ -170,9 +174,9 @@ async function createCourse() {
 // ==================== Предупреждение при уходе со страницы ====================
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (isEditMode.value) return
   const dirty = form.value.title !== ''
     || form.value.description !== ''
+    || form.value.threshold_multipler !== THRESHOLD_DEFAULT
     || form.value.taxonomy_ids.length > 0
   if (!dirty) return
   event.preventDefault()
@@ -182,10 +186,8 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 // ==================== Lifecycle ====================
 
 onMounted(() => {
-  if (!isEditMode.value) {
-    const tax = getValidTaxFromQuery()
-    if (tax !== null) form.value.taxonomy_ids = [tax]
-  }
+  const tax = getValidTaxFromQuery()
+  if (tax !== null) form.value.taxonomy_ids = [tax]
   window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
@@ -195,15 +197,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <CourseEdit
-    v-if="isEditMode"
-    :course-id="courseId!"
-  />
-
   <ConstructPanels
-    v-else
     :main-title="centerTitle"
-    right-title="Параметры курса"
     :display-viewport-selector="false"
     :display-left="false"
     :display-right="false"
@@ -268,23 +263,48 @@ onBeforeUnmount(() => {
                 <TaxonomySelector v-model="form.taxonomy_ids" />
               </div>
 
-              <!-- Язык -->
-              <div>
-                <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
-                  Язык курса <span class="text-error">*</span>
-                </label>
-                <select
-                  v-model="form.locale"
-                  class="h-8 w-full rounded-md border border-default bg-default px-2 text-sm text-highlighted outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-                >
-                  <option
-                    v-for="l in LOCALES"
-                    :key="l.value"
-                    :value="l.value"
+              <!-- Язык + множитель порога -->
+              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    Язык курса <span class="text-error">*</span>
+                  </label>
+                  <select
+                    v-model="form.locale"
+                    class="h-8 w-full rounded-md border border-default bg-default px-2 text-sm text-highlighted outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
                   >
-                    {{ l.label }}
-                  </option>
-                </select>
+                    <option
+                      v-for="l in LOCALES"
+                      :key="l.value"
+                      :value="l.value"
+                    >
+                      {{ l.label }}
+                    </option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    Множитель порога <span class="text-error">*</span>
+                  </label>
+                  <UInput
+                    v-model.number="form.threshold_multipler"
+                    type="number"
+                    size="sm"
+                    :min="THRESHOLD_MIN"
+                    :max="THRESHOLD_MAX"
+                    :step="THRESHOLD_STEP"
+                    class="w-full"
+                    :ui="{ base: 'text-right' }"
+                    :color="thresholdError ? 'error' : undefined"
+                  />
+                  <p
+                    v-if="thresholdError"
+                    class="mt-1 text-[11px] text-error"
+                  >
+                    {{ thresholdError }}
+                  </p>
+                </div>
               </div>
 
               <!-- Название -->
@@ -357,47 +377,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </LoadingOverlay>
-    </template>
-
-    <template #right-header>
-      <div class="flex w-full items-center justify-between gap-2">
-        <span>Параметры курса</span>
-      </div>
-    </template>
-
-    <template #right>
-      <div class="flex flex-col gap-4 bg-default p-4">
-        <div class="text-[11px] font-semibold uppercase tracking-wider text-muted">
-          Тело запроса
-        </div>
-
-        <pre class="overflow-x-auto rounded-lg border border-default bg-elevated/40 p-3 font-mono text-[11px] leading-relaxed text-highlighted">{{ requestPreview }}</pre>
-
-        <div class="mt-auto flex flex-col gap-2">
-          <div
-            v-if="validationHint"
-            class="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-[11px] text-muted"
-          >
-            <UIcon
-              name="i-lucide-info"
-              class="mt-0.5 size-3.5 shrink-0 text-warning"
-            />
-            <span>{{ validationHint }}. Обязательные поля: раздел, название и описание.</span>
-          </div>
-
-          <UButton
-            icon="i-lucide-plus"
-            color="primary"
-            variant="soft"
-            block
-            :loading="creating"
-            :disabled="creating"
-            @click="createCourse"
-          >
-            Создать курс
-          </UButton>
-        </div>
-      </div>
     </template>
   </ConstructPanels>
 </template>

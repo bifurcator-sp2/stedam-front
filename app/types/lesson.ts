@@ -4,11 +4,21 @@ import type { SettingNode } from '~/utils/constructors'
 
 // ==================== Урок ====================
 
+export interface LessonTypeOption {
+  id: number
+  code: string
+  title: string
+  description: string | null
+  color: string | null
+  sort: number
+}
+
 export interface LessonModel {
   id: number | null
   title: string
   description: string
   locale: string
+  type: string | null
   saved: boolean
   published: boolean
   taxonomy_ids: number[] | null
@@ -75,10 +85,12 @@ export interface LessonResponse {
   title: string | null
   description: string | null
   locale: string
+  type?: string | null
   saved: boolean
   published: boolean
   taxonomy_ids: number[] | null
   complexity?: number | null      // ← добавлено
+  lesson_types?: LessonTypeOption[]
   blocks: LessonBlockResponse[]
 }
 
@@ -101,6 +113,7 @@ export interface LessonSavePayload {
   title: string
   description: string
   locale: string
+  type: string | null
   saved: boolean
   published: boolean
   taxonomy_ids: number[] | null
@@ -123,6 +136,7 @@ export function createEmptyLesson(id: number | null = null): LessonModel {
     title: '',
     description: '',
     locale: 'ru',
+    type: null,
     saved: false,
     published: false,
     taxonomy_ids: null,
@@ -140,6 +154,7 @@ export interface LessonListItem {
   id: number
   title: string | null
   description: string | null
+  type?: string | null
   blocks_count: number
   saved: boolean
   published: boolean
@@ -149,6 +164,7 @@ export interface LessonListItem {
 }
 export interface LessonsPage {
   data: LessonListItem[]
+  lesson_types?: LessonTypeOption[]
   meta: {
     current_page: number
     per_page: number

@@ -76,6 +76,7 @@ watch(
       title: d.title || '',
       description: d.description || '',
       locale: d.locale || 'ru',
+      type: d.type ?? null,
       saved: d.saved ?? false,
       published: d.published ?? false,
       taxonomy_ids: d.taxonomy_ids || [],

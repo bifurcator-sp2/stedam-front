@@ -11,51 +11,58 @@ const props = withDefaults(defineProps<{
 
 /**
  * Управление сложностью задания.
- * Наружу — float 0..1, внутри — уровень + число 1..50.
+ * Наружу — float 0..1, внутри — уровень + позиция ползунка 0..100
+ * внутри диапазона выбранного уровня.
  *
  * Градация и диапазоны — в `app/utils/complexity.ts` (COMPLEXITY_LEVELS).
  */
 const model = defineModel<number | null>({ default: null })
 
-const MIN_N = 1
+/** Позиция ползунка внутри уровня: 0..100 */
+const MAX_PERCENT = 100
 
 const level = ref<ComplexityLevelKey>(COMPLEXITY_LEVELS[0].key)
-const n = ref<number>(1)
+const percent = ref<number>(0)
 const isInternalChange = ref(false)
 
 const levels = COMPLEXITY_LEVELS
 
 const hasValue = computed(() => model.value != null && Number.isFinite(Number(model.value)))
 // Уровень берём из выбранной кнопки, а не из model, чтобы UI не «прыгал»,
-// пока число ещё не выровнялось под диапазон нового уровня.
+// пока позиция ползунка ещё не выровнялась под диапазон нового уровня.
 const currentDef = computed(() => levels.find(l => l.key === level.value) ?? levels[0])
-const currentFloat = computed(() => complexityFromSlider(n.value))
-const sliderPercent = computed(() => ((n.value - MIN_N) / (MAX_COMPLEXITY_N - MIN_N)) * 100)
 
-function clampN(v: number): number {
-  if (!Number.isFinite(v)) return MIN_N
-  return Math.max(MIN_N, Math.min(MAX_COMPLEXITY_N, Math.round(v)))
+const clampPercent = (v: number): number => {
+  if (!Number.isFinite(v)) return 0
+  return Math.max(0, Math.min(MAX_PERCENT, Math.round(v)))
 }
+
+/** Позиция 0..100 внутри уровня → float 0..1 (внутри диапазона уровня) */
+function percentToFloat(p: number, def = currentDef.value): number {
+  const t = clampPercent(p) / MAX_PERCENT
+  return +(def.min + (def.max - def.min) * t).toFixed(3)
+}
+
+/** Float 0..1 → позиция 0..100 внутри своего уровня */
+function floatToPercent(v: number | null | undefined, def = complexityLevel(v)): number {
+  const clamped = clampComplexity(v)
+  const span = def.max - def.min
+  if (span <= 0) return 0
+  return clampPercent(((clamped - def.min) / span) * MAX_PERCENT)
+}
+
+const currentFloat = computed(() => percentToFloat(percent.value))
 
 watch(model, (v) => {
   if (isInternalChange.value) return
-  level.value = complexityLevel(v).key
-  n.value = complexitySliderValue(v)
+  const def = complexityLevel(v)
+  level.value = def.key
+  percent.value = floatToPercent(v, def)
 }, { immediate: true })
 
-watch([level, n], () => {
+watch([level, percent], () => {
   if (props.readonly) return
-  // Если уровень сменили, а число не влезает в его диапазон — ставим верхнюю границу
-  const def = levels.find(l => l.key === level.value) ?? levels[0]
-  const ratio = clampN(n.value) / MAX_COMPLEXITY_N
-  if (ratio <= def.min || ratio > def.max) {
-    const nextN = clampN(def.max * MAX_COMPLEXITY_N)
-    if (nextN !== n.value) {
-      n.value = nextN
-      return
-    }
-  }
-
+  // Сменили уровень — позиция ползунка сохраняется (0..100 внутри нового диапазона).
   const next = currentFloat.value
   if (next === model.value) return
   isInternalChange.value = true
@@ -70,31 +77,24 @@ function setLevel(key: ComplexityLevelKey) {
   level.value = key
 }
 
-function onInputNumber(e: Event) {
-  if (props.readonly) return
-  const t = e.target as HTMLInputElement
-  n.value = clampN(Number(t.value))
-  t.value = String(n.value)
-}
-
 function onSliderInput(e: Event) {
   if (props.readonly) return
   const t = e.target as HTMLInputElement
-  n.value = clampN(Number(t.value))
+  percent.value = clampPercent(Number(t.value))
 }
 
 const trackStyle = computed(() => ({
   'background': `linear-gradient(to right,
     ${currentDef.value.hex} 0%,
-    ${currentDef.value.hex} ${sliderPercent.value}%,
-    var(--ui-bg-elevated, #f1f5f9) ${sliderPercent.value}%,
+    ${currentDef.value.hex} ${percent.value}%,
+    var(--ui-bg-elevated, #f1f5f9) ${percent.value}%,
     var(--ui-bg-elevated, #f1f5f9) 100%)`,
   '--_slider-color': currentDef.value.hex
 }))
 
 const compactTitle = computed(() =>
   hasValue.value
-    ? `Сложность: ${currentDef.value.label} · ${n.value}/${MAX_COMPLEXITY_N} (${currentFloat.value.toFixed(3)})`
+    ? `Сложность: ${currentDef.value.label} · ${percent.value}% (${currentFloat.value.toFixed(3)})`
     : 'Сложность не задана'
 )
 </script>
@@ -116,7 +116,7 @@ const compactTitle = computed(() =>
         class="font-medium leading-none"
         :class="currentDef.text"
       >{{ currentDef.label }}</span>
-      <span class="font-mono tabular-nums leading-none">{{ n }}</span>
+      <span class="font-mono tabular-nums leading-none">{{ percent }}%</span>
     </template>
     <template v-else>
       <UIcon
@@ -142,7 +142,7 @@ const compactTitle = computed(() =>
       class="font-medium leading-none"
       :class="currentDef.text"
     >{{ currentDef.label }}</span>
-    <span class="font-mono tabular-nums leading-none">{{ n }}</span>
+    <span class="font-mono tabular-nums leading-none">{{ percent }}%</span>
   </span>
 
   <!-- ==================== FULL ==================== -->
@@ -203,9 +203,10 @@ const compactTitle = computed(() =>
     <div class="flex items-center gap-2.5">
       <input
         type="range"
-        :min="MIN_N"
-        :max="MAX_COMPLEXITY_N"
-        :value="n"
+        min="0"
+        :max="MAX_PERCENT"
+        step="1"
+        :value="percent"
         :style="trackStyle"
         :disabled="readonly"
         class="h-1.5 flex-1 appearance-none rounded-full outline-none
@@ -234,18 +235,11 @@ const compactTitle = computed(() =>
         :aria-label="`Значение сложности внутри уровня «${currentDef.label}»`"
         @input="onSliderInput"
       >
-      <input
-        type="number"
-        :min="MIN_N"
-        :max="MAX_COMPLEXITY_N"
-        :value="n"
-        inputmode="numeric"
-        :disabled="readonly"
-        class="h-7 w-14 shrink-0 rounded-md border border-default bg-default px-1.5 text-center font-mono text-xs font-semibold text-highlighted outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-        :class="readonly ? 'cursor-default opacity-80' : ''"
-        aria-label="Числовое значение сложности"
-        @input="onInputNumber"
-      >
+      <span
+        class="inline-flex h-7 w-14 shrink-0 items-center justify-center rounded-md border border-default bg-default font-mono text-xs font-semibold tabular-nums text-highlighted"
+        :class="readonly ? 'opacity-80' : ''"
+        aria-label="Позиция внутри уровня, %"
+      >{{ percent }}%</span>
     </div>
   </div>
 </template>

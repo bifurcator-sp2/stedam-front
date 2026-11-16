@@ -151,6 +151,7 @@ const { data, pending, error } = await useAsyncData<LessonsPage>(
 )
 
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
+const lessonTypes = computed(() => data.value?.lesson_types ?? [])
 const meta = computed(() => data.value?.meta ?? null)
 
 // ==================== Действия ====================
@@ -237,6 +238,7 @@ function goToPage(page: number) {
             <EducationLessonListElement
               :lesson="l"
               :taxonomy-tree="resolvedTaxonomy"
+              :lesson-types="lessonTypes"
               emit-open-on="click"
               @open="openLesson"
               @open-dblclick="openLessonConstructor"

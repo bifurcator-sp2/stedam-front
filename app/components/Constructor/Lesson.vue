@@ -10,6 +10,7 @@ import {useContentStats} from '~/composables/useContentStats'
 import type {
   LessonModel,
   LessonBlockModel,
+  LessonTypeOption,
   BlockStructItem,
   BlockStructBlock,
   DraggedBlockSource,
@@ -22,6 +23,7 @@ const toast = useToast()
 
 interface Props {
   structItems: BlockStructItem[]
+  lessonTypes?: LessonTypeOption[]
   activeBlockLocalId?: string | null
   isReadOnly?: boolean
   mode?: 'edit' | 'learn'
@@ -29,6 +31,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  lessonTypes: () => [],
   activeBlockLocalId: null,
   isReadOnly: false,
   mode: 'edit',
@@ -356,6 +359,24 @@ function updateDescription(v: string) {
   lesson.value = {...lesson.value, description: v}
 }
 
+// ==================== Тип урока ====================
+
+const typeOptions = computed(() =>
+  props.lessonTypes.map(t => ({
+    label: t.title,
+    value: t.code,
+    description: t.description ?? undefined,
+    color: t.color ?? null,
+  })),
+)
+
+const currentType = computed(() => props.lessonTypes.find(t => t.code === lesson.value.type) ?? null)
+
+function updateType(code: string | null) {
+  if (props.mode === 'learn' || props.isReadOnly) return
+  lesson.value = {...lesson.value, type: code || null}
+}
+
 // ==================== Статистика ====================
 
 const contentRef = ref<HTMLElement | null>(null)
@@ -481,6 +502,45 @@ defineExpose({
         :readonly="isReadOnly || mode === 'learn'"
         @input="updateDescription(($event.target as HTMLTextAreaElement).value)"
       />
+    </div>
+
+    <!-- Тип урока -->
+    <div
+      v-if="mode === 'learn'"
+      class="flex items-center gap-1.5 text-xs text-[var(--ui-text-muted,#94a3b8)]"
+    >
+      <UIcon name="i-lucide-tag"/>
+      <span
+        v-if="currentType"
+        class="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+        :style="{ borderColor: currentType.color || undefined, color: currentType.color || undefined }"
+        :title="currentType.description || undefined"
+      >{{ currentType.title }}</span>
+    </div>
+    <div
+      v-else
+      class="flex items-center gap-2"
+    >
+      <UIcon name="i-lucide-tag" class="size-3.5 shrink-0 text-[var(--ui-text-muted,#94a3b8)]"/>
+      <USelect
+        v-if="typeOptions.length"
+        :model-value="lesson.type ?? undefined"
+        :items="typeOptions"
+        placeholder="Тип урока"
+        size="xs"
+        :disabled="isReadOnly"
+        class="w-56 min-w-0 [&_button]:py-0.5 [&_button]:text-[12.5px]"
+        :title="currentType?.description ?? undefined"
+        :ui="{ item: 'gap-1.5' }"
+        @update:model-value="updateType($event as string | null)"
+      >
+        <template #item-leading="{ item }">
+          <span
+            class="inline-block size-2 shrink-0 rounded-full"
+            :style="{ backgroundColor: (item as { color?: string | null }).color || 'var(--ui-text-muted)' }"
+          />
+        </template>
+      </USelect>
     </div>
 
     <div

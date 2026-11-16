@@ -36,11 +36,11 @@ function onBreadcrumbOpen(id: number) {
 function createCourse() {
   const query: Record<string, string> = {}
   const tax = selectedTaxonomyId.value
-  // Если выбран валидный tax, прокидываем его в конструктор
+  // Если выбран валидный tax, прокидываем его в форму создания курса
   if (tax !== null && Number.isFinite(tax) && tax > 0) {
     query.tax = String(tax)
   }
-  router.push({ path: '/construct-course', query })
+  router.push({ path: '/make-course', query })
 }
 
 // ==================== Выбранный курс ====================

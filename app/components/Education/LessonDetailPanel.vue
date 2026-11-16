@@ -53,6 +53,7 @@ watch(
       title: raw.title || '',
       description: raw.description || '',
       locale: raw.locale || 'ru',
+      type: raw.type ?? null,
       saved: raw.saved ?? false,
       published: raw.published ?? false,
       taxonomy_ids: raw.taxonomy_ids || [],
