@@ -25,18 +25,31 @@ const route = useRoute() // <--- ДОБАВЛЕНО
 const router = useRouter() // <--- ДОБАВЛЕНО
 
 // Фоллбэк-загрузка: если данные не переданы снаружи
-const { data: internalData, pending: internalPending, error: internalError, refresh: internalRefresh } = await useAsyncData<TaxonomyNode[]>(
-  'taxonomy-tree',
-  async () => {
+const internalData = ref<TaxonomyNode[] | null>(null)
+const internalPending = ref(false)
+const internalError = ref<unknown>(null)
+
+async function internalRefresh() {
+  internalPending.value = true
+  internalError.value = null
+
+  try {
     const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
-    return res.data
-  },
-  { lazy: true, immediate: !props.data }
-)
+    internalData.value = res.data
+  } catch (e) {
+    internalError.value = e
+  } finally {
+    internalPending.value = false
+  }
+}
+
+onMounted(() => {
+  if (!props.data) internalRefresh()
+})
 
 const roots = computed(() => props.data ?? internalData.value ?? [])
 const pending = computed(() => props.pending !== undefined ? props.pending : internalPending.value)
-const error = computed(() => props.error !== undefined ? props.error : internalError.value)
+const error = computed<any>(() => props.error !== undefined ? props.error : internalError.value)
 const refresh = () => props.refresh ? props.refresh() : internalRefresh()
 
 // ==================== Сброс фильтра по разделу ====================

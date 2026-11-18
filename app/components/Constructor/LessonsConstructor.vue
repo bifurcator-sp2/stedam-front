@@ -50,13 +50,22 @@ const modalScrollClasses =
 
 // ==================== Структура типов ====================
 
-const {
-  data: struct,
-  pending: structPending,
-  error: structError,
-} = await useAsyncData('block-types-struct', () =>
-  api.get<{ data: BlockStructItem[] }>('/block-types/struct'),
-)
+const struct = ref<{ data: BlockStructItem[] } | null>(null)
+const structPending = ref(true)
+const structError = ref<unknown>(null)
+
+async function loadStruct() {
+  structPending.value = true
+  structError.value = null
+
+  try {
+    struct.value = await api.get<{ data: BlockStructItem[] }>('/block-types/struct')
+  } catch (e) {
+    structError.value = e
+  } finally {
+    structPending.value = false
+  }
+}
 
 const structItems = computed<BlockStructItem[]>(() => struct.value?.data ?? [])
 
@@ -812,6 +821,7 @@ const activeBlockSettingsModel = computed({
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleGlobalClickForPreview)
+  loadStruct()
 })
 
 onBeforeUnmount(() => {

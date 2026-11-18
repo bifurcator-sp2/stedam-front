@@ -12,10 +12,33 @@ const api = useApi()
 
 // ==================== Загрузка данных ====================
 
-const { data: responseData, pending, error } = await useAsyncData<any>(
-  () => `lesson-detail-${props.lessonId}`,
-  () => api.get(`/lessons/${props.lessonId}`),
-  { watch: [() => props.lessonId] }
+const responseData = ref<any>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+
+// Защита от гонки при быстрой смене lessonId
+let requestSeq = 0
+
+async function loadLesson() {
+  const seq = ++requestSeq
+  pending.value = true
+  error.value = null
+  responseData.value = null
+
+  try {
+    const res = await api.get(`/lessons/${props.lessonId}`)
+    if (seq === requestSeq) responseData.value = res
+  } catch (e) {
+    if (seq === requestSeq) error.value = e
+  } finally {
+    if (seq === requestSeq) pending.value = false
+  }
+}
+
+watch(
+  () => props.lessonId,
+  () => loadLesson(),
+  { immediate: true },
 )
 
 // ==================== Преобразование в LessonModel ====================
@@ -72,9 +95,23 @@ const zoomFactor = ref(1)
 
 let resizeObserver: ResizeObserver | null = null
 
-onMounted(() => {
-  if (!containerRef.value) return
+// Превью монтируется только после загрузки урока, поэтому контейнер
+// подписывается на изменение размера по факту появления в DOM (ref-колбэк).
+function observeContainer(el: Element | { $el?: unknown } | null) {
+  // Превью исчезло (перезагрузка/ошибка) — отпускаем прошлый контейнер.
+  if (!(el instanceof HTMLElement)) {
+    containerRef.value = null
+    resizeObserver?.disconnect()
+    return
+  }
+  if (containerRef.value === el) return
+  containerRef.value = el
+  if (!resizeObserver) return
+  resizeObserver.disconnect()
+  resizeObserver.observe(el)
+}
 
+onMounted(() => {
   resizeObserver = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const width = entry.contentRect.width
@@ -83,7 +120,7 @@ onMounted(() => {
       }
     }
   })
-  resizeObserver.observe(containerRef.value)
+  if (containerRef.value) resizeObserver.observe(containerRef.value)
 })
 
 onBeforeUnmount(() => {
@@ -107,7 +144,11 @@ onBeforeUnmount(() => {
       Данные урока не найдены
     </div>
 
-    <div v-else ref="containerRef" class="flex-1 overflow-y-auto overflow-x-hidden relative">
+    <div
+      v-else
+      :ref="observeContainer"
+      class="flex-1 overflow-y-auto overflow-x-hidden relative"
+    >
       <div
         class="pointer-events-none origin-top-left p-6 bg-[var(--ui-bg,#ffffff)] shadow-sm"
         :style="{

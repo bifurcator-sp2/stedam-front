@@ -11,6 +11,8 @@ export interface LessonTypeOption {
   description: string | null
   color: string | null
   sort: number
+  // Интервал (в минутах) до урока следующего типа — показывается на стрелке порядка.
+  time_gap?: number | null
 }
 
 export interface LessonModel {

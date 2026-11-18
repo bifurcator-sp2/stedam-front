@@ -1,6 +1,6 @@
 <!-- app/components/Constructor/ActualLessonsList.vue -->
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { LessonListItem } from '~/types/lesson'
 
 // ==================== Зависимости ====================
@@ -11,10 +11,24 @@ const router = useRouter()
 // ==================== Загрузка ====================
 // Бэкенд /lessons/actual возвращает голый массив, без { data: ... }
 
-const { data, pending, error } = await useAsyncData<LessonListItem[]>(
-  'lessons-actual',
-  () => api.get<LessonListItem[]>('/lessons/actual'),
-)
+const data = ref<LessonListItem[] | null>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+
+async function loadLessons() {
+  pending.value = true
+  error.value = null
+
+  try {
+    data.value = await api.get<LessonListItem[]>('/lessons/actual')
+  } catch (e) {
+    error.value = e
+  } finally {
+    pending.value = false
+  }
+}
+
+onMounted(loadLessons)
 
 const lessons = computed<LessonListItem[]>(() => data.value ?? [])
 

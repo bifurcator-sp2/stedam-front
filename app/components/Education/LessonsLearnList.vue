@@ -28,17 +28,35 @@ const currentPage = computed<number>({
 
 // ==================== Загрузка ====================
 
-const { data, pending, error } = await useAsyncData<LessonsPage>(
-  () => `lessons-list-${currentPage.value}`,
-  () =>
-    api.get<LessonsPage>('/lessons/learn', {
+const data = ref<LessonsPage | null>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+
+// Защита от гонки: обрабатываем только ответ последнего запроса
+let requestSeq = 0
+
+async function loadLessons() {
+  const seq = ++requestSeq
+  pending.value = true
+  error.value = null
+
+  try {
+    const res = await api.get<LessonsPage>('/lessons/learn', {
       params: {
         page: currentPage.value,
         per_page: PER_PAGE,
       },
-    }),
-  { watch: [currentPage] },
-)
+    })
+
+    if (seq === requestSeq) data.value = res
+  } catch (e) {
+    if (seq === requestSeq) error.value = e
+  } finally {
+    if (seq === requestSeq) pending.value = false
+  }
+}
+
+watch(currentPage, () => loadLessons(), { immediate: true })
 
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
 const lessonTypes = computed(() => data.value?.lesson_types ?? [])

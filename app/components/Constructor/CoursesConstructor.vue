@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
-import LessonTheme from '~/components/Constructor/LessonTheme.vue'
+import CourseTheme, { lessonDragState } from '~/components/Constructor/CourseTheme.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import type { LessonTypeOption } from '~/types/lesson'
 import type { ThemeLesson, ThemeLessonDrag, ThemeModel } from '~/types/course'
@@ -23,6 +23,12 @@ const THRESHOLD_MIN = 0
 const THRESHOLD_MAX = 100
 const THRESHOLD_STEP = 0.1
 
+// Время между уроками (time_gap_multipler): float, дефолт 1.0, допустимый ввод: [0, 100].
+const TIME_GAP_MIN = 0
+const TIME_GAP_MAX = 100
+const TIME_GAP_STEP = 0.1
+const TIME_GAP_DEFAULT = 1.0
+
 interface TaxonomyNode {
   id: number
   parent_id: number | null
@@ -37,6 +43,7 @@ interface CourseDetail {
   description: string
   locale: string
   threshold_multipler: number
+  time_gap_multipler: number
   tax_id: number | null
   published: boolean
   updated_at: string | null
@@ -68,13 +75,38 @@ async function fetchCourse(): Promise<CourseDetail | null> {
   return (res as { data?: CourseDetail })?.data ?? (res as CourseDetail)
 }
 
-const { data: course, pending: coursePending, refresh: refreshCourse } = courseId.value !== null
-  ? await useAsyncData<CourseDetail | null>(
-      () => `course-${courseId.value}`,
-      fetchCourse,
-      { watch: [courseId] }
-    )
-  : { data: ref<CourseDetail | null>(null), pending: ref(false), refresh: async () => {} }
+const course = ref<CourseDetail | null>(null)
+const coursePending = ref(false)
+const courseError = ref<unknown>(null)
+
+// Защита от гонки: обрабатываем только ответ последнего запроса
+let courseRequestSeq = 0
+
+async function loadCourse() {
+  if (courseId.value === null) {
+    courseRequestSeq++
+    course.value = null
+    coursePending.value = false
+    return
+  }
+
+  const seq = ++courseRequestSeq
+  coursePending.value = true
+  courseError.value = null
+
+  try {
+    const res = await fetchCourse()
+    if (seq === courseRequestSeq) course.value = res
+  } catch (e) {
+    if (seq === courseRequestSeq) courseError.value = e
+  } finally {
+    if (seq === courseRequestSeq) coursePending.value = false
+  }
+}
+
+const refreshCourse = () => loadCourse()
+
+watch(courseId, () => loadCourse(), { immediate: true })
 
 const courseTaxId = computed<number | null>(() => course.value?.tax_id ?? null)
 
@@ -86,14 +118,16 @@ const centerTitle = computed(() =>
 
 // ==================== Таксономия (крошки, только чтение) ====================
 
-const { data: taxonomyData } = await useAsyncData<TaxonomyNode[]>(
-  'taxonomy-tree',
-  async () => {
-    const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
-    return res.data
-  },
-  { lazy: true }
-)
+const taxonomyData = ref<TaxonomyNode[] | null>(null)
+
+async function loadTaxonomy() {
+  const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
+  taxonomyData.value = res.data
+}
+
+onMounted(() => {
+  loadTaxonomy()
+})
 
 function findPath(nodes: TaxonomyNode[], targetId: number): TaxonomyNode[] | null {
   for (const node of nodes) {
@@ -117,12 +151,14 @@ interface CourseForm {
   title: string
   description: string
   threshold_multipler: number
+  time_gap_multipler: number
 }
 
 const form = reactive<CourseForm>({
   title: '',
   description: '',
-  threshold_multipler: 1.0
+  threshold_multipler: 1.0,
+  time_gap_multipler: TIME_GAP_DEFAULT
 })
 
 const snapshot = ref<CourseForm>({ ...form })
@@ -135,6 +171,7 @@ watch(course, (c) => {
   form.title = c.title ?? ''
   form.description = c.description ?? ''
   form.threshold_multipler = c.threshold_multipler ?? 1.0
+  form.time_gap_multipler = c.time_gap_multipler ?? TIME_GAP_DEFAULT
   published.value = c.published === true
   snapshot.value = { ...form }
 }, { immediate: true })
@@ -144,11 +181,16 @@ const isReadOnly = computed(() => published.value)
 
 const canEdit = computed(() => course.value?.can?.edit !== false && !isReadOnly.value)
 
-const isDirty = computed(() =>
+// Изменения шапки формы (без тем: их состав считается отдельно, см. themesDirty).
+const headerDirty = computed(() =>
   form.title !== snapshot.value.title
   || form.description !== snapshot.value.description
   || form.threshold_multipler !== snapshot.value.threshold_multipler
+  || form.time_gap_multipler !== snapshot.value.time_gap_multipler
 )
+
+// Любое изменение курса — шапка или темы — разблокирует сохранение.
+const isDirty = computed(() => headerDirty.value || themesDirty.value)
 
 // ==================== Валидация ====================
 
@@ -175,10 +217,20 @@ const thresholdError = computed(() => {
   return null
 })
 
+const timeGapError = computed(() => {
+  const v = form.time_gap_multipler
+  if (!Number.isFinite(v)) return 'Введите число'
+  if (v < TIME_GAP_MIN || v > TIME_GAP_MAX) {
+    return `Значение от ${TIME_GAP_MIN} до ${TIME_GAP_MAX}`
+  }
+  return null
+})
+
 const validationHint = computed(() => {
   if (titleError.value) return 'Укажите название курса'
   if (descriptionError.value) return 'Укажите описание курса'
   if (thresholdError.value) return 'Проверьте множитель порога допуска'
+  if (timeGapError.value) return 'Проверьте время между уроками'
   return null
 })
 
@@ -186,6 +238,8 @@ const validationHint = computed(() => {
 
 const saving = ref(false)
 
+// Объявления порядка сохранения: снимок тем фиксируется ниже, когда themes
+// уже инициализированы (иначе TDZ — обращение к const до инициализации).
 interface SaveOptions {
   /** Полное сохранение всей шапки (все поля), а не только изменённых. */
   full?: boolean
@@ -197,7 +251,7 @@ async function saveCourse(options: SaveOptions = {}): Promise<boolean> {
   if (saving.value || courseId.value === null) return false
 
   // Валидация нужна только для полей, которые реально отправляются.
-  const validateAll = options.full === true || isDirty.value
+  const validateAll = options.full === true || headerDirty.value
 
   if (validateAll && validationHint.value) {
     toast.add({
@@ -221,7 +275,9 @@ async function saveCourse(options: SaveOptions = {}): Promise<boolean> {
       payload.title = form.title.trim()
       payload.description = form.description.trim()
       payload.threshold_multipler = form.threshold_multipler
+      payload.time_gap_multipler = form.time_gap_multipler
       payload.published = published.value
+      payload.themes = buildThemesPayload()
     } else {
       // Частичное сохранение: только изменённые поля.
       if (form.title !== snapshot.value.title) payload.title = form.title.trim()
@@ -229,7 +285,11 @@ async function saveCourse(options: SaveOptions = {}): Promise<boolean> {
       if (form.threshold_multipler !== snapshot.value.threshold_multipler) {
         payload.threshold_multipler = form.threshold_multipler
       }
+      if (form.time_gap_multipler !== snapshot.value.time_gap_multipler) {
+        payload.time_gap_multipler = form.time_gap_multipler
+      }
       if (published.value !== wasPublished) payload.published = published.value
+      if (themesDirty.value) payload.themes = buildThemesPayload()
     }
 
     if (!options.full && Object.keys(payload).length === 0) return true
@@ -251,12 +311,13 @@ async function saveCourse(options: SaveOptions = {}): Promise<boolean> {
     }
 
     snapshot.value = { ...form }
+    themesSnapshot.value = JSON.stringify(buildThemesPayload())
 
     toast.add({
       color: 'success',
       ...{
         title: 'Сохранено',
-        description: 'Шапка курса обновлена.',
+        description: 'Курс сохранен.',
         icon: 'i-lucide-check-circle',
         ...options.successToast,
       },
@@ -288,6 +349,7 @@ function resetForm() {
   form.title = snapshot.value.title
   form.description = snapshot.value.description
   form.threshold_multipler = snapshot.value.threshold_multipler
+  form.time_gap_multipler = snapshot.value.time_gap_multipler
 }
 
 // ==================== Статус публикации ====================
@@ -342,16 +404,44 @@ interface DraggedLessonSource {
 
 const themes = ref<ThemeModel[]>([])
 
+// Тело темы для PATCH: уроки — массив id, time_gaps — интервалы параллельно урокам.
+interface ThemePayload {
+  id: number | null
+  title: string
+  lessons: number[]
+  time_gaps: number[]
+}
+
+// Состав тем в том виде, в котором он уходит на сервер (для сравнения изменений).
+function buildThemesPayload(): ThemePayload[] {
+  return themes.value.map((theme) => ({
+    id: theme.id,
+    title: theme.title,
+    lessons: theme.lessons.map((l) => l.id),
+    time_gaps: theme.lessons.map((l) => l.time_gap ?? 0),
+  }))
+}
+
+const themesSnapshot = ref<string>(JSON.stringify(buildThemesPayload()))
+
+const themesDirty = computed(() => JSON.stringify(buildThemesPayload()) !== themesSnapshot.value)
+
 // ==================== Загрузка тем курса ====================
 
 const THEME_LESSON_FIELDS = [
   'id', 'title', 'description', 'type', 'blocks_count',
-  'saved', 'published', 'created_at', 'updated_at', 'taxonomy_ids',
+  'saved', 'published', 'created_at', 'updated_at', 'taxonomy_ids', 'time_gap',
 ] as const
 
 // Данные, доступные нормализатору уроков во время загрузки тем.
 const courseLessonTypesCache = ref<LessonTypeOption[]>([])
 const lessonRecordsCache = ref<Map<number, any>>(new Map())
+
+// Ключ узла темы: id (серверный или локальный отрицательный при сохранении),
+// пока id нет — localId.
+function themeKey(theme: ThemeModel): string {
+  return theme.id !== null ? `id:${theme.id}` : `local:${theme.localId}`
+}
 
 function toThemeLesson(raw: Record<string, any>): ThemeLesson {
   // Темы курса отдают только lesson_id (+ type_id), поэтому источник —
@@ -382,12 +472,23 @@ function toThemeLesson(raw: Record<string, any>): ThemeLesson {
 }
 
 function normalizeTheme(raw: Record<string, any>): ThemeModel {
+  const lessons = Array.isArray(raw.lessons) ? raw.lessons.map(toThemeLesson) : []
+
+  // time_gaps идут параллельно урокам темы — переносим разрыв в сам урок,
+  // чтобы при следующем сохранении отправить его обратно без потерь.
+  if (Array.isArray(raw.time_gaps)) {
+    lessons.forEach((lesson, i) => {
+      const gap = Number(raw.time_gaps[i])
+      if (raw.time_gaps[i] != null && Number.isFinite(gap)) lesson.time_gap = gap
+    })
+  }
+
   return {
     id: typeof raw.id === 'number' ? raw.id : null,
     localId: crypto.randomUUID(),
     title: raw.title ?? '',
     description: raw.description ?? '',
-    lessons: Array.isArray(raw.lessons) ? raw.lessons.map(toThemeLesson) : [],
+    lessons,
   }
 }
 
@@ -457,15 +558,32 @@ async function fetchLessonTypes(): Promise<LessonTypeOption[]> {
   }
 }
 
-const { data: courseThemesData } = await useAsyncData(
-  () => `course-themes-${courseId.value}`,
-  fetchCourseThemes,
-  { watch: [courseId] }
-)
+const courseThemesData = ref<CourseThemesPayload | null>(null)
+
+// Защита от гонки при быстрой смене courseId
+let themesRequestSeq = 0
+
+async function loadCourseThemes() {
+  const seq = ++themesRequestSeq
+
+  try {
+    const res = await fetchCourseThemes()
+    if (seq === themesRequestSeq) courseThemesData.value = res
+  } catch (e) {
+    console.warn('[loadCourseThemes] failed', e)
+  }
+}
+
+watch(courseId, () => loadCourseThemes(), { immediate: true })
 
 watch(courseThemesData, (v) => {
   themes.value = (v?.themes ?? []).map((t) => ({ ...t }))
 }, { immediate: true })
+
+// После перечитывания тем с сервера фиксируем их как сохранённое состояние.
+watch([courseId, courseThemesData], () => {
+  themesSnapshot.value = JSON.stringify(buildThemesPayload())
+})
 
 const courseLessonTypes = computed<LessonTypeOption[]>(() =>
   courseThemesData.value?.lesson_types?.length
@@ -567,6 +685,12 @@ async function onThemeDrop(e: DragEvent) {
 
   if (!canAcceptLesson(source)) return
 
+  // Новая тема начиналась бы с домашней работы — запрещено.
+  if (isHomeWorkLesson(source)) {
+    rejectHomeWorkFirst()
+    return
+  }
+
   // Дроп вне темы — создаём новую тему с этим уроком.
   addTheme(source)
 }
@@ -594,6 +718,23 @@ function rejectDuplicateLesson(lesson: DraggedLessonSource) {
   })
 }
 
+const HOME_WORK_TYPE = 'home_work'
+
+function isHomeWorkLesson(lesson: { type?: string | null } | null | undefined): boolean {
+  return lesson?.type === HOME_WORK_TYPE
+}
+
+// Домашняя работа не может быть первым уроком темы — тема должна
+// начинаться с обычного урока.
+function rejectHomeWorkFirst() {
+  toast.add({
+    title: 'Нельзя начать тему с домашней работы',
+    description: 'Домашняя работа не может быть первым уроком темы. Добавьте её после обычного урока.',
+    color: 'warning',
+    icon: 'i-lucide-alert-circle',
+  })
+}
+
 function isLessonAlreadyInCourse(lesson: DraggedLessonSource): boolean {
   return themes.value.some((t) => t.lessons.some((l) => l.id === lesson.id))
 }
@@ -610,6 +751,49 @@ function canAcceptLesson(lesson: DraggedLessonSource): boolean {
 
 let lastLocalLessonId = 0
 
+// Множитель времени курса: число из формы или дефолт для «битого» ввода.
+function timeGapFactor(): number {
+  const mult = Number(form.time_gap_multipler)
+  return Number.isFinite(mult) && mult >= 0 ? mult : TIME_GAP_DEFAULT
+}
+
+// Обнуление до целого по правилам: 0 остаётся 0, (0, 1] → 1, больше 1 → ceil.
+function ceilTimeGap(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0
+  if (value <= 1) return 1
+  return Math.ceil(value)
+}
+
+// Разрыв после урока (часы): справочный time_gap типа * множитель времени курса,
+// результат приводится к целому (см. ceilTimeGap).
+function lessonGap(type: string | null | undefined, factor = timeGapFactor()): number {
+  const typeCode = type ?? null
+  // Справочник типов объявлен ниже по файлу — при раннем вызове (TDZ) он недоступен.
+  const types = loadedLessonTypes()
+  const raw = types.find((t) => t.code === typeCode)?.time_gap
+  const base = Number(raw)
+  if (raw == null || !Number.isFinite(base) || base <= 0) return 0
+  return ceilTimeGap(base * factor)
+}
+
+// Разрыв урока при выбранном множителе: сохранённое значение курса не переписываем,
+// новое значение — если сохранённого ещё нет (урок ещё не сохранялся).
+function lessonGapFor(lesson: ThemeLesson, factor: number): number {
+  return lesson.time_gap ?? lessonGap(lesson.type, factor)
+}
+
+// Значение рефов справочника типов; пусто, пока их объявления
+// (courseLessonTypesCache/courseLessonTypes) ещё не проинициализированы.
+function loadedLessonTypes(): LessonTypeOption[] {
+  try {
+    return courseLessonTypes.value.length
+      ? courseLessonTypes.value
+      : courseLessonTypesCache.value
+  } catch {
+    return []
+  }
+}
+
 function createLocalLesson(source: DraggedLessonSource): ThemeLesson {
   return {
     id: source.id > 0 ? source.id : --lastLocalLessonId,
@@ -623,6 +807,7 @@ function createLocalLesson(source: DraggedLessonSource): ThemeLesson {
     created_at: source.created_at ?? null,
     updated_at: source.updated_at ?? null,
     taxonomy_ids: source.taxonomy_ids ?? [],
+    time_gap: lessonGap(source.type),
   }
 }
 
@@ -632,9 +817,41 @@ function createLocalTheme(lesson: ThemeLesson): ThemeModel {
     localId: crypto.randomUUID(),
     title: lesson.title?.trim() || 'Новая тема',
     description: '',
-    lessons: [lesson],
+    lessons: [recalcLessonGap(lesson)],
   }
 }
+
+// Разрыв пересчитывается при переносе урока (тип прежний, множитель курса мог измениться).
+function recalcLessonGap(lesson: ThemeLesson, factor = timeGapFactor()): ThemeLesson {
+  return { ...lesson, time_gap: lessonGap(lesson.type, factor) }
+}
+
+// Пропорциональный пересчёт всех разрывов при смене множителя в шапке:
+// time_gap = time_gap / старый множитель * новый множитель, с приведением к целому.
+function rescaleThemesGaps(prevFactor: number, nextFactor: number) {
+  if (prevFactor === nextFactor) return
+  const scale = (gap: number | undefined, type: string | null | undefined) => {
+    if (gap == null) return lessonGap(type, nextFactor)
+    if (prevFactor === 0) return lessonGap(type, nextFactor)
+    return ceilTimeGap(gap / prevFactor * nextFactor)
+  }
+  themes.value = themes.value.map((t) => ({
+    ...t,
+    lessons: t.lessons.map((l) => ({ ...l, time_gap: scale(l.time_gap, l.type) })),
+  }))
+}
+
+// Смена множителя в шапке реактивно меняет разрывы по всем темам.
+watch(
+  () => form.time_gap_multipler,
+  (next, prev) => {
+    const prevFactor = Number(prev)
+    rescaleThemesGaps(
+      Number.isFinite(prevFactor) && prevFactor >= 0 ? prevFactor : TIME_GAP_DEFAULT,
+      timeGapFactor(),
+    )
+  },
+)
 
 function addTheme(source: DraggedLessonSource, index?: number) {
   const theme = createLocalTheme(createLocalLesson(source))
@@ -690,25 +907,29 @@ function onInsertLesson(targetThemeLocalId: string, index: number, source: Theme
   if (isSameTheme && srcIndex !== -1 && srcIndex < index) insertAt = index - 1
   if (isSameTheme && insertAt === srcIndex) return // ничего не изменилось
 
-  themes.value = themes.value.map((t) => {
-    if (isSameTheme) {
-      if (t.localId !== targetThemeLocalId) return t
-      const lessons = t.lessons.filter((l) => l.localId !== source.lessonLocalId)
-      lessons.splice(insertAt, 0, moving)
-      return { ...t, lessons }
-    }
+  // Домашняя работа не может оказаться первым уроком темы.
+  if (insertAt === 0 && isHomeWorkLesson(moving)) {
+    rejectHomeWorkFirst()
+    return
+  }
 
-    // Разные темы: убираем из исходной, вставляем в целевую.
-    if (t.localId === source.themeLocalId) {
-      return { ...t, lessons: t.lessons.filter((l) => l.localId !== source.lessonLocalId) }
+  // Разные темы: убираем из исходной, вставляем в целевую.
+  // Опустевшая исходная тема удаляется автоматически.
+  const next = themes.value.flatMap((t) => {
+    if (!isSameTheme && t.localId === source.themeLocalId) {
+      const lessons = t.lessons.filter((l) => l.localId !== source.lessonLocalId)
+      return lessons.length ? [{ ...t, lessons }] : []
     }
     if (t.localId === targetThemeLocalId) {
-      const lessons = [...t.lessons]
-      lessons.splice(Math.min(Math.max(insertAt, 0), lessons.length), 0, moving)
-      return { ...t, lessons }
+      const lessons = isSameTheme
+        ? t.lessons.filter((l) => l.localId !== source.lessonLocalId)
+        : [...t.lessons]
+      lessons.splice(Math.min(Math.max(insertAt, 0), lessons.length), 0, recalcLessonGap(moving))
+      return [{ ...t, lessons }]
     }
-    return t
+    return [t]
   })
+  themes.value = next
 }
 
 function removeTheme(localId: string) {
@@ -720,7 +941,61 @@ async function onThemeDropLesson(localId: string) {
   const resolved = await resolveDroppedLesson()
   if (!resolved) return
   if (!canAcceptLesson(resolved)) return
+  // Тема пустая — домашняя работа стала бы первым уроком.
+  if (isHomeWorkLesson(resolved) && isThemeEmpty(localId)) {
+    rejectHomeWorkFirst()
+    return
+  }
   addLessonToTheme(localId, resolved)
+}
+
+function isThemeEmpty(themeLocalId: string): boolean {
+  const theme = themes.value.find((t) => t.localId === themeLocalId)
+  return !theme || theme.lessons.length === 0
+}
+
+// Вставка урока, перетащенного из левой панели, сразу в позицию index темы.
+async function onInsertLessonSource(themeLocalId: string, index: number, lessonId: number) {
+  if (!canEdit.value) return
+  // Догружаем полный payload по id (resolveDroppedLesson сам сходит за уроком).
+  const lesson = await resolveDroppedLesson()
+    ?? await fetchLessonById(lessonId)
+  if (!lesson) return
+  if (!canAcceptLesson(lesson)) return
+  // Домашняя работа не может открывать тему.
+  if (index === 0 && isHomeWorkLesson(lesson)) {
+    rejectHomeWorkFirst()
+    return
+  }
+  insertLessonToTheme(themeLocalId, index, createLocalLesson(lesson))
+}
+
+function insertLessonToTheme(themeLocalId: string, index: number, lesson: ThemeLesson) {
+  themes.value = themes.value.map((t) => {
+    if (t.localId !== themeLocalId) return t
+    const lessons = [...t.lessons]
+    lessons.splice(Math.min(Math.max(index, 0), lessons.length), 0, lesson)
+    return { ...t, lessons }
+  })
+}
+
+async function fetchLessonById(id: number): Promise<DraggedLessonSource | null> {
+  try {
+    const res = await api.get<{ data?: Record<string, any> } | Record<string, any>>(
+      `/lessons/${id}`,
+      { silent: true }
+    )
+    const raw = (res as { data?: Record<string, any> })?.data ?? (res as Record<string, any>)
+    const { blocks, lesson_types, ...rest } = raw
+    return {
+      ...rest,
+      id,
+      blocks_count: Array.isArray(blocks) ? blocks.length : 0,
+    } as DraggedLessonSource
+  } catch (e) {
+    console.warn('[fetchLessonById] failed', e)
+    return null
+  }
 }
 
 // Индекс разделителя, над которым сейчас hover/drag — для подсветки «вставить сюда».
@@ -748,6 +1023,7 @@ function reorderTheme(draggedLocalId: string, index: number) {
   if (to === from) return
   const next = [...themes.value]
   const [moved] = next.splice(from, 1)
+  if (!moved) return
   next.splice(to, 0, moved)
   themes.value = next
 }
@@ -755,13 +1031,20 @@ function reorderTheme(draggedLocalId: string, index: number) {
 // Крайняя зона «создать новую тему» (перед первой / после последней).
 const edgeHover = ref<'start' | 'end' | null>(null)
 
+// Перетаскивание урока внутри конструктора тем (из карточки).
+function getThemeLessonDrag(): ThemeLessonDrag | null {
+  if (!import.meta.client) return null
+  return ((window as any).__draggedThemeLesson as ThemeLessonDrag | null) ?? null
+}
+
 function onEdgeDragOver(e: DragEvent, position: 'start' | 'end') {
   if (!canEdit.value) return
   const isThemeDrag = draggedThemeLocalId.value !== null
+  const isInternalLesson = getThemeLessonDrag() !== null
   const isLessonDrag = isDroppable(resolveLessonSource())
-  if (!isThemeDrag && !isLessonDrag) return
+  if (!isThemeDrag && !isInternalLesson && !isLessonDrag) return
   e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = isThemeDrag ? 'move' : 'copy'
+  if (e.dataTransfer) e.dataTransfer.dropEffect = isThemeDrag || isInternalLesson ? 'move' : 'copy'
   edgeHover.value = position
 }
 
@@ -769,27 +1052,107 @@ function onEdgeDragLeave(position: 'start' | 'end') {
   if (edgeHover.value === position) edgeHover.value = null
 }
 
+// Перетаскивается урок из темы: края (верх/низ) работают как одна кнопка
+// «сделать урок отдельной темой» — дроп в любой край выносит его в новую тему.
+const edgeLessonDragActive = ref(false)
+
+// Верхняя/нижняя зона подсвечены уроком из темы — доступна быстрая вставка.
+const edgeLessonReady = computed<boolean>(() => edgeLessonDragActive.value && edgeHover.value !== null)
+
+// Ключ темы-«черновика» этой вставки: после сохранения курса серверные id и
+// localId темы переназначаются, поэтому запоминаем сгенерированный ключ узла
+// (тот же, что передаётся в key), чтобы повторный дроп перемещал ту же тему.
+const edgeLessonDraftKey = ref<string | null>(null)
+
+function onEdgeLessonDragEnter() {
+  if (!canEdit.value) return
+  edgeLessonDragActive.value = true
+}
+
+function onEdgeLessonDragEnd() {
+  edgeLessonDragActive.value = false
+  edgeHover.value = null
+  edgeLessonDraftKey.value = null
+}
+
+// Приземление урока из темы в крайнюю зону: исходная тема теряет урок,
+// на его месте появляется новая тема. Повторный дроп в край переносит ту же тему.
+function dropThemeLessonAtEdge(position: 'start' | 'end'): boolean {
+  const internal = getThemeLessonDrag()
+  if (!internal) return false
+
+  const srcTheme = themes.value.find((t) => t.localId === internal.themeLocalId)
+  const moving = srcTheme?.lessons.find((l) => l.localId === internal.lessonLocalId)
+  if (!moving) return false
+  if (isHomeWorkLesson(moving)) {
+    rejectHomeWorkFirst()
+    return false
+  }
+
+  ;(window as any).__draggedThemeLesson = null
+  lessonDragState.value = null
+
+  // Тема, созданная этой же вставкой, — повторный дроп: перемещаем её в край.
+  const draftKey = edgeLessonDraftKey.value
+  const draft = draftKey !== null
+    ? themes.value.findIndex((t) => themeKey(t) === draftKey)
+    : -1
+  if (draft !== -1) {
+    const next = [...themes.value]
+    const [theme] = next.splice(draft, 1)
+    if (!theme) return false
+    next.splice(position === 'start' ? 0 : next.length, 0, theme)
+    themes.value = next
+    return true
+  }
+
+  // Убираем урок из исходной темы; опустевшую тему удаляем.
+  const next = themes.value.flatMap((t) => {
+    if (t.localId !== internal.themeLocalId) return [t]
+    const lessons = t.lessons.filter((l) => l.localId !== internal.lessonLocalId)
+    return lessons.length ? [{ ...t, lessons }] : []
+  })
+  const theme = createLocalTheme(moving)
+  next.splice(position === 'start' ? 0 : next.length, 0, theme)
+  themes.value = next
+  edgeLessonDraftKey.value = themeKey(theme)
+  return true
+}
+
 async function onEdgeDrop(e: DragEvent, position: 'start' | 'end') {
   e.stopPropagation()
   edgeHover.value = null
-  const index = position === 'start' ? 0 : themes.value.length
+  const at = position === 'start' ? 0 : themes.value.length
 
   // Перетаскивается тема — перемещаем в начало/конец.
   if (draggedThemeLocalId.value) {
     e.preventDefault()
     const id = draggedThemeLocalId.value
     draggedThemeLocalId.value = null
-    reorderTheme(id, index)
+    reorderTheme(id, at)
+    return
+  }
+
+  if (!canEdit.value) return
+
+  // Перетаскивается урок из темы — создаём новую тему в крайней позиции.
+  if (getThemeLessonDrag()) {
+    e.preventDefault()
+    if (dropThemeLessonAtEdge(position)) return
     return
   }
 
   // Перетаскивается урок из левой панели — создаём новую тему в крайней позиции.
-  if (!canEdit.value) return
   e.preventDefault()
   const resolved = await resolveDroppedLesson()
   if (!resolved) return
   if (!canAcceptLesson(resolved)) return
-  addTheme(resolved, index)
+  // Новая тема начиналась бы с домашней работы — запрещено.
+  if (isHomeWorkLesson(resolved)) {
+    rejectHomeWorkFirst()
+    return
+  }
+  addTheme(resolved, at)
 }
 
 function canDropOnDivider(): boolean {
@@ -835,6 +1198,11 @@ async function onThemeDividerDrop(index: number) {
   const resolved = await resolveDroppedLesson()
   if (!resolved) return
   if (!canAcceptLesson(resolved)) return
+  // Новая тема начиналась бы с домашней работы — запрещено.
+  if (isHomeWorkLesson(resolved)) {
+    rejectHomeWorkFirst()
+    return
+  }
   addTheme(resolved, index)
 }
 </script>
@@ -860,7 +1228,7 @@ async function onThemeDividerDrop(index: number) {
     </template>
 
     <template #main>
-      <div class="mx-auto w-full max-w-[834px]">
+      <div class="mx-auto w-full">
         <LoadingOverlay :loading="coursePending || saving">
           <div>
             <!-- Статус публикации -->
@@ -954,7 +1322,7 @@ async function onThemeDividerDrop(index: number) {
               />
             </div>
 
-            <!-- Метрики: множитель порога -->
+            <!-- Метрики: множитель порога, время между уроками -->
             <div
               class="mt-4 flex items-center justify-between py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
             >
@@ -976,12 +1344,31 @@ async function onThemeDividerDrop(index: number) {
                   @update:model-value="(v: number | undefined) => form.threshold_multipler = v ?? NaN"
                 />
               </span>
+
+              <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
+                <UIcon name="i-lucide-timer"/>
+                <span>Время между уроками</span>
+                <UInputNumber
+                  :model-value="Number.isFinite(form.time_gap_multipler) ? form.time_gap_multipler : undefined"
+                  :step="TIME_GAP_STEP"
+                  :min="TIME_GAP_MIN"
+                  :max="TIME_GAP_MAX"
+                  :disabled="!canEdit"
+                  :color="timeGapError && isDirty ? 'error' : undefined"
+                  size="xs"
+                  variant="ghost"
+                  class="w-28 min-w-0"
+                  :ui="{ base: 'w-full text-center font-mono tabular-nums' }"
+                  :title="`Допустимо: от ${TIME_GAP_MIN} до ${TIME_GAP_MAX}, шаг ${TIME_GAP_STEP}`"
+                  @update:model-value="(v: number | undefined) => form.time_gap_multipler = v ?? NaN"
+                />
+              </span>
             </div>
 
             <!-- Темы курса: drop-area для уроков -->
             <div
               class="mt-4 flex flex-col gap-3 rounded-xl border-2 border-dashed border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg-elevated,#f8fafc)] p-3 transition-colors"
-              :class="dropActive ? 'border-[var(--ui-primary,#3b82f6)] bg-[var(--ui-primary-muted,rgba(59,130,246,0.08))]' : ''"
+              :class="dropActive && themes.length === 0 ? 'border-[var(--ui-primary,#3b82f6)] bg-[var(--ui-primary-muted,rgba(59,130,246,0.08))]' : ''"
               :data-drop-zone="themes.length ? undefined : true"
               @dragenter="onThemeDragEnter"
               @dragover="onThemeDragOver"
@@ -1013,15 +1400,18 @@ async function onThemeDividerDrop(index: number) {
               <div
                 v-else
                 class="flex flex-col"
-                @dragend="dividerHoverIndex = null; edgeHover = null"
+                @dragend="dividerHoverIndex = null"
               >
                 <!-- Крайняя зона перед первой темой -->
                 <div
                   class="mb-3 border-2 border-dashed px-3 py-3 text-center text-[11px] transition-colors"
                   :class="edgeHover === 'start'
                     ? 'border-[var(--ui-primary,#3b82f6)] bg-[var(--ui-primary-muted,rgba(59,130,246,0.08))] text-[var(--ui-primary,#3b82f6)]'
-                    : 'border-[var(--ui-border,#e5e7eb)] text-[var(--ui-text-muted,#94a3b8)]'"
+                    : (edgeLessonReady
+                        ? 'border-[var(--ui-primary,#3b82f6)]/60 text-[var(--ui-primary,#3b82f6)] cursor-copy'
+                        : 'border-[var(--ui-border,#e5e7eb)] text-[var(--ui-text-muted,#94a3b8)]')"
                   data-drop-zone
+                  @dragenter="onEdgeLessonDragEnter"
                   @dragover="onEdgeDragOver($event, 'start')"
                   @dragleave="onEdgeDragLeave('start')"
                   @drop="onEdgeDrop($event, 'start')"
@@ -1036,21 +1426,26 @@ async function onThemeDividerDrop(index: number) {
 
                 <template
                   v-for="(theme, index) in themes"
-                  :key="theme.localId"
+                  :key="themeKey(theme)"
                 >
-                  <LessonTheme
+                  <CourseTheme
                     :theme="theme"
                     :read-only="!canEdit"
                     :selected-lesson-id="selectedLessonId"
                     :lesson-types="courseLessonTypes"
+                    :time-gap-multiplier="form.time_gap_multipler"
                     @update:theme="onThemeUpdate(theme.localId, $event)"
                     @remove="removeTheme(theme.localId)"
                     @select-lesson="onSelectLesson"
                     @drop-lesson="onThemeDropLesson(theme.localId)"
                     @remove-lesson="onRemoveLessonFromTheme(theme.localId, $event)"
                     @insert-lesson="onInsertLesson(theme.localId, $event.index, $event.source)"
+                    @insert-lesson-source="onInsertLessonSource(theme.localId, $event.index, $event.lessonId)"
+                    @homework-rejected="rejectHomeWorkFirst"
                     @theme-drag-start="onThemeDragStart"
                     @theme-drag-end="onThemeDragEnd"
+                    @dragenter="onEdgeLessonDragEnter"
+                    @dragend="onEdgeLessonDragEnd"
                   />
 
                   <!-- Разделитель между темами — дроп создаёт тему в позиции index + 1 -->
@@ -1094,8 +1489,11 @@ async function onThemeDividerDrop(index: number) {
                   class="mt-3 border-2 border-dashed px-3 py-3 text-center text-[11px] transition-colors"
                   :class="edgeHover === 'end'
                     ? 'border-[var(--ui-primary,#3b82f6)] bg-[var(--ui-primary-muted,rgba(59,130,246,0.08))] text-[var(--ui-primary,#3b82f6)]'
-                    : 'border-[var(--ui-border,#e5e7eb)] text-[var(--ui-text-muted,#94a3b8)]'"
+                    : (edgeLessonReady
+                        ? 'border-[var(--ui-primary,#3b82f6)]/60 text-[var(--ui-primary,#3b82f6)] cursor-copy'
+                        : 'border-[var(--ui-border,#e5e7eb)] text-[var(--ui-text-muted,#94a3b8)]')"
                   data-drop-zone
+                  @dragenter="onEdgeLessonDragEnter"
                   @dragover="onEdgeDragOver($event, 'end')"
                   @dragleave="onEdgeDragLeave('end')"
                   @drop="onEdgeDrop($event, 'end')"
@@ -1112,12 +1510,13 @@ async function onThemeDividerDrop(index: number) {
 
             <!-- Ошибки валидации -->
             <div
-              v-if="validationHint && (isDirty || titleError || descriptionError || thresholdError)"
+              v-if="validationHint && (isDirty || titleError || descriptionError || thresholdError || timeGapError)"
               class="mt-2 flex flex-col gap-1 text-[11px] text-error"
             >
               <p v-if="titleError">{{ titleError }}</p>
               <p v-if="descriptionError">{{ descriptionError }}</p>
               <p v-if="thresholdError">{{ thresholdError }}</p>
+              <p v-if="timeGapError">{{ timeGapError }}</p>
             </div>
 
             <div class="mt-4 flex items-center justify-end gap-2">

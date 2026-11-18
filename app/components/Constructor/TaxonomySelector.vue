@@ -50,22 +50,26 @@ const isOpen = computed({
 })
 
 // ============================================================
-// Загрузка дерева через useAsyncData (общий кеш Nuxt)
+// Загрузка дерева через useApi
 // ============================================================
 
-const {
-  data: treeData,
-  pending: loading,
-  error: fetchError,
-  refresh: load
-} = await useAsyncData<TaxonomyNode[]>(
-  'taxonomy-tree',
-  async () => {
+const treeData = ref<TaxonomyNode[] | null>(null)
+const loading = ref(false)
+const fetchError = ref<any>(null)
+
+async function load() {
+  loading.value = true
+  fetchError.value = null
+
+  try {
     const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
-    return res.data ?? []
-  },
-  { lazy: true, immediate: false }
-)
+    treeData.value = res.data ?? []
+  } catch (e) {
+    fetchError.value = e
+  } finally {
+    loading.value = false
+  }
+}
 
 // Оборачиваем в computed для удобства использования в шаблоне
 const tree = computed(() => treeData.value ?? [])

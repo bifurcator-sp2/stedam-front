@@ -1,6 +1,6 @@
 <!-- app/components/Constructor/LessonsSearch.vue -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { LessonListItem, LessonsPage } from '~/types/lesson'
 
 interface TaxonomyNode {
@@ -11,10 +11,13 @@ interface TaxonomyNode {
   children: TaxonomyNode[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   selectedTaxonomyId?: number | null
   taxonomyData?: TaxonomyNode[]
-}>()
+  autoRefresh?: boolean
+}>(), {
+  autoRefresh: false,
+})
 
 const api = useApi()
 const route = useRoute()
@@ -61,14 +64,17 @@ const currentPage = computed<number>({
 
 // ==================== Данные Таксономии ====================
 
-const { data: internalTaxonomyData } = await useAsyncData<TaxonomyNode[]>(
-  'taxonomy-tree',
-  async () => {
-    const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
-    return res.data
-  },
-  { lazy: true, immediate: !props.taxonomyData }
-)
+const internalTaxonomyData = ref<TaxonomyNode[] | null>(null)
+
+async function loadTaxonomy() {
+  const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
+  internalTaxonomyData.value = res.data
+}
+
+onMounted(() => {
+  if (!props.taxonomyData) loadTaxonomy()
+  if (props.autoRefresh) refresh()
+})
 
 const resolvedTaxonomy = computed<TaxonomyNode[]>(() => {
   return props.taxonomyData ?? internalTaxonomyData.value ?? []
@@ -136,19 +142,49 @@ function clearSearch() {
 
 // ==================== Загрузка Уроков ====================
 
-const { data, pending, error } = await useAsyncData<LessonsPage>(
-  () => `lessons-list-${props.selectedTaxonomyId ?? 'query'}-${currentPage.value}-${currentTaxId.value}-${currentSearch.value}`,
-  () =>
-    api.get<LessonsPage>('lessons', {
+const data = ref<LessonsPage | null>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+
+// Защита от гонки: обрабатываем только ответ последнего запроса
+let requestSeq = 0
+
+async function loadLessons(opts: { refresh?: boolean } = {}) {
+  const seq = ++requestSeq
+  pending.value = true
+  error.value = null
+
+  try {
+    const res = await api.get<LessonsPage>('lessons', {
       params: {
         page: currentPage.value,
         per_page: PER_PAGE,
         tax: currentTaxId.value,
         search: currentSearch.value || undefined,
       },
-    }),
-  { watch: [() => props.selectedTaxonomyId, currentPage, currentTaxId, currentSearch] },
+      refresh: opts.refresh,
+    })
+
+    if (seq === requestSeq) data.value = res
+  } catch (e) {
+    if (seq === requestSeq) error.value = e
+  } finally {
+    if (seq === requestSeq) pending.value = false
+  }
+}
+
+watch(
+  [() => props.selectedTaxonomyId, currentPage, currentTaxId, currentSearch],
+  () => loadLessons(),
+  { immediate: true },
 )
+
+// Принудительное обновление списка (игнорируя кэш useApi)
+function refresh() {
+  return loadLessons({ refresh: true })
+}
+
+defineExpose({ refresh })
 
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
 const lessonTypes = computed(() => data.value?.lesson_types ?? [])

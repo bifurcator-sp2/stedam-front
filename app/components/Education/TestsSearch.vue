@@ -150,14 +150,16 @@ const PER_PAGE = 15
 
 // ==================== Данные Таксономии ====================
 
-const { data: internalTaxonomyData } = await useAsyncData<TaxonomyNode[]>(
-  'taxonomy-tree',
-  async () => {
-    const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
-    return res.data
-  },
-  { lazy: true, immediate: !props.taxonomyData }
-)
+const internalTaxonomyData = ref<TaxonomyNode[] | null>(null)
+
+async function loadTaxonomy() {
+  const res = await api.get<{ data: TaxonomyNode[] }>('/taxonomies/tree', { silent: true })
+  internalTaxonomyData.value = res.data
+}
+
+onMounted(() => {
+  if (!props.taxonomyData) loadTaxonomy()
+})
 
 const resolvedTaxonomy = computed<TaxonomyNode[]>(() => {
   return props.taxonomyData ?? internalTaxonomyData.value ?? []
@@ -225,10 +227,20 @@ function clearSearch() {
 // ==================== Загрузка заданий ====================
 
 // Добавлен refresh для принудительного обновления
-const { data, pending, error, refresh } = await useAsyncData<any>(
-  () => `tests-list-${localPage.value}-${currentTaxId.value}-${localSearch.value}-${localAll.value}-${localIsProc.value}-${isAutonomous.value ? 'prop' : 'url'}`,
-  () =>
-    api.get('/teacher-tests', {
+const data = ref<any>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+
+// Защита от гонки: обрабатываем только ответ последнего запроса
+let requestSeq = 0
+
+async function loadTests() {
+  const seq = ++requestSeq
+  pending.value = true
+  error.value = null
+
+  try {
+    const res = await api.get('/teacher-tests', {
       params: {
         page: localPage.value,
         per_page: PER_PAGE,
@@ -237,8 +249,22 @@ const { data, pending, error, refresh } = await useAsyncData<any>(
         all: localAll.value ? 'true' : undefined,
         ...(isAdmin.value ? { is_proc: localIsProc.value ? 'true' : 'false' } : {})
       }
-    }),
-  { watch: [localPage, currentTaxId, localSearch, localAll, localIsProc] }
+    })
+
+    if (seq === requestSeq) data.value = res
+  } catch (e) {
+    if (seq === requestSeq) error.value = e
+  } finally {
+    if (seq === requestSeq) pending.value = false
+  }
+}
+
+// Используется в toggleAll / toggleProc / goToPage для принудительного обновления
+const refresh = () => loadTests()
+
+watch(
+  [localPage, currentTaxId, localSearch, localAll, localIsProc],
+  () => loadTests(),
 )
 
 const tests = computed(() => data.value?.data ?? [])
@@ -353,6 +379,8 @@ onMounted(() => {
     const p = Number(Array.isArray(qPage) ? qPage[0] : qPage)
     localPage.value = Number.isFinite(p) && p > 0 ? p : 1
   }
+
+  loadTests()
 
   if (rootRef.value) {
     // ИСПРАВЛЕНИЕ МЕРЦАНИЯ: Используем border-box, чтобы изменение внутренних отступов (padding)

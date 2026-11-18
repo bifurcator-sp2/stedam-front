@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
@@ -56,10 +56,26 @@ interface BlocksPage {
 
 const api = useApi()
 
-const { data: blockTypes, pending, error } = await useAsyncData(
-  'block-types',
-  () => api.get<BlockType[]>('/block-types'),
-)
+const blockTypes = ref<BlockType[] | null>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+
+async function loadBlockTypes() {
+  pending.value = true
+  error.value = null
+
+  try {
+    blockTypes.value = await api.get<BlockType[]>('/block-types')
+  } catch (e) {
+    error.value = e
+  } finally {
+    pending.value = false
+  }
+}
+
+onMounted(() => {
+  loadBlockTypes()
+})
 
 // ==================== Роутер / query ====================
 

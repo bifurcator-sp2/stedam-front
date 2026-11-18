@@ -8,13 +8,29 @@ const route = useRoute()
 const router = useRouter()
 
 // ==================== Загрузка дерева (Один раз) ====================
-const { data: taxonomyData, pending: taxonomyPending, error: taxonomyError, refresh: taxonomyRefresh } = await useAsyncData<any[]>(
-  'taxonomy-tree',
-  async () => {
+const taxonomyData = ref<any[] | null>(null)
+const taxonomyPending = ref(true)
+const taxonomyError = ref<unknown>(null)
+
+async function loadTaxonomy() {
+  taxonomyPending.value = true
+  taxonomyError.value = null
+
+  try {
     const res = await api.get<{ data: any[] }>('/taxonomies/tree', { silent: true })
-    return res.data
+    taxonomyData.value = res.data
+  } catch (e) {
+    taxonomyError.value = e
+  } finally {
+    taxonomyPending.value = false
   }
-)
+}
+
+const taxonomyRefresh = () => loadTaxonomy()
+
+onMounted(() => {
+  loadTaxonomy()
+})
 
 // ==================== Таксономия ====================
 const selectedTaxonomyId = computed<number | null>(() => {
@@ -121,6 +137,7 @@ onBeforeUnmount(() => {
       <EducationCoursesSearch
         :selected-taxonomy-id="selectedTaxonomyId"
         :taxonomy-data="taxonomyData"
+        :autoRefresh = "true"
         @open-taxonomy="onBreadcrumbOpen"
         @select-course="onSelectCourse"
       />

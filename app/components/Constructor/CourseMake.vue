@@ -29,6 +29,13 @@ const THRESHOLD_MAX = 100
 const THRESHOLD_STEP = 0.1
 const THRESHOLD_DEFAULT = 1.0
 
+// Время между уроками (time_gap_multipler): в API — float, дефолт 1.0,
+// допустимый ввод: [0, 100].
+const TIME_GAP_MIN = 0
+const TIME_GAP_MAX = 100
+const TIME_GAP_STEP = 0.1
+const TIME_GAP_DEFAULT = 1.0
+
 // ==================== Модель формы ====================
 
 interface CourseForm {
@@ -36,6 +43,7 @@ interface CourseForm {
   description: string
   locale: string
   threshold_multipler: number
+  time_gap_multipler: number
   taxonomy_ids: number[]
 }
 
@@ -45,6 +53,7 @@ function createEmptyForm(): CourseForm {
     description: '',
     locale: locale.value || 'ru',
     threshold_multipler: THRESHOLD_DEFAULT,
+    time_gap_multipler: TIME_GAP_DEFAULT,
     taxonomy_ids: []
   }
 }
@@ -90,6 +99,15 @@ const thresholdError = computed(() => {
   return null
 })
 
+const timeGapError = computed(() => {
+  const v = form.value.time_gap_multipler
+  if (!Number.isFinite(v)) return 'Введите число'
+  if (v < TIME_GAP_MIN || v > TIME_GAP_MAX) {
+    return `Значение от ${TIME_GAP_MIN} до ${TIME_GAP_MAX}`
+  }
+  return null
+})
+
 // ==================== Статус отправки ====================
 
 const creating = ref(false)
@@ -104,6 +122,7 @@ const validationHint = computed(() => {
   if (titleError.value) return 'Укажите название курса'
   if (descriptionError.value) return 'Укажите описание курса'
   if (thresholdError.value) return 'Проверьте множитель порога допуска'
+  if (timeGapError.value) return 'Проверьте время между уроками'
   return null
 })
 
@@ -114,6 +133,7 @@ const requestPayload = computed(() => ({
   description: form.value.description.trim(),
   locale: form.value.locale,
   threshold_multipler: form.value.threshold_multipler,
+  time_gap_multipler: form.value.time_gap_multipler,
   tax_id: form.value.taxonomy_ids[0] ?? null
 }))
 
@@ -177,6 +197,7 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
   const dirty = form.value.title !== ''
     || form.value.description !== ''
     || form.value.threshold_multipler !== THRESHOLD_DEFAULT
+    || form.value.time_gap_multipler !== TIME_GAP_DEFAULT
     || form.value.taxonomy_ids.length > 0
   if (!dirty) return
   event.preventDefault()
@@ -263,8 +284,8 @@ onBeforeUnmount(() => {
                 <TaxonomySelector v-model="form.taxonomy_ids" />
               </div>
 
-              <!-- Язык + множитель порога -->
-              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <!-- Язык + множитель порога + время между уроками -->
+              <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
                     Язык курса <span class="text-error">*</span>
@@ -303,6 +324,29 @@ onBeforeUnmount(() => {
                     class="mt-1 text-[11px] text-error"
                   >
                     {{ thresholdError }}
+                  </p>
+                </div>
+
+                <div>
+                  <label class="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted">
+                    Время между уроками <span class="text-error">*</span>
+                  </label>
+                  <UInput
+                    v-model.number="form.time_gap_multipler"
+                    type="number"
+                    size="sm"
+                    :min="TIME_GAP_MIN"
+                    :max="TIME_GAP_MAX"
+                    :step="TIME_GAP_STEP"
+                    class="w-full"
+                    :ui="{ base: 'text-right' }"
+                    :color="timeGapError ? 'error' : undefined"
+                  />
+                  <p
+                    v-if="timeGapError"
+                    class="mt-1 text-[11px] text-error"
+                  >
+                    {{ timeGapError }}
                   </p>
                 </div>
               </div>
