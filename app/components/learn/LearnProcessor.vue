@@ -8,6 +8,7 @@ import type {
   LearnSnapshotData,
   LearnSnapshotResponse
 } from '~/composables/useLearnApi'
+import { loadingPhrases } from '~/utils/loadingPhrases'
 
 // Папка learn/ может конфликтовать с приватной директорией Nuxt,
 // поэтому имя компонента задаём явно, чтобы не зависеть от авто-импорта.
@@ -66,6 +67,12 @@ const MIN_STAGE_MS = 1000
 // должны существовать к моменту вызова из watch, иначе TDZ-ошибка на старте.
 const loading = ref(false)
 const loadingAction = ref('')
+// Меняющаяся строка под логотипом: фразы из loadingPhrases.
+const loadingStatus = ref('')
+
+// Темп смены фраз и сколько последняя надпись висит перед снятием оверлея.
+const PHRASE_MS = 100
+const FINAL_PHRASE_MS = 350
 
 function setStage(action: string) {
   loadingAction.value = action
@@ -85,6 +92,37 @@ function tick(): Promise<void> {
 // Номер прогона: действия устаревших запросов после рестарта игнорируются.
 let runKey = 0
 
+// Гасим цикл фраз, когда шаг закончился (или его сменил новый прогон).
+let phraseTimer: ReturnType<typeof setTimeout> | null = null
+
+function stopPhrases() {
+  if (phraseTimer == null) return
+  clearTimeout(phraseTimer)
+  phraseTimer = null
+}
+
+// Крутит фразы загрузчика, пока шаг идёт. Последняя фраза в цикле не показывается:
+// она отдаётся отдельно на FINAL_PHRASE_MS уже после основного таймера шага,
+// чтобы «загрузка завершена» совпала с финалом.
+function startPhrases(isCurrent: () => boolean) {
+  stopPhrases()
+  const phrases = loadingPhrases.slice(0, -1)
+  let i = 0
+
+  const step = () => {
+    if (!isCurrent() || !loading.value) {
+      phraseTimer = null
+      return
+    }
+
+    loadingStatus.value = phrases[i % phrases.length]!
+    i++
+    phraseTimer = setTimeout(step, PHRASE_MS)
+  }
+
+  step()
+}
+
 // Достаёт id прохождения из ответа POST /learn/begin.
 // StartLearnAction возвращает LearnResource: { id, ... }
 function learnIdFrom(res: Awaited<ReturnType<typeof learnApi.begin>> | null): number | null {
@@ -97,6 +135,10 @@ function learnIdFrom(res: Awaited<ReturnType<typeof learnApi.begin>> | null): nu
 async function beginLesson() {
   const key = ++runKey
   const isCurrent = () => runKey === key
+
+  // Фразы предыдущего прогона больше не нужны.
+  stopPhrases()
+  loadingStatus.value = ''
 
   // Сброс предыдущего состояния.
   snapshot.value = null
@@ -129,6 +171,8 @@ async function beginLesson() {
 
   beginPending.value = false
   if (failed) {
+    stopPhrases()
+    loadingStatus.value = ''
     loading.value = false
     return
   }
@@ -144,6 +188,8 @@ async function beginLesson() {
   await tick()
   snapshot.value = null
   snapshotPending.value = true
+  // Фразы идут параллельно запросу снапшота.
+  startPhrases(isCurrent)
   const snapshotStartedAt = Date.now()
 
   try {
@@ -154,6 +200,12 @@ async function beginLesson() {
 
   // Прелоадер шага живёт реальное время ответа + секунду.
   await delay(MIN_STAGE_MS - (Date.now() - snapshotStartedAt))
+  if (!isCurrent()) return
+
+  // Финальная надпись из списка — на последние 350 мс перед снятием оверлея.
+  stopPhrases()
+  loadingStatus.value = loadingPhrases[loadingPhrases.length - 1]!
+  await delay(FINAL_PHRASE_MS)
   if (!isCurrent()) return
 
   snapshotPending.value = false
@@ -282,7 +334,7 @@ function goBack() {
     <!-- Контент -->
     <main class="flex-1 flex flex-col">
       <div
-        v-stedam-loading="{ value: loading, action: loadingAction, statusText:'Идет процесс' }"
+        v-stedam-loading="{ value: loading, action: loadingAction, statusText: loadingStatus }"
         class="relative flex-1 max-w-4xl w-full mx-auto p-4"
       >
         <!-- Ошибка старта / загрузки снимка -->
