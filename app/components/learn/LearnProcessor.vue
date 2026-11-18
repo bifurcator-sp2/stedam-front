@@ -377,6 +377,31 @@ function goBack() {
           :is-read-only="false"
           mode="learn"
         />
+
+        <!-- Действия с уроком -->
+        <div
+          v-if="lessonModel"
+          class="grid grid-cols-2 gap-3 mt-4"
+        >
+          <UButton
+            icon="i-lucide-save"
+            color="neutral"
+            variant="soft"
+            size="lg"
+            block
+          >
+            Сохранить
+          </UButton>
+          <UButton
+            icon="i-lucide-send"
+            color="success"
+            variant="solid"
+            size="lg"
+            block
+          >
+            Отправить на проверку
+          </UButton>
+        </div>
       </div>
     </main>
   </div>
