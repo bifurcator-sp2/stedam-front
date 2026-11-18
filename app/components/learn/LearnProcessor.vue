@@ -290,17 +290,21 @@ const lessonModel = computed<LessonModel | null>(() => {
     title: data.title ?? '',
     description: '',
     locale: data.locale || 'ru',
-    type: null,
+    type: data.type ?? null,
     saved: false,
     published: false,
-    taxonomy_ids: null,
-    complexity: null,
+    taxonomy_ids: data.taxonomy_ids ?? null,
+    complexity: data.complexity ?? null,
     blocks: (data.blocks ?? [])
       .slice()
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map(b => toBlockModel(b, origin))
   }
 })
+
+// Справочник типов урока нужен ConstructorLesson, чтобы подписать type (код)
+// человекочитаемым названием и цветом (см. currentType в Constructor/Lesson.vue).
+const lessonTypes = computed(() => parseSnapshot(snapshot.value?.snapshot_data)?.lesson_types ?? [])
 
 const loadError = computed(() => beginError.value || snapshotError.value)
 const canRetry = computed(() => {
@@ -374,6 +378,7 @@ function goBack() {
           v-else-if="lessonModel"
           :model-value="lessonModel"
           :struct-items="[]"
+          :lesson-types="lessonTypes"
           :is-read-only="false"
           mode="learn"
         />

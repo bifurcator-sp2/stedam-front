@@ -1,5 +1,7 @@
 // app/composables/useLearnApi.ts
 
+import type { LessonTypeOption } from '~/types/lesson'
+
 export interface LearnSnapshotNode {
   key: string
   default?: unknown
@@ -21,6 +23,12 @@ export interface LearnSnapshotData {
   lesson_id: number
   title: string | null
   locale: string
+  // Метаданные урока, которые контроллер подмешивает в снапшот
+  // (в самом снимке их нет — см. LearnSnapshotData::snapshotDataArray).
+  type: string | null
+  complexity: number | null
+  taxonomy_ids: number[] | null
+  lesson_types: LessonTypeOption[]
   blocks: LearnSnapshotBlock[]
 }
 
