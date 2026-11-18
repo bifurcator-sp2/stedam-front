@@ -83,8 +83,8 @@ const actionText = computed(() => {
             <!-- Строка статуса: Transition с mode="out-in" и :key —
                  каждая новая фраза коротко проступает, строка не прыгает -->
             <Transition
-              enter-active-class="transition-opacity duration-150"
-              leave-active-class="transition-opacity duration-150"
+              enter-active-class="transition-opacity duration-50"
+              leave-active-class="transition-opacity duration-50"
               enter-from-class="opacity-0"
               leave-to-class="opacity-0"
               mode="out-in"

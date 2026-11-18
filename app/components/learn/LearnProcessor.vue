@@ -282,7 +282,7 @@ function goBack() {
     <!-- Контент -->
     <main class="flex-1 flex flex-col">
       <div
-        v-stedam-loading="{ value: loading, action: loadingAction }"
+        v-stedam-loading="{ value: loading, action: loadingAction, statusText:'Идет процесс' }"
         class="relative flex-1 max-w-4xl w-full mx-auto p-4"
       >
         <!-- Ошибка старта / загрузки снимка -->
