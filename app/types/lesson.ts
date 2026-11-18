@@ -40,6 +40,7 @@ export interface LessonBlockModel {
   files: any[]
   userId?: number | null
   isTest?: boolean
+  isProc?: boolean
   complexity?: number | null      // ← добавлено (пригодится позже)
 }
 
