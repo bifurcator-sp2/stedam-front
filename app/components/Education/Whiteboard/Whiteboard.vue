@@ -197,6 +197,15 @@ function extractInkStrokes(input: InkDocument | InkStroke[] | undefined): InkStr
 
 const strokes: Stroke[] = []
 const redoStack: Stroke[] = []
+// Реактивные счётчики — сами массивы не наблюдаются Vue, поэтому кнопки undo/redo
+// ориентируются на эти значения.
+const strokeCount = ref(0)
+const redoCount = ref(0)
+
+function syncCounters() {
+  strokeCount.value = strokes.length
+  redoCount.value = redoStack.length
+}
 
 // ==================== Состояние канвы ====================
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -415,6 +424,47 @@ function redrawAll() {
   if (ctx) ctx.globalCompositeOperation = 'source-over'
 }
 
+// ==================== Undo / redo ====================
+// id последнего отменённого штриха — он удаляется из redoStack при новом рисовании,
+// а остальные «скрытые» штрихи остаются и доступны по redo.
+let pendingRedoId: string | null = null
+
+function emitStrokeUpdate() {
+  syncCounters()
+  emit('stroke-end', [...strokes])
+  emit('strokeComplete', serializeStrokes())
+}
+
+// Стирает скрытые (отменённые) штрихи — они пропадают, как только пользователь
+// начинает рисовать заново.
+function dropRedoStack() {
+  if (redoStack.length === 0) return
+  redoStack.length = 0
+  syncCounters()
+}
+
+function doUndo() {
+  if (redoStack.length > 0 && redoStack[redoStack.length - 1]!.id === pendingRedoId) {
+    pendingRedoId = null
+  }
+  const s = strokes.pop()
+  if (!s) return false
+  redoStack.push(s)
+  pendingRedoId = s.id
+  redrawAll()
+  emitStrokeUpdate()
+  return true
+}
+
+function doRedo() {
+  const s = redoStack.pop()
+  if (!s) return false
+  strokes.push(s)
+  redrawAll()
+  emitStrokeUpdate()
+  return true
+}
+
 // ==================== Инициализация / resize ====================
 function initCanvas() {
   if (!canvasRef.value) return
@@ -540,9 +590,9 @@ function onPointerUp(e: PointerEvent) {
 
   if (finished) {
     strokes.push(finished)
-    redoStack.length = 0
-    emit('stroke-end', [...strokes])
-    emit('strokeComplete', serializeStrokes())
+    dropRedoStack()
+    pendingRedoId = null
+    emitStrokeUpdate()
   }
 
   drawing = false
@@ -564,9 +614,9 @@ function onPointerCancel(e: PointerEvent) {
   finishStroke()
   if (currentStroke) {
     strokes.push(currentStroke)
-    redoStack.length = 0
-    emit('stroke-end', [...strokes])
-    emit('strokeComplete', serializeStrokes())
+    dropRedoStack()
+    pendingRedoId = null
+    emitStrokeUpdate()
   }
 
   drawing = false
@@ -696,9 +746,11 @@ function syncExternalStrokes() {
     if (s) strokes.push(s)
   }
   redoStack.length = 0
+  pendingRedoId = null
   lastMid = null
   stabilizerState = null
   redrawAll()
+  syncCounters()
   emit('stroke-end', [...strokes])
 }
 
@@ -759,37 +811,27 @@ defineExpose({
     }
     lastAppliedStrokeIds = strokes.map(s => s.id)
     redoStack.length = 0
+    pendingRedoId = null
     currentStroke = null
     lastMid = null
     stabilizerState = null
     redrawAll()
+    syncCounters()
     emit('stroke-end', [...strokes])
   },
   clear: () => {
     strokes.length = 0
     redoStack.length = 0
+    pendingRedoId = null
     currentStroke = null
     lastMid = null
     stabilizerState = null
     redrawAll()
+    syncCounters()
     emit('stroke-end', [])
   },
-  undo: () => {
-    const s = strokes.pop()
-    if (!s) return false
-    redoStack.push(s)
-    redrawAll()
-    emit('stroke-end', [...strokes])
-    return true
-  },
-  redo: () => {
-    const s = redoStack.pop()
-    if (!s) return false
-    strokes.push(s)
-    redrawAll()
-    emit('stroke-end', [...strokes])
-    return true
-  },
+  undo: doUndo,
+  redo: doRedo,
   toDataURL: () => canvasRef.value?.toDataURL() ?? '',
   getImage,
 })
@@ -814,6 +856,33 @@ defineExpose({
       @pointerleave="onPointerLeave"
       @pointerenter="onPointerEnter"
     ></canvas>
+
+    <!-- Undo / redo -->
+    <div
+      class="wb-toolbar absolute top-2 left-2 z-50 flex items-center gap-1.5 rounded-lg border border-default bg-default/90 p-1 shadow-sm backdrop-blur-sm"
+      @pointerdown.stop
+    >
+      <button
+        type="button"
+        class="p-1.5 rounded-md transition-colors disabled:opacity-40 disabled:cursor-default"
+        :class="strokeCount > 0 ? 'text-muted hover:bg-elevated' : 'text-muted'"
+        :disabled="strokeCount === 0"
+        title="Отменить последний штрих"
+        @click="doUndo"
+      >
+        <UIcon name="i-lucide-undo" class="size-4" />
+      </button>
+      <button
+        type="button"
+        class="p-1.5 rounded-md transition-colors disabled:opacity-40 disabled:cursor-default"
+        :class="redoCount > 0 ? 'text-muted hover:bg-elevated' : 'text-muted'"
+        :disabled="redoCount === 0"
+        title="Вернуть штрих"
+        @click="doRedo"
+      >
+        <UIcon name="i-lucide-redo" class="size-4" />
+      </button>
+    </div>
 
     <!-- Тулбар -->
     <div
