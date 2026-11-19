@@ -713,6 +713,9 @@ function stopResize(e?: PointerEvent) {
   }
   const el = containerRef.value
   if (el) emit('resize', Math.round(el.getBoundingClientRect().height))
+  // Ресайз считается завершённым изменением доски — сообщаем так же, как о штрихе,
+  // чтобы подписчики (сохранение ответов) перечитали document.
+  emitStrokeUpdate()
 }
 
 // ==================== Экспорт изображения ====================
