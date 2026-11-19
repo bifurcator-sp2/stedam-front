@@ -175,12 +175,12 @@ export const useLearnApi = () => {
       return { learn_id: learnId, saved: true }
     }
 
-    // TODO: эндпоинт на бэке ещё не готов — раскомментировать позднее.
-    // const response = await api.post<LearnSaveResponse>(
-    //   '/learn/save',
-    //   { learn_id: learnId, answers },
-    //   { silent: true },
-    // )
+
+     const response = await api.patch<LearnSaveResponse>(
+       '/learn/save',
+       { learn_id: learnId, answers },
+       { silent: false },
+     )
 
     // return { ...response, learn_id: learnId, saved: response?.saved ?? true }
     return { learn_id: learnId, saved: true }

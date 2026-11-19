@@ -9,6 +9,7 @@ import ComplexitySelector from '~/components/Constructor/ComplexitySelector.vue'
 
 import {useContentStats} from '~/composables/useContentStats'
 import {provideLessonWhiteboards} from '~/composables/useLessonWhiteboards'
+import {useLessonPdf} from '~/composables/useLessonPdf'
 import type {
   LessonModel,
   LessonBlockModel,
@@ -69,6 +70,14 @@ const lessonTaxonomyIds = computed(() => lesson.value.taxonomy_ids || [])
 provide('lesson-taxonomy-ids', lessonTaxonomyIds)
 const lessonComplexity = computed(() => lesson.value.complexity ?? null)
 provide('task-complexity', lessonComplexity)
+
+// Идёт ли сейчас сохранение PDF (используется и в render-контексте, и на кнопке).
+const isPdfExporting = ref(false)
+
+// Пока идёт сохранение, урок перерисовывается в «бумажном» режиме:
+// блоки показывают просмотр вместо редактора, служебные панели скрыты.
+const renderContext = computed<'screen' | 'pdf'>(() => (isPdfExporting.value ? 'pdf' : 'screen'))
+provide('lesson-render-context', renderContext)
 
 // Реестр белых досок урока: LearnProcessor по нему собирает штрихи всех досок.
 const whiteboards = provideLessonWhiteboards()
@@ -458,6 +467,64 @@ function handleFocusIn(e: FocusEvent) {
   showReadOnlyToast()
 }
 
+// ==================== Печать ====================
+
+let printCleanup: (() => void) | null = null
+
+function handlePrint(e: UIEvent) {
+  if (e.target === contentRef.value) printCleanup?.()
+}
+
+function printLesson() {
+  if (!import.meta.client) return
+  const el = contentRef.value
+  if (!el) return
+
+  // Снимаем возможную предыдущую изоляцию.
+  printCleanup?.()
+
+  // Помечаем контейнер урока для изоляции при печати (см. @media print ниже).
+  el.classList.add('is-printing')
+  el.addEventListener('afterprint', handlePrint)
+
+  printCleanup = () => {
+    el.classList.remove('is-printing')
+    el.removeEventListener('afterprint', handlePrint)
+    printCleanup = null
+  }
+
+  window.print()
+}
+
+// ==================== Экспорт в PDF ====================
+
+const {exportPdf} = useLessonPdf()
+
+async function exportPdfLesson() {
+  if (!import.meta.client || isPdfExporting.value) return
+  const el = contentRef.value
+  if (!el) return
+
+  isPdfExporting.value = true
+  // Экспорт клонирует урок в песочницу, поэтому убираем каретку и снимаем
+  // фокус с полей ввода — незавершённый ввод попадёт в PDF.
+  const active = document.activeElement as HTMLElement | null
+  if (active && el.contains(active) && typeof active.blur === 'function') active.blur()
+  try {
+    await exportPdf(el, lesson.value.title)
+  } catch (e) {
+    console.error('[exportPdfLesson] failed', e)
+    toast.add({
+      title: 'Не удалось сохранить PDF',
+      description: 'Попробуйте ещё раз.',
+      color: 'error',
+      icon: 'i-lucide-circle-alert',
+    })
+  } finally {
+    isPdfExporting.value = false
+  }
+}
+
 // ==================== Глобальная деактивация ====================
 
 function onGlobalPointerDown(e: PointerEvent) {
@@ -491,6 +558,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('dragend', clearDragOver)
   document.removeEventListener('pointerdown', onGlobalPointerDown, true)
   if (toastTimer) clearTimeout(toastTimer)
+  printCleanup?.()
 })
 
 function clearDragOver() {
@@ -536,7 +604,7 @@ defineExpose({
     <!-- Тип урока -->
     <div
       v-if="mode === 'learn'"
-      class="flex items-center gap-1.5 text-xs text-[var(--ui-text-muted,#94a3b8)]"
+      class="print:hidden flex items-center gap-1.5 text-xs text-[var(--ui-text-muted,#94a3b8)]"
     >
       <UIcon name="i-lucide-tag"/>
       <span
@@ -548,7 +616,7 @@ defineExpose({
     </div>
     <div
       v-else
-      class="flex items-center gap-2"
+      class="print:hidden flex items-center gap-2"
     >
       <UIcon name="i-lucide-tag" class="size-3.5 shrink-0 text-[var(--ui-text-muted,#94a3b8)]"/>
       <USelect
@@ -573,9 +641,18 @@ defineExpose({
     </div>
 
     <div
-      class="flex items-center justify-between py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
+      class="print:hidden flex items-center justify-between py-2 border-y border-[var(--ui-border,#f1f5f9)] text-xs text-[var(--ui-text-muted,#94a3b8)]"
     >
       <div class="flex items-center gap-3.5">
+        <button
+          type="button"
+          class="inline-flex items-center justify-center rounded p-0.5 transition-colors hover:text-[var(--ui-primary,#3b82f6)] [&_svg]:w-[13px] [&_svg]:h-[13px]"
+          title="Печать урока"
+          @click.stop="printLesson"
+        >
+          <UIcon name="i-lucide-printer"/>
+        </button>
+
         <span class="inline-flex items-center gap-1.5 [&_svg]:w-[13px] [&_svg]:h-[13px]">
           <UIcon name="i-lucide-type"/>
           {{ totalChars }}
@@ -724,7 +801,7 @@ defineExpose({
 
     <!-- Оверлей для isReadOnly -->
     <div
-      v-if="isReadOnly"
+      v-if="isReadOnly && !isPdfExporting"
       class="absolute inset-0 z-50 bg-transparent cursor-not-allowed"
       @click="handleOverlayClick"
     />
@@ -744,5 +821,118 @@ defineExpose({
 
 .block-drag {
   cursor: grabbing;
+}
+
+/* ==================== Печать урока ==================== */
+@media print {
+  /*
+   * Печатаем только контент самого компонента урока.
+   * Размеры страницы A4 задаются здесь же; поля — по ГОСТ Р 7.0.97-2016
+   * (левое 30 мм, правое 15 мм, верхнее/нижнее 20 мм).
+   */
+  @page {
+    size: A4 portrait;
+    margin: 20mm 15mm 20mm 30mm;
+  }
+
+  html,
+  body {
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* Всё, кроме дерева, содержащего печатаемый урок, скрываем. */
+  body:has(.is-printing) *:not(:has(.is-printing)):not(.is-printing):not(.is-printing *) {
+    display: none !important;
+  }
+
+  /* Обёртки, содержащие урок, не обрезают и не скроллят контент. */
+  body:has(.is-printing),
+  body:has(.is-printing) *:has(.is-printing) {
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    transform: none !important;
+  }
+
+  .is-printing {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    color: #000 !important;
+    background: #fff !important;
+    /* Контейнер урока в приложении — flex-column с gap: при печати
+       разрывы задают сами блоки (margin/line-height), поэтому gap снимаем. */
+    gap: 0 !important;
+    font-size: 12pt;
+    line-height: 1.4;
+  }
+
+  /* У кнопок-иконок нет текста — только глифы, которые не печатаются. */
+  .is-printing button {
+    display: none !important;
+  }
+
+  /* Контент урока тянется на всю ширину печатной области. */
+  .is-printing * {
+    max-width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  .is-printing img,
+  .is-printing svg,
+  .is-printing canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+
+  .is-printing table {
+    width: 100% !important;
+    border-collapse: collapse;
+  }
+
+  /* Служебные элементы интерфейса не печатаем. */
+  .is-printing [data-drop-zone],
+  .is-printing .drag-handle,
+  .is-printing .cursor-col-resize,
+  .is-printing [data-block-action] {
+    display: none !important;
+  }
+
+  /* Заголовок урока — крупно, чёрным. */
+  .is-printing input,
+  .is-printing textarea {
+    border: none !important;
+    background: transparent !important;
+    outline: none !important;
+    padding: 0 !important;
+  }
+
+  .is-printing input {
+    color: #000 !important;
+    font-size: 16pt !important;
+  }
+
+  .is-printing textarea {
+    height: auto !important;
+    overflow: visible !important;
+    color: #000 !important;
+  }
+
 }
 </style>
