@@ -269,8 +269,10 @@ const localHeight = ref<number>(250)
 const isResizing = ref(false)
 let startY = 0
 let startHeight = 0
-// Минимум контейнера — как у доски (minHeight по умолчанию 120), иначе Whiteboard
-// отрисуется выше своего бокса и уедет под ручку.
+// Минимум контейнера — как у доски (minHeight 120), иначе Whiteboard
+// отрисуется выше своего бокса и уедет под ручку. Это же значение — нижний
+// предел ресайза: раньше в :min-height доски уходила текущая высота, и
+// уменьшить доску было нельзя.
 const MIN_BOARD_HEIGHT = 120
 
 // Высота из прохождения. Ставится доске LearnProcessor'ом (applyWhiteboardHeights →
@@ -507,7 +509,7 @@ function onUpdateChildNode(updatedNode: SettingNode) {
                 color="#000000"
                 mode="pen"
                 :resizable="isLearner"
-                :min-height="localHeight"
+                :min-height="MIN_BOARD_HEIGHT"
                 @stroke-complete="onStrokeComplete"
                 @resize="onWhiteboardResize"
               />

@@ -687,9 +687,16 @@ function currentHeight(): number {
   return Math.round(el.getBoundingClientRect().height)
 }
 
+// Высота, заданная доске inline-стилем (0 — height не выставлен и берётся из вёрстки).
+function appliedHeight(): number {
+  const h = Number.parseFloat(containerRef.value?.style.height ?? '')
+  return Number.isFinite(h) && h > 0 ? Math.round(h) : 0
+}
+
 // Программная установка высоты (высота из сохранённого прохождения).
 // В отличие от stopResize, 'resize' здесь НЕ эмитится: это не жест пользователя,
 // и подписчики не должны принимать её за ручной ресайз.
+// Высота применяется в обе стороны — как больше текущей, так и меньше.
 // false — доска ещё не смонтирована, высоту применить нельзя.
 function setHeight(height: number | null | undefined): boolean {
   const el = containerRef.value
@@ -707,7 +714,11 @@ function startResize(e: PointerEvent) {
 
   resizing.value = true
   resizeStartY = e.clientY
-  resizeStartHeight = currentHeight()
+  // Стартуем от высоты, заданной доске ранее: доску оборачивают в блок с
+  // фиксированной высотой (h-full), и getBoundingClientRect() отдал бы её
+  // высоту. Без inline-высоты (вертикальная тяга ещё не происходила) берём
+  // отрисованную — тягание вниз идёт от неё, а не от MIN_HEIGHT.
+  resizeStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
