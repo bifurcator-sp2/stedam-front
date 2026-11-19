@@ -25,6 +25,9 @@ export interface WhiteboardHandle {
    * false — доска ещё не отрисована (высоту нужно применить позже).
    */
   setHeight?: (height: number) => boolean
+  /** Позиция линии «Зона ответа» (px от нижнего края доски). */
+  getAnswerSize?: () => number
+  setAnswerSize?: (size: number) => void
   /**
    * Визуальная (контейнерная) высота доски: программная минимальная высота
    * из документа ответа (whiteboard_height, «пол») и последняя сохранённая
@@ -111,6 +114,8 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
     if (!doc) return
     applied.add(wb)
     wb.loadStrokes(doc)
+    // Позиция линии «Зона ответа» лежит в том же документе ответа.
+    if (doc.answer_size != null) wb.setAnswerSize?.(doc.answer_size)
   }
 
   function setAnswers(list: InkDocument[]) {

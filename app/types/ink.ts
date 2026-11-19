@@ -32,4 +32,6 @@ export interface InkDocument {
   /** Версия схемы — на будущее, при изменениях формата. */
   version: 1
   strokes: InkStroke[]
+  /** Позиция линии «Зона ответа» (px от нижнего края доски), если задана. */
+  answer_size?: number
 }

@@ -510,6 +510,7 @@ function onUpdateChildNode(updatedNode: SettingNode) {
                 mode="pen"
                 :resizable="isLearner"
                 :min-height="MIN_BOARD_HEIGHT"
+                answer-zone
                 @stroke-complete="onStrokeComplete"
                 @resize="onWhiteboardResize"
               />

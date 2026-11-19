@@ -29,6 +29,8 @@ const toast = useToast()
 const lessonRef = ref<{
   getWhiteboardStrokes?: () => InkDocument[]
   getWhiteboardHeights?: () => (number | null)[]
+  /** Позиции линий «Зона ответа» досок (px), порядок блоков. */
+  getWhiteboardAnswerSizes?: () => number[]
   applyWhiteboardHeights?: (heights: (number | null)[] | null) => void
 } | null>(null)
 
@@ -232,6 +234,17 @@ function applyLessonHeights() {
   const heights = heightsFromRecord(learnRecord.value)
   lessonRef.value?.applyWhiteboardHeights?.(heights)
   heightsApplied.value = true
+}
+
+// Ответы с позициями линий «Зона ответа»: доски спрашиваем напрямую
+// (Whiteboard.getAnswerSize) в том же порядке, что и штрихи, и пишем позицию
+// рядом со strokes — answers[i].answer_size. Остальные поля документа не трогаем.
+function withAnswerSizes(docs: InkDocument[]): InkDocument[] {
+  const sizes = lessonRef.value?.getWhiteboardAnswerSizes?.() ?? []
+  return docs.map((doc, i) => {
+    const size = Number(sizes[i])
+    return Number.isFinite(size) ? { ...doc, answer_size: size } : doc
+  })
 }
 
 // Высоты досок для сохранения. Доски спрашиваем напрямую (Whiteboard.getHeight)
@@ -508,7 +521,7 @@ async function saveSilently() {
   if (learnId == null || silentPending.value) return
 
   silentPending.value = true
-  const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
+  const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
   const savedHeights = currentWhiteboardHeights(savedAnswers)
   const startedAt = Date.now()
 
@@ -546,7 +559,7 @@ async function save(silent = false) {
   loadingStatus.value = ''
   savePending.value = true
 
-  const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
+  const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
   const savedHeights = currentWhiteboardHeights(savedAnswers)
   const startedAt = Date.now()
 

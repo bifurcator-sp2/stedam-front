@@ -50,13 +50,26 @@ const props = withDefaults(defineProps<{
   resizable?: boolean
   /** Минимальная высота при ресайзе, px. */
   minHeight?: number
+  /**
+   * Показывать линию «Зона ответа» — горизонтальную полосу, которую можно
+   * тянуть вверх-вниз. Её позиция живёт в модели answerSize (v-model).
+   */
+  answerZone?: boolean
 }>(), {
   color: '#000000',
   hideToolbar: false,
   strokes: undefined,
   resizable: false,
   minHeight: 120,
+  answerZone: false,
 })
+
+// Позиция линии «Зона ответа»: расстояние (px) от нижней границы доски.
+// Двусторонняя модель (v-model:answer-size) — доступна родителю.
+const answerSize = defineModel<number>('answerSize', { default: 75 })
+
+// Сколько пикселей от нижнего края доски линия не может пересечь.
+const ANSWER_SIZE_MIN = 0
 
 // События
 const emit = defineEmits<{
@@ -67,6 +80,8 @@ const emit = defineEmits<{
   (e: 'interaction', active: boolean): void
   /** Высота доски изменилась перетаскиванием ручки. */
   (e: 'resize', height: number): void
+  /** Линию «Зона ответа» перетащили: новое расстояние от нижнего края, px. */
+  (e: 'answerSizeChange', size: number): void
 }>()
 
 const { userData } = useProfile()
@@ -152,6 +167,7 @@ function newStrokeId(): string {
 function serializeStrokes(): InkDocument {
   return {
     version: 1,
+    ...(props.answerZone ? { answer_size: answerSize.value } : {}),
     strokes: strokes.map(s => ({
       id: s.id,
       startedAt: s.startedAt,
@@ -913,10 +929,55 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
   stopResize()
+  stopAnswerDrag()
   currentStroke = null
   lastMid = null
   stabilizerState = null
 })
+
+// ==================== Линия «Зона ответа» ====================
+// Горизонтальная полоса на answerSize px от нижней границы доски. Тянется
+// указателем вверх-вниз (координата clientY, как у ручки ресайза высоты).
+const answerDragging = ref(false)
+let answerStartY = 0
+let answerStartSize = 0
+
+function startAnswerDrag(e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation() // не начинать штрих на холсте
+
+  answerDragging.value = true
+  answerStartY = e.clientY
+  answerStartSize = answerSize.value
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  document.body.style.cursor = 'ns-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onAnswerDragMove(e: PointerEvent) {
+  if (!answerDragging.value) return
+  // Вверх (delta < 0) — линия уходит от нижнего края, вниз — приближается.
+  const next = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize - (e.clientY - answerStartY)))
+  answerSize.value = next
+  // Как и рисование: пока полосу тянут, ИИ-инференс на паузе.
+  setInteraction(true)
+}
+
+function stopAnswerDrag(e?: PointerEvent) {
+  if (!answerDragging.value) return
+  answerDragging.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  if (e) {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+    } catch { /* ignore */ }
+  }
+  setInteraction(false)
+  // Позиция изменилась — просим сохранить ответ (тихая запись).
+  if (answerSize.value !== answerStartSize) emit('answerSizeChange', answerSize.value)
+}
 
 // ==================== Публичный API ====================
 defineExpose({
@@ -963,6 +1024,14 @@ defineExpose({
   getHeight: currentHeight,
   /** Задать высоту доске прозрачно для подписчиков: без эмита 'resize'. */
   setHeight,
+  /** Позиция линии «Зона ответа» (px от нижнего края доски). */
+  getAnswerSize: () => answerSize.value,
+  /** Выставить позицию линии «Зона ответа» (из сохранённого прохождения). */
+  setAnswerSize: (size: number) => {
+    const n = Number(size)
+    if (!Number.isFinite(n)) return
+    answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(n))
+  },
 })
 </script>
 
@@ -970,7 +1039,7 @@ defineExpose({
   <div
     ref="containerRef"
     class="relative w-full h-full overflow-hidden select-none bg-default"
-    :class="{ 'wb-resizing': resizing }"
+    :class="{ 'wb-resizing': resizing, 'wb-answer-dragging': answerDragging }"
     style="touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none;"
   >
     <div class="absolute inset-0 pointer-events-none transition-opacity duration-200" :style="bgStyle"></div>
@@ -1054,6 +1123,23 @@ defineExpose({
       </svg>
     </div>
 
+    <!-- Линия «Зона ответа»: тянется вверх-вниз, надпись двигается вместе с ней -->
+    <div
+      v-if="answerZone"
+      class="wb-answer-zone"
+      :class="{ 'is-active': answerDragging }"
+      :style="{ bottom: `${answerSize}px` }"
+      title="Потяните, чтобы изменить зону ответа"
+      @pointerdown="startAnswerDrag"
+      @pointermove="onAnswerDragMove"
+      @pointerup="stopAnswerDrag"
+      @pointercancel="stopAnswerDrag"
+      @lostpointercapture="stopAnswerDrag"
+    >
+      <div class="wb-answer-line"></div>
+      <span class="wb-answer-label">Зона ответа</span>
+    </div>
+
     <!-- Ручка изменения высоты (тянем за нижнюю границу) -->
     <div
       v-if="resizable"
@@ -1106,6 +1192,52 @@ canvas {
 
 /* Во время перетаскивания кисть на холсте не нужна */
 .wb-resizing canvas {
+  cursor: ns-resize;
+}
+
+/* ==================== Зона ответа ==================== */
+/* Полоса-захват: 12px вокруг линии, чтобы её было удобно тянуть. */
+.wb-answer-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  /* Поднята над холстом, чтобы указатель тянул полосу, а не рисовал. */
+  z-index: 35;
+  height: 12px;
+  transform: translateY(50%);
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.wb-answer-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: #8b1a1a;
+  transition: background-color 0.15s;
+}
+
+.wb-answer-zone:hover .wb-answer-line,
+.wb-answer-zone.is-active .wb-answer-line {
+  background: #b91c1c;
+}
+
+.wb-answer-label {
+  position: absolute;
+  left: 4px;
+  top: 100%;
+  font-size: 9px;
+  line-height: 1;
+  color: #8b1a1a;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Во время перетаскивания полосы кисть на холсте не нужна */
+.wb-answer-dragging canvas {
   cursor: ns-resize;
 }
 </style>

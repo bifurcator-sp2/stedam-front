@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed, ref, watch, onBeforeUnmount, onMounted, toRaw, provide} from 'vue'
+import {computed, ref, reactive, watch, onBeforeUnmount, onMounted, toRaw, provide} from 'vue'
 import type { InkDocument } from '~/types/ink'
 import {VueDraggable} from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
@@ -108,6 +108,17 @@ onBeforeUnmount(stopStrokeListener)
 watch(() => props.answers, list => whiteboards.setAnswers(list ?? []), {
   immediate: true,
 })
+
+// ==================== Зона ответа ====================
+// Позиция линии «Зона ответа» хранится в самой доске (её модель answerSize).
+// Наружу события не эмитим: LearnProcessor читает её напрямую у доски
+// (getWhiteboardAnswerSizes) — по тому же принципу, что и высоты (getHeight).
+
+// Реальные позиции линий «Зона ответа» всех досок урока (px от нижнего края),
+// порядок = порядок блоков / getWhiteboardStrokes.
+function getWhiteboardAnswerSizes(): number[] {
+  return whiteboards.getWhiteboards().map(wb => wb.getAnswerSize?.() ?? 0)
+}
 
 // ==================== Утилита поиска блока в дереве ====================
 
@@ -589,6 +600,8 @@ defineExpose({
   getWhiteboardStrokes,
   /** Реальные высоты тех же досок (px), порядок совпадает с getWhiteboardStrokes. */
   getWhiteboardHeights,
+  /** Позиции линий «Зона ответа» тех же досок (px), порядок совпадает. */
+  getWhiteboardAnswerSizes,
   /** Выставить всем доскам урока высоты из прохождения (без эмита 'resize'). */
   applyWhiteboardHeights,
 })
