@@ -27,11 +27,14 @@ const toast = useToast()
 // Ref на ConstructorLesson: через него забираем штрихи всех белых досок урока.
 const lessonRef = ref<{
   getWhiteboardStrokes?: () => InkDocument[]
+  getWhiteboardHeights?: () => (number | null)[]
 } | null>(null)
 
 // Ответы прохождения (по документу штрихов на доску, в порядке блоков).
 // ConstructorLesson раздаёт их доскам через реестр lesson-whiteboards.
 const answers = ref<InkDocument[]>([])
+// Высоты досок ответов (px) в том же порядке; null — высота неизвестна.
+const whiteboardHeights = ref<(number | null)[]>([])
 
 // Origin бэкенда: к нему приводим относительные '/storage/...' из снапшота.
 const storageOrigin = computed(() => {
@@ -174,12 +177,28 @@ function toAnswers(raw: unknown[]): InkDocument[] {
     .filter((d): d is InkDocument => !!d && Array.isArray((d as InkDocument).strokes))
 }
 
+// Высота доски лежит в самом документе ответа: answers[i].whiteboard_height.
+function heightOf(doc: InkDocument | undefined): number | null {
+  const raw = (doc as { whiteboard_height?: unknown } | undefined)?.whiteboard_height
+  const n = Number(raw)
+  return raw != null && Number.isFinite(n) ? n : null
+}
+
+function toHeights(answers: InkDocument[]): (number | null)[] {
+  return answers.map(heightOf)
+}
+
 async function loadAnswers(userId: number, learnId: number): Promise<InkDocument[]> {
   try {
     return toAnswers(await learnApi.getAnswers(userId, learnId))
   } catch {
     return []
   }
+}
+
+// Высоты досок текущего урока — параллельно штрихам (индекс = порядок блоков).
+function currentWhiteboardHeights(): (number | null)[] {
+  return lessonRef.value?.getWhiteboardHeights?.() ?? []
 }
 
 // begin мог не вернуть learn_id (например, сервер недоступен): ответы всё равно
@@ -206,6 +225,7 @@ async function beginLesson() {
   // Сброс предыдущего состояния.
   currentLearnId.value = null
   answers.value = []
+  whiteboardHeights.value = []
   snapshot.value = null
   snapshotError.value = null
   beginError.value = null
@@ -245,6 +265,7 @@ async function beginLesson() {
     // Урока нет, но нарисованное могло сохраниться локально раньше.
     answers.value = await loadCachedAnswers()
   }
+  whiteboardHeights.value = toHeights(answers.value)
   if (!isCurrent()) return
 
   // Прелоадер шага живёт реальное время ответа + секунду.
@@ -405,10 +426,11 @@ async function saveSilently() {
 
   silentPending.value = true
   const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
+  const savedHeights = currentWhiteboardHeights()
   const startedAt = Date.now()
 
   try {
-    await learnApi.saveLearn(learnId, savedAnswers, true)
+    await learnApi.saveLearn(learnId, savedAnswers, true, savedHeights)
   } catch {
     // Молча: локальная запись saveLearn выполняется сама, оверлей не поднимаем.
   }
@@ -442,12 +464,13 @@ async function save(silent = false) {
   savePending.value = true
 
   const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
+  const savedHeights = currentWhiteboardHeights()
   const startedAt = Date.now()
   let failed = false
 
   try {
     if (learnId == null) throw new Error('Не удалось определить прохождение урока')
-    await learnApi.saveLearn(learnId, savedAnswers, silent)
+    await learnApi.saveLearn(learnId, savedAnswers, silent, savedHeights)
   } catch (e) {
     failed = true
     toast.add({
@@ -533,6 +556,7 @@ function goBack() {
           ref="lessonRef"
           :model-value="lessonModel"
           :answers="answers"
+          :whiteboard-heights="whiteboardHeights"
           :struct-items="[]"
           :lesson-types="lessonTypes"
           :is-read-only="false"

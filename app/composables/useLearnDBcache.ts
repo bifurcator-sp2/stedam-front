@@ -37,6 +37,11 @@ export interface LearnQuestion {
 }
 
 export interface LearnAnswer {
+  /** Документ штрихов доски; рядом лежит whiteboard_height. */
+  version?: number
+  strokes?: unknown[]
+  /** Высота доски ответа (px). Пишется фронтендом рядом со strokes. */
+  whiteboard_height?: number | null
   [key: string]: unknown
 }
 
@@ -52,6 +57,7 @@ export interface LearnRecord {
   score: number | null
   graded_by: number | null
   questions: LearnQuestion[]
+  /** По документу на доску; высота доски — в whiteboard_height каждого документа. */
   answers: LearnAnswer[]
   complete_date: string | null
   archived_at: string | null
@@ -172,6 +178,7 @@ export const useLearnDBcache = () => {
   }
 
   // Ответы из записи learns по ключу [user_id, id]. Нет записи — пустой массив.
+  // Высота доски — в whiteboard_height каждого документа.
   async function getAnswers(userId: number, learnId: number): Promise<unknown[]> {
     const record = await readRecord<LearnRecord>(LEARN_STORE, [userId, learnId])
     return Array.isArray(record?.answers) ? record.answers : []

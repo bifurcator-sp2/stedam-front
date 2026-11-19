@@ -14,17 +14,22 @@ const props = withDefaults(defineProps<{
   editable?: boolean
   /** localId блока в уроке — для реестра белых досок (порядок штрихов) */
   blockLocalId?: string | null
+  /** Сохранённая высота доски ответа (px) из прохождения; null — брать из настроек. */
+  whiteboardHeight?: number | null
 }>(), {
   editable: true,
   settings: null,
   stylePath: '',
   blockLocalId: null,
+  whiteboardHeight: null,
 })
 
 const emit = defineEmits<{
   (e: 'update', value: SettingNode): void
   /** Доска ответа изменила высоту — тот же контракт, что и 'update' (v-model:settings). */
   (e: 'update:settings', value: SettingNode[]): void
+  /** Высота доски ответа (px): при монтировании/смене настройки и после ресайза. */
+  (e: 'whiteboard-height', height: number): void
 }>()
 
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
@@ -247,15 +252,34 @@ const localHeight = ref<number>(250)
 const isResizing = ref(false)
 let startY = 0
 let startHeight = 0
+// Высота из прохождения (шапка whiteboardHeights ConstructorLesson). Приоритетнее
+// answerHeight: это высота, которую ученик оставил сам. Правка в режиме редактора
+// ответ не трогает — там высота берётся из настройки.
+const appliedHeight = ref<number | null>(
+  props.whiteboardHeight != null ? Math.max(80, props.whiteboardHeight) : null,
+)
 
 watch(
   () => child(answerNode.value, 'answerHeight')?.default,
   (val) => {
-    if (val !== undefined && !isResizing.value) {
-      localHeight.value = Number(val) || 250
+    if (isResizing.value) return
+    if (appliedHeight.value !== null) {
+      localHeight.value = appliedHeight.value
+      return
     }
+    if (val !== undefined) localHeight.value = Number(val) || 250
   },
   { immediate: true }
+)
+
+// Сохранённая высота может прийти и после монтирования (ответы грузятся async).
+watch(
+  () => props.whiteboardHeight,
+  (val) => {
+    if (val == null || isResizing.value) return
+    appliedHeight.value = Math.max(80, val)
+    localHeight.value = appliedHeight.value
+  },
 )
 
 function startResize(e: MouseEvent) {
@@ -313,8 +337,13 @@ onBeforeUnmount(() => stopResize())
 // изменение уже произошло жестом пользователя.
 function onWhiteboardResize(height: number) {
   localHeight.value = Math.max(80, height)
+  emit('whiteboard-height', localHeight.value)
   stopResize()
 }
+
+// Высота доски известна и без ресайза (по умолчанию или из настройки answerHeight) —
+// сообщаем её сразу, чтобы она попадала в сохранение даже у нетронутой доски.
+watch(localHeight, h => emit('whiteboard-height', h), { immediate: true, flush: 'post' })
 
 // ==================== Обновление ====================
 

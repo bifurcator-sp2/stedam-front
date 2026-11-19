@@ -36,6 +36,11 @@ interface Props {
    * Необязательно — без ответов доски работают как обычно.
    */
   answers?: InkDocument[]
+  /**
+   * Высоты досок ответов (px) в том же порядке, что и answers; null — высота неизвестна.
+   * Необязательно — доски без высоты берут её из своих настроек.
+   */
+  whiteboardHeights?: (number | null)[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -45,6 +50,7 @@ const props = withDefaults(defineProps<Props>(), {
   mode: 'edit',
   displayReadOnlyToast: true,
   answers: () => [],
+  whiteboardHeights: () => [],
 })
 
 // ==================== Модель ====================
@@ -83,6 +89,30 @@ provide('lesson-render-context', renderContext)
 const whiteboards = provideLessonWhiteboards()
 function getWhiteboardStrokes() {
   return whiteboards.getWhiteboards().map(wb => wb.getStrokes())
+}
+// Высоты досок ответов — параллельный массив к getWhiteboardStrokes(),
+// элементы null у досок без высоты.
+function getWhiteboardHeights() {
+  return whiteboards.getWhiteboardHeights()
+}
+// Блок сообщил высоту своей доски ответа (по умолчанию или после ресайза).
+function onWhiteboardHeight(block: LessonBlockModel, height: number) {
+  whiteboards.setWhiteboardHeight(block.localId, height)
+}
+
+// Блоки, регистрирующие белую доску (задание), в порядке урока:
+// индекс блока в этом списке = индекс его доски в ответах.
+function whiteboardIndexOf(block: LessonBlockModel): number {
+  const ordered = lesson.value.blocks.filter(b => b.isTest)
+  return ordered.findIndex(b => b.localId === block.localId)
+}
+
+// Сохранённая высота доски ответа этого блока из прохождения (px, null — нет).
+function storedWhiteboardHeight(block: LessonBlockModel): number | null {
+  if (!props.whiteboardHeights.length) return null
+  const index = whiteboardIndexOf(block)
+  if (index < 0 || index >= props.whiteboardHeights.length) return null
+  return props.whiteboardHeights[index] ?? null
 }
 
 // На доске завершён штрих — сообщаем наружу (LearnProcessor тихо сохраняет ответы).
@@ -574,6 +604,8 @@ defineExpose({
   contentRef,
   /** Документы штрихов всех белых досок урока, в порядке блоков. */
   getWhiteboardStrokes,
+  /** Высоты досок ответов (px) в том же порядке; null — высота неизвестна. */
+  getWhiteboardHeights,
 })
 </script>
 
@@ -751,8 +783,10 @@ defineExpose({
                     :initial-images="block.images ?? []"
                     :show-to-delete-images="true"
                     :block-local-id="block.localId"
+                    :whiteboard-height="storedWhiteboardHeight(block)"
                     v-model:settings="block.settings"
                     @register-files="onRegisterFiles(block, $event)"
+                    @whiteboard-height="onWhiteboardHeight(block, $event)"
                   />
                 </ReadOnlyWrapper>
 
@@ -767,8 +801,10 @@ defineExpose({
                   :initial-images="block.images ?? []"
                   :show-to-delete-images="true"
                   :block-local-id="block.localId"
+                  :whiteboard-height="storedWhiteboardHeight(block)"
                   v-model:settings="block.settings"
                   @register-files="onRegisterFiles(block, $event)"
+                  @whiteboard-height="onWhiteboardHeight(block, $event)"
                 />
               </div>
             </LessonBlockWrapper>

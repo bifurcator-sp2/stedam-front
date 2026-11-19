@@ -158,16 +158,25 @@ export const useLearnApi = () => {
   // Сохранение прохождения: POST /learn/save
   // answers — документы штрихов белых досок урока в порядке блоков
   // (индекс массива = порядок доски в уроке).
+  // whiteboardHeights — высоты досок ответов (px) в том же порядке, что и answers.
+  // В сохраняемый документ высота попадает рядом со strokes: answers[i].whiteboard_height
+  // (null — высота неизвестна).
   // silent: true — только локальный кэш (IndexedDB), без запроса на сервер.
   async function saveLearn(
     learnId: number,
     answers: InkDocument[],
     silent = false,
+    whiteboardHeights: (number | null)[] = [],
   ): Promise<LearnSaveResponse> {
+    const payload = answers.map((doc, i) => ({
+      ...doc,
+      whiteboard_height: whiteboardHeights[i] ?? null,
+    }))
+
     // Сначала локальный кэш (таблица learns).
     const userId = currentUserId()
     if (userId !== null) {
-      await dbCache.updateLearnAnswers(userId, learnId, answers)
+      await dbCache.updateLearnAnswers(userId, learnId, payload)
     }
 
     // silent — на сервер не отправляем.
@@ -178,7 +187,7 @@ export const useLearnApi = () => {
 
      const response = await api.patch<LearnSaveResponse>(
        '/learn/save',
-       { learn_id: learnId, answers },
+       { learn_id: learnId, answers: payload },
        { silent: false },
      )
 
