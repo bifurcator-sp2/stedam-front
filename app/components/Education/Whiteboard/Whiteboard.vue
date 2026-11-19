@@ -109,6 +109,16 @@ interface StrokePoint {
   isPen: boolean
 }
 
+// Сегмент ластика: отрезок (в координатах канвы), вырезанный из растра
+interface EraseSegment {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+  width: number
+  points: StrokePoint[]
+}
+
 interface Stroke {
   points: StrokePoint[]
   color: string
@@ -119,21 +129,38 @@ interface Stroke {
   minPw: number
   maxPw: number
   stabilizer: number
+  // Заполняется у ластиков (см. computeEraseSegments)
+  erase?: EraseSegment[]
 }
 
 const strokes: Stroke[] = []
 const redoStack: Stroke[] = []
 
+// Слой штрихов: все рисующие операции идут сюда, при каждой отрисовке он
+// компонуется поверх растра (восстановленного изображения) в видимый canvas.
+interface StrokeLayer {
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+}
+
+let strokeLayer: StrokeLayer | null = null
+
 // ==================== Восстановленное состояние ====================
-// Растеризованные штрихи из маски (перекрашенные в текущий цвет) — лежат под новыми штрихами.
-let backgroundImage: HTMLImageElement | null = null
+// Логическое состояние: растр (перекрашенная маска + следы, «сожжённые» ластиком).
+// Хранится отдельно от видимого canvas, поэтому не зависит ни от resize, ни от замены слоя штрихов.
+let rasterImage: HTMLImageElement | null = null
+let rasterEditCanvas: HTMLCanvasElement | null = null
+let rasterEditCtx: CanvasRenderingContext2D | null = null
+// Буфер видимого canvas: растр + композитинг слоя штрихов
+let sceneCtx: CanvasRenderingContext2D | null = null
 let backgroundLoadToken = 0
 
 function loadBackground(src: string | null | undefined) {
   const token = ++backgroundLoadToken
 
   if (!src) {
-    backgroundImage = null
+    rasterImage = null
+    releaseRasterEditCanvas()
     redrawAll()
     return
   }
@@ -148,7 +175,8 @@ function loadBackground(src: string | null | undefined) {
   }
   const fail = () => {
     if (token !== backgroundLoadToken) return
-    backgroundImage = null
+    rasterImage = null
+    releaseRasterEditCanvas()
     redrawAll()
   }
 
@@ -160,25 +188,115 @@ function loadBackground(src: string | null | undefined) {
   if (img.complete && img.naturalWidth > 0) done()
 }
 
-function drawBackground() {
-  if (!ctx || !canvasRef.value || !backgroundImage) return
-  if (backgroundImage.naturalWidth === 0) return
+// ==================== Растр: чтение / правка ====================
+// Редко (смена image) — меняем сам источник растра. После этого растр считаем неотредактированным.
+function releaseRasterEditCanvas() {
+  rasterEditCanvas = null
+  rasterEditCtx = null
+}
 
-  // «contain»: вписываем в буфер без искажений и обрезки
+// Часто (ластик) — редактируемая копия растра в буфере canvas (в «логических» координатах),
+// создаётся лениво при первой правке и переиспользуется.
+function getRasterEditCtx(): CanvasRenderingContext2D | null {
+  if (rasterEditCtx) return rasterEditCtx
+  if (!rasterImage || !canvasRef.value) return null
+  if (rasterImage.naturalWidth === 0) return null
+
   const cw = canvasRef.value.width
   const ch = canvasRef.value.height
-  const iw = backgroundImage.naturalWidth
-  const ih = backgroundImage.naturalHeight
+  if (cw === 0 || ch === 0) return null
+
+  const canvas = document.createElement('canvas')
+  canvas.width = cw
+  canvas.height = ch
+  const rctx = canvas.getContext('2d')
+  if (!rctx) return null
+
+  // Растр «contain» вписан в буфер
+  rctx.imageSmoothingEnabled = true
+  rctx.imageSmoothingQuality = 'high'
+  drawRasterInto(rctx, rasterImage, cw, ch)
+
+  rasterEditCanvas = canvas
+  rasterEditCtx = rctx
+  return rctx
+}
+
+// Рисует растр (или его отредактированную копию) «contain» в буфер w×h
+function drawRasterInto(target: CanvasRenderingContext2D, source: HTMLImageElement | HTMLCanvasElement, cw: number, ch: number) {
+  const iw = source instanceof HTMLImageElement ? source.naturalWidth : source.width
+  const ih = source instanceof HTMLImageElement ? source.naturalHeight : source.height
+  if (!iw || !ih) return
+
   const scale = Math.min(cw / iw, ch / ih)
   const dw = iw * scale
   const dh = ih * scale
   const dx = (cw - dw) / 2
   const dy = (ch - dh) / 2
 
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.globalCompositeOperation = 'source-over'
-  ctx.drawImage(backgroundImage, dx, dy, dw, dh)
+  target.imageSmoothingEnabled = true
+  target.imageSmoothingQuality = 'high'
+  target.drawImage(source, dx, dy, dw, dh)
+}
+
+// Актуальная логическая картинка растра: отредактированная копия (если была) или исходник
+function getRasterSource(): HTMLCanvasElement | HTMLImageElement | null {
+  return rasterEditCanvas ?? (rasterImage && rasterImage.naturalWidth > 0 ? rasterImage : null)
+}
+
+function drawRaster() {
+  if (!sceneCtx || !canvasRef.value) return
+  const source = getRasterSource()
+  if (!source) return
+
+  sceneCtx.save()
+  sceneCtx.setTransform(1, 0, 0, 1, 0, 0)
+  sceneCtx.globalCompositeOperation = 'source-over'
+  if (rasterEditCanvas) {
+    // Копия уже в координатах буфера — переносим 1:1
+    sceneCtx.drawImage(rasterEditCanvas, 0, 0)
+  } else {
+    drawRasterInto(sceneCtx, source, canvasRef.value.width, canvasRef.value.height)
+  }
+  sceneCtx.restore()
+}
+
+// Слой штрихов в размере буфера видимого canvas
+function ensureStrokeLayer(): StrokeLayer | null {
+  if (!canvasRef.value) return null
+  const w = canvasRef.value.width
+  const h = canvasRef.value.height
+  if (w === 0 || h === 0) return null
+
+  if (strokeLayer && strokeLayer.canvas.width === w && strokeLayer.canvas.height === h) {
+    return strokeLayer
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const lctx = canvas.getContext('2d')
+  if (!lctx) return null
+
+  lctx.lineCap = 'round'
+  lctx.lineJoin = 'round'
+  lctx.imageSmoothingEnabled = true
+
+  strokeLayer = { canvas, ctx: lctx }
+  return strokeLayer
+}
+
+// Прозрачный временный canvas в размере видимого canvas (следы ластика)
+function createScratchLayer(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
+  if (!canvasRef.value) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = canvasRef.value.width
+  canvas.height = canvasRef.value.height
+  const cctx = canvas.getContext('2d')
+  if (!cctx) return null
+  cctx.lineCap = 'round'
+  cctx.lineJoin = 'round'
+  return { canvas, ctx: cctx }
 }
 
 // ==================== Состояние канвы ====================
@@ -382,27 +500,162 @@ function recomputeLastMid() {
   lastMid = midpoint(pts[pts.length - 2]!, pts[pts.length - 1]!)
 }
 
+// ==================== Редактирование растра ====================
+// Стирание растра идёт через редактируемую копию (rasterEditCtx), которую можно
+// пересобрать с нуля. Но перед тем как «разрушить» картинку нижележащего изображения
+// (undo ниже стирающего штриха) — вырезание в этой копии становится необратимым.
+// Сегменты ластика (EraseSegment) хранятся в модели: у штриха-ластика — свой путь,
+// у стираемых штрихов — след попадания, пока их откат ещё возможен.
+
+// Вырезающие сегменты одного отрезка (в логических координатах)
+function eraseSegmentsFor(context: CanvasRenderingContext2D, seg: EraseSegment) {
+  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.globalCompositeOperation = 'destination-out'
+  context.strokeStyle = '#000'
+  context.fillStyle = '#000'
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  if (seg.x0 === seg.x1 && seg.y0 === seg.y1) {
+    context.beginPath()
+    context.arc(seg.x0, seg.y0, seg.width / 2, 0, Math.PI * 2)
+    context.fill()
+  } else {
+    context.lineWidth = seg.width
+    context.beginPath()
+    context.moveTo(seg.x0, seg.y0)
+    context.lineTo(seg.x1, seg.y1)
+    context.stroke()
+  }
+  context.restore()
+}
+
+// Применяет сегменты ластика к контексту с трансформом (dpr)
+function applyEraseToContext(context: CanvasRenderingContext2D, erase: EraseSegment[]) {
+  for (const seg of erase) eraseSegmentsFor(context, seg)
+}
+
+// Пути ластиков из модели (собственные сегменты штрихов-ластиков).
+// Следы стираемых штрихов (stroke.erase) не учитываем: их undo/redo обрабатывается отдельно.
+function collectEraseSegments(): EraseSegment[] {
+  const segments: EraseSegment[] = []
+  for (const s of strokes) {
+    if (s.eraser && s.erase && s.erase.length > 0) segments.push(...s.erase)
+  }
+  return segments
+}
+
+// Пересобирает редактируемую копию растра с нуля: исходный растр + все ластики из модели
+function rebuildRaster() {
+  releaseRasterEditCanvas()
+  if (!rasterImage) return
+
+  const segments = collectEraseSegments()
+  if (segments.length === 0) return
+
+  const rctx = getRasterEditCtx()
+  if (!rctx) return
+  applyEraseToContext(rctx, segments)
+}
+
+// Запекает следы ластика штриха прямо в растр (когда откат этого штриха уже невозможен).
+// Нужно только для не-ластиков, попавших в redo через undo: базовую копию пересобрать нельзя —
+// то, что ластик уже стёр из неё, потеряно.
+function burnEraseTrail(stroke: Stroke) {
+  if (!stroke.erase || stroke.erase.length === 0) return
+  if (!rasterImage) {
+    stroke.erase = undefined
+    return
+  }
+  const rctx = getRasterEditCtx()
+  if (rctx) applyEraseToContext(rctx, stroke.erase)
+  stroke.erase = undefined
+}
+
+// ==================== Перерисовка ====================
+// Видимый canvas = актуальный растр + слой штрихов (включая незавершённый текущий).
+// Ластик живёт в слое штрихов (destination-out); в растр он попадает через его правки.
 function redrawAll() {
   if (!ctx || !canvasRef.value) return
+
+  const layer = ensureStrokeLayer()
+  if (layer) {
+    layer.ctx.save()
+    layer.ctx.setTransform(1, 0, 0, 1, 0, 0)
+    layer.ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height)
+    layer.ctx.restore()
+
+    const savedCtx = ctx
+    ctx = layer.ctx
+    for (const s of strokes) redrawStroke(s)
+    if (currentStroke) {
+      redrawStroke(currentStroke)
+      recomputeLastMid()
+    }
+    ctx = savedCtx
+  }
+
+  // Композитинг: растр → следы ластика текущего жеста → слой штрихов
   ctx.save()
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
   ctx.restore()
 
-  drawBackground()
+  drawRaster()
 
-  for (const s of strokes) redrawStroke(s)
-  if (currentStroke) {
-    redrawStroke(currentStroke)
-    recomputeLastMid()
+  if (layer) {
+    // Временные следы ластика ещё не в модели (жест идёт) — рисуем отдельным проходом
+    if (currentStroke && currentStroke.eraser && currentStroke.erase && currentStroke.erase.length > 0) {
+      const scratch = createScratchLayer()
+      if (scratch) {
+        scratch.ctx.drawImage(layer.canvas, 0, 0)
+        scratch.ctx.save()
+        scratch.ctx.scale(dpr, dpr)
+        applyEraseToContext(scratch.ctx, currentStroke.erase)
+        scratch.ctx.restore()
+
+        ctx.save()
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.drawImage(scratch.canvas, 0, 0)
+        ctx.restore()
+        return
+      }
+    }
+
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.drawImage(layer.canvas, 0, 0)
+    ctx.restore()
   }
+}
+
+// Начинает штрих: слой штрихов + порт видимого canvas
+function beginStrokeDraw(stroke: Stroke, pt: StrokePoint) {
+  const layer = ensureStrokeLayer()
+  const layerCtx = layer?.ctx ?? null
+  if (!layerCtx) return
+
+  const savedCtx = ctx
+  ctx = layerCtx
+  drawDot(pt, stroke)
   ctx.globalCompositeOperation = 'source-over'
+  ctx = savedCtx
+
+  // Точечный ластик — сразу вырезаем и из растра
+  if (stroke.eraser && stroke.erase && stroke.erase.length === 0) {
+    const rctx = rasterImage ? getRasterEditCtx() : null
+    if (rctx) applyEraseToContext(rctx, [{ x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y, width: segmentWidth(pt, stroke), points: [pt] }])
+  }
+
+  redrawAll()
 }
 
 // ==================== Инициализация / resize ====================
 function initCanvas() {
   if (!canvasRef.value) return
   ctx = canvasRef.value.getContext('2d', { alpha: true })
+  sceneCtx = ctx
   if (ctx) {
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
@@ -429,6 +682,8 @@ function handleResize() {
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
 
+  // В размере буфера изменились и растр, и слой штрихов
+  rebuildRaster()
   redrawAll()
 }
 
@@ -474,12 +729,12 @@ function onPointerDown(e: PointerEvent) {
     minPw: minPressureWidth.value,
     maxPw: maxPressureWidth.value,
     stabilizer: stabilizerStrength.value,
+    erase: [],
   }
   lastMid = { x: pt.x, y: pt.y }
   stabilizerState = { x: pt.x, y: pt.y }
 
-  drawDot(pt, currentStroke)
-  ctx.globalCompositeOperation = 'source-over'
+  beginStrokeDraw(currentStroke, pt)
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -513,6 +768,17 @@ function onPointerMove(e: PointerEvent) {
     if (dx * dx + dy * dy < 0.01) continue
     pts.push(pt)
     drawCurrentSegment()
+    // Путь ластика: вырезает этот же участок из растра при пересборке и откатывается в undo
+    if (currentStroke.eraser && currentStroke.erase) {
+      currentStroke.erase.push({
+        x0: last.x,
+        y0: last.y,
+        x1: pt.x,
+        y1: pt.y,
+        width: segmentWidth(pt, currentStroke),
+        points: [last, pt],
+      })
+    }
   }
 }
 
@@ -520,10 +786,11 @@ function onPointerUp(e: PointerEvent) {
   if (!canvasRef.value || !ctx) return
   if (e.pointerId !== currentPointerId) return
 
+  const finished = currentStroke
   finishStroke()
 
-  if (currentStroke) {
-    strokes.push(currentStroke)
+  if (finished) {
+    strokes.push(finished)
     redoStack.length = 0
     emit('stroke-end', [...strokes])
   }
@@ -535,6 +802,10 @@ function onPointerUp(e: PointerEvent) {
   lastMid = null
   stabilizerState = null
   ctx.globalCompositeOperation = 'source-over'
+
+  // Пересобираем растр и слой штрихов из модели (убирает инкрементальные артефакты)
+  rebuildRaster()
+  redrawAll()
 
   try {
     canvasRef.value.releasePointerCapture(e.pointerId)
@@ -597,63 +868,8 @@ function onKeyUp(e: KeyboardEvent) {
 //   белый  → прозрачно;  чёрный → полная непрозрачность (там, где писали).
 // При восстановлении маска перекрашивается в текущий цвет письма (props.color).
 
-type MaskableCanvas = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
-
-// Рисуем штрих (с учётом «резиновой» сегментации пера) в произвольный контекст
-function paintStroke(context: MaskableCanvas, stroke: Stroke) {
-  const savedCtx = ctx
-  ctx = context as CanvasRenderingContext2D
-
-  const pts = stroke.points
-  context.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
-  context.strokeStyle = stroke.eraser ? '#000' : stroke.color
-  context.fillStyle = stroke.eraser ? '#000' : stroke.color
-  context.lineCap = 'round'
-  context.lineJoin = 'round'
-
-  if (pts.length === 1) {
-    drawDot(pts[0]!, stroke)
-  } else if (!stroke.smooth) {
-    for (let i = 1; i < pts.length; i++) {
-      context.lineWidth = segmentWidth(pts[i]!, stroke)
-      context.beginPath()
-      context.moveTo(pts[i - 1]!.x, pts[i - 1]!.y)
-      context.lineTo(pts[i]!.x, pts[i]!.y)
-      context.stroke()
-    }
-  } else {
-    // То же геометрическое разбиение, что и в redrawStroke(), но на переданном контексте
-    const mid01 = midpoint(pts[0]!, pts[1]!)
-    context.lineWidth = segmentWidth(pts[0]!, stroke)
-    context.beginPath()
-    context.moveTo(pts[0]!.x, pts[0]!.y)
-    context.lineTo(mid01.x, mid01.y)
-    context.stroke()
-
-    let last = mid01
-    for (let i = 1; i < pts.length - 1; i++) {
-      const mid = midpoint(pts[i]!, pts[i + 1]!)
-      context.lineWidth = segmentWidth(pts[i]!, stroke)
-      context.beginPath()
-      context.moveTo(last.x, last.y)
-      context.quadraticCurveTo(pts[i]!.x, pts[i]!.y, mid.x, mid.y)
-      context.stroke()
-      last = mid
-    }
-
-    const tail = pts[pts.length - 1]!
-    context.lineWidth = segmentWidth(tail, stroke)
-    context.beginPath()
-    context.moveTo(last.x, last.y)
-    context.lineTo(tail.x, tail.y)
-    context.stroke()
-  }
-
-  context.globalCompositeOperation = 'source-over'
-  ctx = savedCtx
-}
-
-// Полная маска непрозрачности (белое = писалось, прозрачное = нет)
+// Полная маска непрозрачности: запекает растр (восстановленное изображение + стёртое
+// ластиком) и слой штрихов (с текущим незавершённым штрихом) в один силуэт.
 function buildCoverageMask(w: number, h: number): HTMLCanvasElement | null {
   const canvas = document.createElement('canvas')
   canvas.width = w
@@ -661,20 +877,39 @@ function buildCoverageMask(w: number, h: number): HTMLCanvasElement | null {
   const mctx = canvas.getContext('2d')
   if (!mctx) return null
 
-  const all = recomposeStrokes()
-  for (const s of all) {
-    if (s.points.length > 0) paintStroke(mctx, s)
+  // 1. Растр: берём актуальную (отредактированную) картинку в координатах буфера
+  const raster = getRasterSource()
+  if (raster) {
+    mctx.save()
+    if (raster instanceof HTMLCanvasElement) {
+      mctx.drawImage(raster, 0, 0)
+    } else {
+      drawRasterInto(mctx, raster, w, h)
+    }
+    mctx.restore()
   }
+
+  // 2. Слой штрихов — уже отрендерен (redrawAll) под теми же координатами
+  const layer = ensureStrokeLayer()
+  if (layer) mctx.drawImage(layer.canvas, 0, 0)
+
+  // 3. Незавершённый текущий штрих (getImage синхронно вызывается из onPointerUp)
+  if (currentStroke && currentStroke.points.length > 0) {
+    const scratch = createScratchLayer()
+    if (scratch) {
+      const savedCtx = ctx
+      ctx = scratch.ctx
+      redrawStroke(currentStroke)
+      ctx = savedCtx
+      mctx.drawImage(scratch.canvas, 0, 0)
+    }
+  }
+
   mctx.globalCompositeOperation = 'source-over'
   return canvas
 }
 
-// Штрихи модели + незавершённый текущий штрих (getImage вызывается из onPointerUp до сохранения)
-function recomposeStrokes(): Stroke[] {
-  return currentStroke ? [...strokes, currentStroke] : strokes
-}
-
-// Отдаёт маску штрихов: grayscale-негатив WebP без потерь, без альфа-канала.
+// Отдаёт маску: grayscale-негатив от запечённого растра + штрихов, WebP без потерь, без альфы.
 function getImage(): string {
   if (!canvasRef.value) return ''
 
@@ -751,11 +986,13 @@ function applyMaskToColor(src: HTMLImageElement): HTMLCanvasElement | null {
   return outCanvas
 }
 
-// Восстановление штрихов из маски: результат становится фоном (картинкой) под новыми штрихами
+// Восстановление штрихов из маски: результат становится растром под новыми штрихами.
+// Правки растра (ластик) сбрасываются — растр считается «заново открытым».
 function restoreFromMask(src: HTMLImageElement, token: number) {
   const colored = applyMaskToColor(src)
   if (!colored) {
-    backgroundImage = src
+    rasterImage = src
+    releaseRasterEditCanvas()
     redrawAll()
     return
   }
@@ -764,12 +1001,14 @@ function restoreFromMask(src: HTMLImageElement, token: number) {
   img.decoding = 'async'
   img.onload = () => {
     if (token !== backgroundLoadToken) return
-    backgroundImage = img
+    rasterImage = img
+    releaseRasterEditCanvas()
     redrawAll()
   }
   img.onerror = () => {
     if (token !== backgroundLoadToken) return
-    backgroundImage = src
+    rasterImage = src
+    releaseRasterEditCanvas()
     redrawAll()
   }
   img.src = colored.toDataURL('image/png')
@@ -815,6 +1054,7 @@ defineExpose({
     currentStroke = null
     lastMid = null
     stabilizerState = null
+    rebuildRaster()
     redrawAll()
     emit('stroke-end', [])
   },
@@ -822,6 +1062,7 @@ defineExpose({
     const s = strokes.pop()
     if (!s) return false
     redoStack.push(s)
+    rebuildRaster()
     redrawAll()
     emit('stroke-end', [...strokes])
     return true
@@ -830,6 +1071,10 @@ defineExpose({
     const s = redoStack.pop()
     if (!s) return false
     strokes.push(s)
+    // Если штрих попал в redo через undo — его след ластика уже вырезан в растёртой
+    // копии необратимо, значит запекаем в растр; ластики пересобираются вместе с копией
+    if (!s.eraser) burnEraseTrail(s)
+    rebuildRaster()
     redrawAll()
     emit('stroke-end', [...strokes])
     return true
