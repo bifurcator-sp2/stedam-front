@@ -295,6 +295,39 @@ function applyStabilizer(raw: StrokePoint, strength: number): StrokePoint {
   return { x, y, pressure: raw.pressure, isPen: raw.isPen }
 }
 
+// ==================== Автоувеличение высоты при письме ====================
+// Пока пользователь рисует, следим за нижней границей bbox всех штрихов
+// (в CSS-пикселях доски). Как только она подходит к низу ближе чем на
+// AUTO_GROW_GAP — высота разом растёт на AUTO_GROW_STEP, и наружу уходит
+// 'resize' с новой высотой. Работает и без ручки (resizable), т.к. штрихи
+// за нижнюю границу всё равно не дорисовались бы.
+const AUTO_GROW_GAP = 25
+const AUTO_GROW_STEP = 100
+
+// Самый низкий штрих доски: текущий (в процессе рисования) и завершённые.
+function strokesBottom(): number {
+  const all = currentStroke ? [...strokes, currentStroke] : strokes
+  let max = 0
+  for (const s of all) {
+    for (const p of s.points) {
+      if (p.y > max) max = p.y
+    }
+  }
+  return max
+}
+
+// Рост высоты: доска не смонтирована — растить нечего.
+function growHeightIfNeeded() {
+  const el = containerRef.value
+  if (!el) return
+  const height = currentHeight()
+  if (height <= 0) return
+  if (height - strokesBottom() > AUTO_GROW_GAP) return
+
+  el.style.height = `${height + AUTO_GROW_STEP}px`
+  emit('resize', height + AUTO_GROW_STEP)
+}
+
 // ==================== Инкрементальное рисование ====================
 function drawCurrentSegment() {
   if (!ctx || !currentStroke || !lastMid) return
@@ -591,6 +624,9 @@ function onPointerMove(e: PointerEvent) {
     pts.push(pt)
     drawCurrentSegment()
   }
+
+  // Штрих подошёл к нижней границе — доска подрастает (и шлёт 'resize').
+  growHeightIfNeeded()
 }
 
 function onPointerUp(e: PointerEvent) {
