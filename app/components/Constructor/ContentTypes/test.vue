@@ -23,10 +23,14 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'update', value: SettingNode): void
+  /** Доска ответа изменила высоту — тот же контракт, что и 'update' (v-model:settings). */
+  (e: 'update:settings', value: SettingNode[]): void
 }>()
 
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
 const canEdit = computed(() => props.editable && lessonMode.value === 'edit')
+// Режим прохождения: доску ответа можно растянуть по высоте (ручка Whiteboard).
+const isLearner = computed(() => lessonMode.value === 'learn')
 
 // ==================== Реестр белых досок ====================
 // Доска регистрируется в реестре урока, чтобы LearnProcessor мог собрать
@@ -294,10 +298,23 @@ function stopResize() {
   const newChildren = [...(props.node.children || [])]
   newChildren[ansIdx] = newAnswerNode
 
-  emit('update', { ...props.node, children: newChildren })
+  const next = { ...props.node, children: newChildren }
+  emit('update', next)
+  emit('update:settings', [next])
 }
 
 onBeforeUnmount(() => stopResize())
+
+// ==================== Высота доски (Whiteboard) ====================
+// Режим прохождения: ручка доски меняет её высоту и пишет её в настройку
+// answerHeight (тем же путём, что и родная ручка контейнера), чтобы настройка
+// уходила в сохранение ответов вместе с уроком.
+// stopResize() сам эмитит настройки — canEdit в нём проверять не нужно:
+// изменение уже произошло жестом пользователя.
+function onWhiteboardResize(height: number) {
+  localHeight.value = Math.max(80, height)
+  stopResize()
+}
 
 // ==================== Обновление ====================
 
@@ -386,7 +403,10 @@ function onUpdateChildNode(updatedNode: SettingNode) {
                 :eraser-size="40"
                 color="#000000"
                 mode="pen"
+                :resizable="isLearner"
+                :min-height="localHeight"
                 @stroke-complete="onStrokeComplete"
+                @resize="onWhiteboardResize"
               />
             </div>
 

@@ -43,10 +43,19 @@ const props = withDefaults(defineProps<{
    * Штрихи, нарисованные пользователем, в пропсу не пишутся (без двусторонней привязки).
    */
   strokes?: InkDocument | InkStroke[]
+  /**
+   * Показывать ручку под нижней границей: тягание меняет высоту доски
+   * (контейнер `position: relative` получает inline height).
+   */
+  resizable?: boolean
+  /** Минимальная высота при ресайзе, px. */
+  minHeight?: number
 }>(), {
   color: '#000000',
   hideToolbar: false,
   strokes: undefined,
+  resizable: false,
+  minHeight: 120,
 })
 
 // События
@@ -56,6 +65,8 @@ const emit = defineEmits<{
   (e: 'strokeComplete', doc: InkDocument): void
   // ★ Новое событие для управления паузой ИИ-инференса
   (e: 'interaction', active: boolean): void
+  /** Высота доски изменилась перетаскиванием ручки. */
+  (e: 'resize', height: number): void
 }>()
 
 const { userData } = useProfile()
@@ -517,6 +528,7 @@ function pointerToPoint(e: PointerEvent): StrokePoint {
 // ==================== Pointer-события ====================
 function onPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest('.wb-toolbar')) return
+  if ((e.target as HTMLElement).closest('.wb-resize-handle')) return
   if (!canvasRef.value || !ctx) return
   e.preventDefault()
 
@@ -660,6 +672,49 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
+// ==================== Ресайз высоты ====================
+// Высота задаётся контейнеру inline-стилем: он size-container, и canvas
+// (absolute inset-0) подхватывает новую высоту, а ResizeObserver перерисовывает штрихи.
+const resizing = ref(false)
+const MIN_HEIGHT = computed(() => Math.max(40, props.minHeight))
+let resizeStartY = 0
+let resizeStartHeight = 0
+
+function startResize(e: PointerEvent) {
+  const el = containerRef.value
+  if (!el || e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation() // не начинать штрих на холсте
+
+  resizing.value = true
+  resizeStartY = e.clientY
+  resizeStartHeight = el.getBoundingClientRect().height
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  document.body.style.cursor = 'ns-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onResizeMove(e: PointerEvent) {
+  const el = containerRef.value
+  if (!resizing.value || !el) return
+  const height = Math.max(MIN_HEIGHT.value, Math.round(resizeStartHeight + e.clientY - resizeStartY))
+  el.style.height = `${height}px`
+}
+
+function stopResize(e?: PointerEvent) {
+  if (!resizing.value) return
+  resizing.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  if (e) {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+    } catch { /* ignore */ }
+  }
+  const el = containerRef.value
+  if (el) emit('resize', Math.round(el.getBoundingClientRect().height))
+}
+
 // ==================== Экспорт изображения ====================
 // Отдаёт содержимое холста (со штрихами) как grayscale WebP без потерь и без альфа-канала.
 // Непрозрачный белый фон → оттенки серого, альфа принудительно в 255.
@@ -788,6 +843,7 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
+  stopResize()
   currentStroke = null
   lastMid = null
   stabilizerState = null
@@ -841,6 +897,7 @@ defineExpose({
   <div
     ref="containerRef"
     class="relative w-full h-full overflow-hidden select-none bg-default"
+    :class="{ 'wb-resizing': resizing }"
     style="touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none;"
   >
     <div class="absolute inset-0 pointer-events-none transition-opacity duration-200" :style="bgStyle"></div>
@@ -923,11 +980,59 @@ defineExpose({
         <path d="m5 11 9 9"></path>
       </svg>
     </div>
+
+    <!-- Ручка изменения высоты (тянем за нижнюю границу) -->
+    <div
+      v-if="resizable"
+      class="wb-resize-handle"
+      title="Потяните, чтобы изменить высоту"
+      @pointerdown="startResize"
+      @pointermove="onResizeMove"
+      @pointerup="stopResize"
+      @pointercancel="stopResize"
+      @lostpointercapture="stopResize"
+    >
+      <div class="wb-resize-grip" :class="{ 'is-active': resizing }"></div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 canvas {
   cursor: crosshair;
+}
+
+.wb-resize-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.wb-resize-grip {
+  width: 48px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--ui-border, #d1d5db);
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s;
+}
+
+.wb-resize-handle:hover .wb-resize-grip,
+.wb-resize-grip.is-active {
+  opacity: 1;
+  background: var(--ui-primary, #3b82f6);
+}
+
+/* Во время перетаскивания кисть на холсте не нужна */
+.wb-resizing canvas {
+  cursor: ns-resize;
 }
 </style>
