@@ -680,6 +680,13 @@ const MIN_HEIGHT = computed(() => Math.max(40, props.minHeight))
 let resizeStartY = 0
 let resizeStartHeight = 0
 
+// Реальная высота доски в CSS-пикселях (без учёта dpr).
+function currentHeight(): number {
+  const el = containerRef.value
+  if (!el) return 0
+  return Math.round(el.getBoundingClientRect().height)
+}
+
 function startResize(e: PointerEvent) {
   const el = containerRef.value
   if (!el || e.button !== 0) return
@@ -688,7 +695,7 @@ function startResize(e: PointerEvent) {
 
   resizing.value = true
   resizeStartY = e.clientY
-  resizeStartHeight = el.getBoundingClientRect().height
+  resizeStartHeight = currentHeight()
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -711,11 +718,11 @@ function stopResize(e?: PointerEvent) {
       (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
     } catch { /* ignore */ }
   }
-  const el = containerRef.value
-  if (el) emit('resize', Math.round(el.getBoundingClientRect().height))
-  // Ресайз считается завершённым изменением доски — сообщаем так же, как о штрихе,
-  // чтобы подписчики (сохранение ответов) перечитали document.
-  emitStrokeUpdate()
+  // Rendered height уже учитывает применённую в этом тике высоту.
+  // 'resize' раньше 'strokeComplete': подписчик к моменту сохранения уже
+  // знает новую высоту, и она попадает в документ вместе со штрихами.
+  const height = currentHeight()
+  if (height > 0) emit('resize', height)
 }
 
 // ==================== Экспорт изображения ====================
@@ -893,6 +900,8 @@ defineExpose({
   redo: doRedo,
   toDataURL: () => canvasRef.value?.toDataURL() ?? '',
   getImage,
+  /** Текущая отрисованная высота доски (CSS px, 0 — если ещё не смонтирована). */
+  getHeight: currentHeight,
 })
 </script>
 

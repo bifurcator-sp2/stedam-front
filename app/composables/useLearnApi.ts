@@ -168,9 +168,13 @@ export const useLearnApi = () => {
     silent = false,
     whiteboardHeights: (number | null)[] = [],
   ): Promise<LearnSaveResponse> {
+    // Явная высота из массива приоритетнее; если её нет, оставляем ту, что
+    // уже лежит в документе (не затираем null-ом).
     const payload = answers.map((doc, i) => ({
       ...doc,
-      whiteboard_height: whiteboardHeights[i] ?? null,
+      whiteboard_height: whiteboardHeights[i]
+        ?? (doc as { whiteboard_height?: number | null }).whiteboard_height
+        ?? null,
     }))
 
     // Сначала локальный кэш (таблица learns).

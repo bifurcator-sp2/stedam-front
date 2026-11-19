@@ -1,6 +1,6 @@
 <!-- components/Constructor/ContentTypes/test.vue -->
 <script setup lang="ts">
-import { computed, inject, ref, nextTick, onBeforeUnmount, watch, type Ref } from 'vue'
+import { computed, inject, ref, onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
 import TextNode from '../TextNode.vue'
 import Whiteboard from '~/components/Education/Whiteboard/Whiteboard.vue'
 import type { InlineEditBinding } from '~/directives/inlineEdit'
@@ -28,8 +28,6 @@ const emit = defineEmits<{
   (e: 'update', value: SettingNode): void
   /** Доска ответа изменила высоту — тот же контракт, что и 'update' (v-model:settings). */
   (e: 'update:settings', value: SettingNode[]): void
-  /** Высота доски ответа (px): при монтировании/смене настройки и после ресайза. */
-  (e: 'whiteboard-height', height: number): void
 }>()
 
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
@@ -52,13 +50,17 @@ function onStrokeComplete() {
   whiteboards?.notifyStrokeComplete()
 }
 
-// Регистрируем доску после того, как она смонтирована и её холст инициализирован
-// (flush: 'post' + nextTick) — иначе loadStrokes прилетит в 0×0-буфер и не отрисуется.
-watch(whiteboardRef, async wb => {
-  if (!wb) return
-  await nextTick()
+// Регистрация доски в реестре урока: доска видна Lesson, и он читает у неё
+// штрихи и реальную высоту (getHeight) при сохранении. blockLocalId может
+// прийти уже после монтирования, поэтому регистрацию повторяем на его смене.
+let registeredWb: InstanceType<typeof Whiteboard> | null = null
+function registerCurrentWhiteboard() {
+  const wb = whiteboardRef.value
+  if (!wb || !props.blockLocalId) return
+  registeredWb = wb
   registerWhiteboard(wb)
-}, { immediate: true, flush: 'post' })
+}
+watch(() => props.blockLocalId, registerCurrentWhiteboard)
 
 onBeforeUnmount(() => {
   if (whiteboardRef.value) unregisterWhiteboard(whiteboardRef.value)
@@ -300,13 +302,17 @@ function onResize(e: MouseEvent) {
   localHeight.value = Math.max(80, startHeight + delta)
 }
 
-function stopResize() {
-  if (!isResizing.value) return
+// force — ресайз вызван ручкой доски: она живёт в режиме прохождения, где
+// isResizing (ручка контейнера, только в редакторе) не выставляется.
+function stopResize(force = false) {
+  if (!isResizing.value && !force) return
   isResizing.value = false
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
+  if (!force) {
+    document.body.style.cursor = ''
+    document.body.style.userSelect = ''
+  }
 
   if (!answerNode.value?.children) return
   const hIdx = answerNode.value.children.findIndex(c => c.key === 'answerHeight')
@@ -335,15 +341,16 @@ onBeforeUnmount(() => stopResize())
 // уходила в сохранение ответов вместе с уроком.
 // stopResize() сам эмитит настройки — canEdit в нём проверять не нужно:
 // изменение уже произошло жестом пользователя.
+// Доска — источник высоты: при ресайзе она отдаёт реальную отрисованную высоту.
+// Сохранение высоту собирает у самой доски (getHeight), событие наружу не нужно —
+// только фиксируем её в настройке answerHeight (update/update:settings).
 function onWhiteboardResize(height: number) {
   localHeight.value = Math.max(80, height)
-  emit('whiteboard-height', localHeight.value)
-  stopResize()
+  stopResize(true)
 }
 
-// Высота доски известна и без ресайза (по умолчанию или из настройки answerHeight) —
-// сообщаем её сразу, чтобы она попадала в сохранение даже у нетронутой доски.
-watch(localHeight, h => emit('whiteboard-height', h), { immediate: true, flush: 'post' })
+// Доска регистрируется, чтобы Lesson мог прочитать её штрихи и высоту.
+onMounted(registerCurrentWhiteboard)
 
 // ==================== Обновление ====================
 

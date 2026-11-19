@@ -25,8 +25,6 @@ interface Props {
   initialImages?: any[]
   /** localId блока в уроке — для реестра белых досок в порядке блоков */
   blockLocalId?: string | null
-  /** Сохранённая высота доски ответа блока (px) — проброс в блок. */
-  whiteboardHeight?: number | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -37,7 +35,6 @@ const props = withDefaults(defineProps<Props>(), {
   allowDragAndDrop: true,
   initialImages: () => [],
   blockLocalId: null,
-  whiteboardHeight: null,
 })
 
 // ==================== Модель ====================
@@ -48,8 +45,6 @@ const settings = defineModel<SettingNode[]>('settings', { default: () => [] })
 
 const emit = defineEmits<{
   (e: 'register-files', inst: any): void
-  /** Высота доски ответа внутри блока (px) — вверх в урок. */
-  (e: 'whiteboard-height', height: number): void
 }>()
 
 // ==================== Резолв компонента ====================
@@ -62,6 +57,10 @@ const isResolved = computed(() => component.value !== null)
 
 function onRegisterFiles(inst: any) {
   emit('register-files', inst)
+}
+
+function onWhiteboardHeight(height: number) {
+  emit('whiteboard-height', height)
 }
 
 // ==================== Реестр белых досок ====================
@@ -89,9 +88,7 @@ watch(blockLocalId, syncBlock)
     :allow-drag-and-drop="props.allowDragAndDrop"
     :initial-images="props.initialImages"
     :block-local-id="props.blockLocalId"
-    :whiteboard-height="props.whiteboardHeight"
     @register-files="onRegisterFiles"
-    @whiteboard-height="emit('whiteboard-height', $event)"
   />
 
   <!-- === Компонент не найден — fallback === -->

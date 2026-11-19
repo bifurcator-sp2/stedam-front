@@ -18,6 +18,8 @@ export interface WhiteboardHandle {
    * и этот метод не вызывается.
    */
   loadStrokes?: (input: InkDocument | InkStroke[]) => void
+  /** Текущая высота доски (CSS px), 0 — доска ещё не отрисована. */
+  getHeight?: () => number
 }
 
 export interface LessonWhiteboardsRegistry {
@@ -25,13 +27,6 @@ export interface LessonWhiteboardsRegistry {
   registerWhiteboard: (localId: string, wb: WhiteboardHandle) => void
   unregisterWhiteboard: (wb: WhiteboardHandle) => void
   getWhiteboards: () => WhiteboardHandle[]
-  /**
-   * Высоты досок ответов (px) в порядке блоков, как у getWhiteboards().
-   * Доски без известной высоты дают null — порядок при этом сохраняется.
-   */
-  getWhiteboardHeights: () => (number | null)[]
-  /** Высота доски блока (px). null — блок доски ответов не отдал высоту. */
-  setWhiteboardHeight: (localId: string, height: number | null) => void
   /** Подписка на завершение штриха на любой доске урока. */
   onStrokeComplete: (cb: () => void) => () => void
   /** Уведомить подписчиков, что на доске завершён штрих. */
@@ -51,8 +46,6 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
   const byBlock = new Map<string, WhiteboardHandle[]>()
   // blockLocalId -> порядковый номер блока в уроке
   const blockOrder = new Map<string, number>()
-  // blockLocalId -> высота доски ответа (px), если блок её сообщил
-  const heights = new Map<string, number>()
   const strokeListeners = new Set<() => void>()
   // Ответы прохождения и доски, которым они уже применены — чтобы не
   // перезаписывать доску повторно (пользователь мог уже дорисовать).
@@ -91,15 +84,6 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
     return () => {
       blockOrder.delete(localId)
       byBlock.delete(localId)
-      heights.delete(localId)
-    }
-  }
-
-  function setWhiteboardHeight(localId: string, height: number | null) {
-    if (height != null && Number.isFinite(height) && height > 0) {
-      heights.set(localId, Math.round(height))
-    } else {
-      heights.delete(localId)
     }
   }
 
@@ -129,24 +113,11 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
       .flatMap(([localId]) => byBlock.get(localId) ?? [])
   }
 
-  // Индекс высоты берётся по номеру блока, а не по номеру доски: доска без
-  // высоты не сдвигает высоты следующих досок.
-  function getWhiteboardHeights(): (number | null)[] {
-    return [...blockOrder.entries()]
-      .sort((a, b) => a[1] - b[1])
-      .filter(([localId]) => (byBlock.get(localId)?.length ?? 0) > 0)
-      .flatMap(([localId]) =>
-        (byBlock.get(localId) ?? []).map(() => heights.get(localId) ?? null),
-      )
-  }
-
   return {
     registerBlock,
     registerWhiteboard,
     unregisterWhiteboard,
     getWhiteboards,
-    getWhiteboardHeights,
-    setWhiteboardHeight,
     onStrokeComplete,
     notifyStrokeComplete,
     setAnswers,
@@ -183,7 +154,10 @@ export function useLessonWhiteboard(localId: () => string | null | undefined) {
     registry,
     register(wb: WhiteboardHandle) {
       const id = localId()
-      if (registry && id) registry.registerWhiteboard(id, wb)
+      if (!registry || !id) return
+      // Повторная регистрация с новым localId не должна оставлять доску в старом блоке.
+      registry.unregisterWhiteboard(wb)
+      registry.registerWhiteboard(id, wb)
     },
     unregister(wb: WhiteboardHandle) {
       registry?.unregisterWhiteboard(wb)
