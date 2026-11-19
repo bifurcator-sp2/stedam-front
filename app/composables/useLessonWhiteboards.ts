@@ -20,6 +20,33 @@ export interface WhiteboardHandle {
   loadStrokes?: (input: InkDocument | InkStroke[]) => void
   /** Текущая высота доски (CSS px), 0 — доска ещё не отрисована. */
   getHeight?: () => number
+  /**
+   * Задать высоту доски из сохранённого прохождения — без эмита 'resize'.
+   * false — доска ещё не отрисована (высоту нужно применить позже).
+   */
+  setHeight?: (height: number) => boolean
+  /**
+   * Визуальная (контейнерная) высота доски: программная минимальная высота
+   * из документа ответа (whiteboard_height, «пол») и последняя сохранённая
+   * пользователем при ресайзе высота. Хранится в реестре, а не в самой доске:
+   * загрузка ответов перезаписывает props.strokes, и пол должен её пережить.
+   */
+  visualHeight?: WhiteboardVisualHeight
+  /** Пользователь оставил новую высоту — контейнер запоминает её (настройка answerHeight). */
+  onSavedHeight?: (height: number) => void
+  /**
+   * Визуальная высота доски изменилась программно (из прохождения). Реестр
+   * вызывает колбэк напрямую: присваивание visualHeight на экземпляре
+   * компонента не реактивно, и контейнер не узнал бы о новой высоте.
+   */
+  onHeightChange?: (height: number) => void
+}
+
+export interface WhiteboardVisualHeight {
+  /** «Пол» из сохранённого прохождения (whiteboard_height документа). */
+  floor?: number
+  /** Последняя высота, которую оставил пользователь. */
+  saved?: number
 }
 
 export interface LessonWhiteboardsRegistry {
@@ -36,6 +63,29 @@ export interface LessonWhiteboardsRegistry {
    * Уже зарегистрированные доски сразу получают свой документ.
    */
   setAnswers: (answers: InkDocument[]) => void
+  /**
+   * Высоты досок из сохранённого прохождения (необязательно, null — не трогать).
+   * Порядок = порядок блоков, как у setAnswers.
+   */
+  setHeights: (heights: (number | null)[] | null) => void
+  /**
+   * «Пол» высоты доски из документа ответа: минимальная высота, которую контейнер
+   * держит, пока ученик не растянул доску сильнее.
+   */
+  setFloorHeight: (wb: WhiteboardHandle, height: number) => void
+  /** Последняя сохранённая пользователем высота доски (null — не было). */
+  getSavedHeight: (wb: WhiteboardHandle) => number | null
+  /**
+   * Запомнить высоту, оставленную пользователем: в памяти реестра и в настройке
+   * блока (handle.onSavedHeight), чтобы она ушла в сохранение вместе с уроком.
+   */
+  saveHeight: (wb: WhiteboardHandle, height: number) => void
+  /**
+   * Применить сохранённые высоты всем зарегистрированным доскам по порядку.
+   * Высота ставится доске напрямую (setHeight, без эмита 'resize') и
+   * запоминается в реестре. Порядок — от первой доски к последней.
+   */
+  applyHeights: () => void
 }
 
 export const LESSON_WHITEBOARDS_KEY: InjectionKey<LessonWhiteboardsRegistry> =
@@ -113,14 +163,80 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
       .flatMap(([localId]) => byBlock.get(localId) ?? [])
   }
 
+  // ==================== Высоты досок ====================
+
+  // Высоты из сохранённого экземпляра learn; null — высоту не трогаем.
+  let heights: (number | null)[] | null = null
+
+  function setFloorHeight(wb: WhiteboardHandle, height: number) {
+    const h = Number(height)
+    if (!Number.isFinite(h) || h <= 0) return
+    wb.visualHeight = { ...wb.visualHeight, floor: h }
+    wb.onHeightChange?.(h)
+  }
+
+  function getSavedHeight(wb: WhiteboardHandle): number | null {
+    const saved = Number(wb.visualHeight?.saved)
+    return Number.isFinite(saved) && saved > 0 ? saved : null
+  }
+
+  function saveHeight(wb: WhiteboardHandle, height: number) {
+    const h = Number(height)
+    if (!Number.isFinite(h) || h <= 0) return
+    wb.visualHeight = { ...wb.visualHeight, saved: h }
+    wb.onSavedHeight?.(h)
+    wb.onHeightChange?.(h)
+  }
+
+  // Высота из экземпляра learn по индексу доски (порядок = порядок блоков).
+  function learnHeightOf(wb: WhiteboardHandle): number | null {
+    if (!heights) return null
+    const height = Number(heights[getWhiteboards().indexOf(wb)])
+    return Number.isFinite(height) && height > 0 ? height : null
+  }
+
+  function setHeights(list: (number | null)[] | null) {
+    heights = Array.isArray(list) && list.length ? list : null
+    applyHeights()
+  }
+
+  // Ставит высоту из learn-экземпляра доске напрямую (setHeight не эмитит
+  // 'resize') и запоминает её как пол. Порядок — как у getWhiteboards().
+  // Скрытый контейнер (например, во вкладке) не отрисуется — ok будет false,
+  // а колбэк получит высоту в любом случае, чтобы контейнер дорос вместе с доской.
+  function applyHeights() {
+    for (const wb of getWhiteboards()) {
+      const height = learnHeightOf(wb)
+      if (height == null || typeof wb.setHeight !== 'function') continue
+      const ok = wb.setHeight(height)
+      if (!ok) {
+        // Доска не смонтирована: пол всё равно запоминаем — дорисуется позже.
+        wb.visualHeight = { ...wb.visualHeight, floor: height }
+        wb.onHeightChange?.(height)
+        continue
+      }
+      wb.visualHeight = { ...wb.visualHeight, floor: height }
+      wb.onHeightChange?.(height)
+    }
+  }
+
   return {
     registerBlock,
-    registerWhiteboard,
+    // Высота могла прийти раньше, чем доска отрисовалась.
+    registerWhiteboard: (localId, wb) => {
+      registerWhiteboard(localId, wb)
+      applyHeights()
+    },
     unregisterWhiteboard,
     getWhiteboards,
     onStrokeComplete,
     notifyStrokeComplete,
     setAnswers,
+    setHeights,
+    setFloorHeight,
+    getSavedHeight,
+    saveHeight,
+    applyHeights
   }
 }
 
@@ -162,5 +278,9 @@ export function useLessonWhiteboard(localId: () => string | null | undefined) {
     unregister(wb: WhiteboardHandle) {
       registry?.unregisterWhiteboard(wb)
     },
+    /** Запомнить высоту, оставленную пользователем (в реестре и в настройке). */
+    saveHeight(wb: WhiteboardHandle, height: number) {
+      registry?.saveHeight(wb, height)
+    }
   }
 }

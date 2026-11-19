@@ -8,6 +8,7 @@ import type {
   LearnSnapshotData,
   LearnSnapshotResponse
 } from '~/composables/useLearnApi'
+import type { LearnRecord } from '~/composables/useLearnDBcache'
 import type { InkDocument } from '~/types/ink'
 import { loadingPhrases } from '~/utils/loadingPhrases'
 
@@ -28,6 +29,7 @@ const toast = useToast()
 const lessonRef = ref<{
   getWhiteboardStrokes?: () => InkDocument[]
   getWhiteboardHeights?: () => (number | null)[]
+  applyWhiteboardHeights?: (heights: (number | null)[] | null) => void
 } | null>(null)
 
 // Ответы прохождения (по документу штрихов на доску, в порядке блоков).
@@ -51,6 +53,17 @@ const storageOrigin = computed(() => {
 const beginPending = ref(false)
 const beginResult = ref<unknown>(null)
 const beginError = ref<unknown>(null)
+
+// Сохранённый экземпляр learn (IndexedDB: user_id + learn_id после begin).
+// Его answers[i].whiteboard_height — единственный источник высот досок:
+// высоты из прохождения выставляются доскам перед снятием прелоадера.
+const learnRecord = ref<LearnRecord | null>(null)
+
+// Высоты досок из сохранённого learn. Уже проставленные высоты не перетираем
+// пустым значением. Выставлены ли они хоть раз — помним, чтобы «реальные»
+// высоты досок при сохранении (getHeight) их не заменили.
+const lessonHeights = ref<(number | null)[]>([])
+const heightsApplied = ref(false)
 
 // Снимок прохождения: GET /learn/snapshot/{learn}
 const snapshotPending = ref(false)
@@ -192,27 +205,71 @@ async function loadAnswers(userId: number, learnId: number): Promise<InkDocument
   }
 }
 
-// Реальные высоты досок текущего урока: ConstructorLesson опрашивает каждую
-// доску (Whiteboard.getHeight) в том же порядке, что и штрихи, поэтому индекс
-// высоты = индекс документа в answers. Пустой ответ (доски ещё не отрисованы)
-// откатываем к высотам, сохранённым в самих документах ответа.
+// Сохранённый экземпляр learn (после begin он уже лежит в IndexedDB).
+// Ключ поиска в кэше — [user_id, lesson_id], поэтому передаём id урока,
+// а не id прохождения (learn_id).
+async function loadLearnRecord(userId: number, lessonId: number): Promise<LearnRecord | null> {
+  try {
+    return await useLearnDBcache().getLearn(userId, lessonId)
+  } catch {
+    return null
+  }
+}
+
+// Высоты досок из сохранённого экземпляра learn (источник — whiteboard_height
+// документов ответов, в порядке блоков). Пустые значения не затирают уже известные.
+function heightsFromRecord(record: LearnRecord | null): (number | null)[] {
+  const docs = toAnswers(record?.answers ?? [])
+  return docs.map((doc, i) => heightOf(doc) ?? lessonHeights.value[i] ?? null)
+}
+
+// Выставить высоты из сохранённого learn всем доскам ConstructorLesson.
+// Каждая доска получает свою высоту напрямую (Whiteboard.setHeight) — без эмита
+// 'resize', поэтому это не считается жестом пользователя и не запускает
+// тихое сохранение. Порядок — как у урока: доски ConstructorLesson отдаёт
+// по порядку блоков, индекс совпадает с индексом документа ответа.
+function applyLessonHeights() {
+  const heights = heightsFromRecord(learnRecord.value)
+  lessonRef.value?.applyWhiteboardHeights?.(heights)
+  heightsApplied.value = true
+}
+
+// Высоты досок для сохранения. Доски спрашиваем напрямую (Whiteboard.getHeight)
+// в порядке блоков — одинаковом с порядком штрихов. Но пока неинициализированные
+// доски не отрисованы, getHeight может вернуть 0 (или высоту не по прохождению):
+// такие значения берём из сохранённого learn / документа ответа, чтобы
+// выставленная при загрузке высота не затёрлась пустой.
 function currentWhiteboardHeights(docs: InkDocument[]): (number | null)[] {
   const actual = lessonRef.value?.getWhiteboardHeights?.() ?? []
-  if (actual.length) return actual
-  return docs.map(heightOf)
+  if (!actual.length && !heightsApplied.value) return docs.map(heightOf)
+
+  return docs.map((doc, i) => {
+    const measured = Number(actual[i])
+    if (Number.isFinite(measured) && measured > 0) return measured
+    return lessonHeights.value[i] ?? heightOf(doc)
+  })
 }
 
 // begin мог не вернуть learn_id (например, сервер недоступен): ответы всё равно
 // лежат локально — берём их из кэша по последнему известному прохождению урока.
 async function loadCachedAnswers(): Promise<InkDocument[]> {
+  return toAnswers((await cachedLearnRecord())?.answers ?? [])
+}
+
+// Последняя сохранённая запись прохождения этого урока (IndexedDB).
+async function cachedLearnRecord(): Promise<LearnRecord | null> {
   const userId = currentUserId()
-  if (userId === null) return []
+  if (userId === null) return null
   try {
-    const record = await useLearnDBcache().getLearn(userId, props.lessonId)
-    return toAnswers(record?.answers ?? [])
+    return await useLearnDBcache().getLearn(userId, props.lessonId)
   } catch {
-    return []
+    return null
   }
+}
+
+// id прохождения без begin: из последней записи урока в кэше.
+async function cachedLearnId(): Promise<number | null> {
+  return (await cachedLearnRecord())?.id ?? null
 }
 
 async function beginLesson() {
@@ -226,6 +283,9 @@ async function beginLesson() {
   // Сброс предыдущего состояния.
   currentLearnId.value = null
   answers.value = []
+  learnRecord.value = null
+  lessonHeights.value = []
+  heightsApplied.value = false
   snapshot.value = null
   snapshotError.value = null
   beginError.value = null
@@ -256,8 +316,11 @@ async function beginLesson() {
   await tick()
   if (!isCurrent()) return
 
+  // id прохождения: из begin, а если он его не вернул — из последней записи урока.
+  const userId = currentUserId()
+  const savedLearnId = learnId ?? await cachedLearnId()
+
   if (!failed && learnId != null) {
-    const userId = currentUserId()
     answers.value = userId !== null
       ? await loadAnswers(userId, learnId)
       : []
@@ -265,6 +328,15 @@ async function beginLesson() {
     // Урока нет, но нарисованное могло сохраниться локально раньше.
     answers.value = await loadCachedAnswers()
   }
+  if (!isCurrent()) return
+
+  // Сохранённый экземпляр learn: высоты досок (whiteboard_height ответов)
+  // проставим доскам перед снятием прелоадера. Ключ кэша — [user_id, lesson_id]
+  // (id урока из URL), а не learn_id.
+  learnRecord.value = userId !== null
+    ? await loadLearnRecord(userId, props.lessonId)
+    : null
+  lessonHeights.value = heightsFromRecord(learnRecord.value)
   if (!isCurrent()) return
 
   // Прелоадер шага живёт реальное время ответа + секунду.
@@ -295,7 +367,8 @@ async function beginLesson() {
   const snapshotStartedAt = Date.now()
 
   try {
-    snapshot.value = await learnApi.snapshot(learnId!)
+    // Без id из begin снимок берём по id сохранённого прохождения.
+    snapshot.value = await learnApi.snapshot((learnId ?? savedLearnId)!)
   } catch (e) {
     if (isCurrent()) snapshotError.value = errorMessage(e, 'Не удалось загрузить урок')
   }
@@ -316,6 +389,17 @@ async function beginLesson() {
   // под оверлеем, затем снимаем прелоадер: в одном патче директива
   // не получает value=false вместе со сменой содержимого.
   await tick()
+  if (!isCurrent()) return
+
+  // Строго перед снятием прелоадера: доски ConstructorLesson (и вложенные
+  // Whiteboard) получают высоты из сохранённого экземпляра learn.
+  // Тик — доски уже отрисованы; во время задержки перед снятием оверлея
+  // дорисовываем высоты ещё раз для досок, смонтированных позже.
+  applyLessonHeights()
+  await tick()
+  if (!isCurrent()) return
+  applyLessonHeights()
+
   loading.value = false
 }
 
@@ -465,17 +549,15 @@ async function save(silent = false) {
   const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
   const savedHeights = currentWhiteboardHeights(savedAnswers)
   const startedAt = Date.now()
-  let failed = false
 
   try {
     if (learnId == null) throw new Error('Не удалось определить прохождение урока')
     await learnApi.saveLearn(learnId, savedAnswers, silent, savedHeights)
   } catch (e) {
-    failed = true
     toast.add({
       title: 'Не удалось сохранить урок',
       description: String(messageOf(e, 'Не удалось сохранить урок')),
-      color: 'error',
+      color: 'error'
     })
   }
 

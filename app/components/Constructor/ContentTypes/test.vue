@@ -5,7 +5,7 @@ import TextNode from '../TextNode.vue'
 import Whiteboard from '~/components/Education/Whiteboard/Whiteboard.vue'
 import type { InlineEditBinding } from '~/directives/inlineEdit'
 import type { SettingNode } from '~/utils/constructors'
-import { useLessonWhiteboard } from '~/composables/useLessonWhiteboards'
+import { useLessonWhiteboard, type WhiteboardHandle, type WhiteboardVisualHeight } from '~/composables/useLessonWhiteboards'
 
 const props = withDefaults(defineProps<{
   node: SettingNode
@@ -43,7 +43,19 @@ const {
   registry: whiteboards,
   register: registerWhiteboard,
   unregister: unregisterWhiteboard,
+  saveHeight: registrySaveHeight,
 } = useLessonWhiteboard(() => props.blockLocalId)
+
+// ==================== Высота доски из прохождения ====================
+// Экземпляр доски в реестре: через него высота из сохранённого прохождения
+// ставится доске напрямую (setHeight, без эмита 'resize').
+// Пол высоты (whiteboard_height документа) и последняя высота, оставленная
+// пользователем, живут в реестре и переживают перезагрузку ответов.
+// Контейнер читает их и ставит свою высоту (см. applyVisualHeight).
+function heightOf(wb: InstanceType<typeof Whiteboard>): WhiteboardVisualHeight {
+  const handle = wb as unknown as WhiteboardHandle
+  return (handle.visualHeight ??= {})
+}
 
 // Штрих доски завершён — сообщаем реестру (LearnProcessor тихо сохраняет ответы).
 function onStrokeComplete() {
@@ -57,6 +69,9 @@ let registeredWb: InstanceType<typeof Whiteboard> | null = null
 function registerCurrentWhiteboard() {
   const wb = whiteboardRef.value
   if (!wb || !props.blockLocalId) return
+  // Колбэк высоты — на том же объекте, что реестр запоминает при регистрации,
+  // и до registerWhiteboard: он сразу применяет высоту и вызовет колбэк.
+  ;(wb as unknown as WhiteboardHandle).onHeightChange = onHeightChange
   registeredWb = wb
   registerWhiteboard(wb)
 }
@@ -254,19 +269,59 @@ const localHeight = ref<number>(250)
 const isResizing = ref(false)
 let startY = 0
 let startHeight = 0
-// Высота из прохождения (шапка whiteboardHeights ConstructorLesson). Приоритетнее
-// answerHeight: это высота, которую ученик оставил сам. Правка в режиме редактора
-// ответ не трогает — там высота берётся из настройки.
-const appliedHeight = ref<number | null>(
-  props.whiteboardHeight != null ? Math.max(80, props.whiteboardHeight) : null,
-)
+// Минимум контейнера — как у доски (minHeight по умолчанию 120), иначе Whiteboard
+// отрисуется выше своего бокса и уедет под ручку.
+const MIN_BOARD_HEIGHT = 120
+
+// Высота из прохождения. Ставится доске LearnProcessor'ом (applyWhiteboardHeights →
+// Whiteboard.setHeight) и живёт в реестре визуальной высоты — она приоритетнее answerHeight:
+// это высота, которую ученик оставил сам. Правка в режиме редактора ответ
+// не трогает — там высота берётся из настройки.
+const appliedHeight = ref<number | null>(null)
+
+// Высота, оставленная пользователем в этом сеансе: приоритетнее настройки,
+// чтобы перестройка настроек урока её не откатила.
+const userHeight = ref<number | null>(null)
+
+// Текущая визуальная высота доски: высота пользователя, иначе высота из
+// прохождения (пол из документа ответа ставит реестр — он переживает
+// перезагрузку ответов), иначе null — брать из настройки answerHeight.
+function visualHeight(): number | null {
+  const wb = whiteboardRef.value
+  const visual = wb ? heightOf(wb) : {}
+  return userHeight.value
+    ?? visual.saved
+    ?? appliedHeight.value
+    ?? visual.floor
+    ?? null
+}
+
+// Программная установка высоты: доска и контейнер получают её напрямую, без
+// эмитов. Это не жест пользователя — подписчики ресайза не срабатывают.
+function applyVisualHeight() {
+  const wb = whiteboardRef.value
+  const height = visualHeight()
+  if (!wb || height == null || !wb.setHeight?.(height)) return
+  localHeight.value = Math.max(MIN_BOARD_HEIGHT, height)
+}
+
+// Реестр высот: он ставит высоту доске и уведомляет колбэком. Присваивание
+// visualHeight на экземпляре компонента не реактивно, поэтому контейнер
+// узнаёт о новой высоте только отсюда — и растёт вместе с доской
+// (иначе overflow-hidden обрежёт холст). Колбэк регистрируется в
+// registerCurrentWhiteboard на том же объекте, что хранит реестр.
+function onHeightChange(height: number) {
+  if (isResizing.value) return
+  localHeight.value = Math.max(MIN_BOARD_HEIGHT, height)
+}
 
 watch(
   () => child(answerNode.value, 'answerHeight')?.default,
   (val) => {
     if (isResizing.value) return
-    if (appliedHeight.value !== null) {
-      localHeight.value = appliedHeight.value
+    const fixed = visualHeight()
+    if (fixed !== null) {
+      localHeight.value = Math.max(MIN_BOARD_HEIGHT, fixed)
       return
     }
     if (val !== undefined) localHeight.value = Number(val) || 250
@@ -274,13 +329,13 @@ watch(
   { immediate: true }
 )
 
-// Сохранённая высота может прийти и после монтирования (ответы грузятся async).
+// Высота может прийти после монтирования (ответы грузятся async).
 watch(
   () => props.whiteboardHeight,
   (val) => {
     if (val == null || isResizing.value) return
     appliedHeight.value = Math.max(80, val)
-    localHeight.value = appliedHeight.value
+    applyVisualHeight()
   },
 )
 
@@ -299,12 +354,14 @@ function startResize(e: MouseEvent) {
 function onResize(e: MouseEvent) {
   if (!isResizing.value) return
   const delta = e.clientY - startY
-  localHeight.value = Math.max(80, startHeight + delta)
+  localHeight.value = Math.max(MIN_BOARD_HEIGHT, startHeight + delta)
 }
 
 // force — ресайз вызван ручкой доски: она живёт в режиме прохождения, где
 // isResizing (ручка контейнера, только в редакторе) не выставляется.
-function stopResize(force = false) {
+// skipEmit — высота выставлена программно (из прохождения): запоминаем её без
+// эмита настроек, чтобы не гонять update/update:settings на инициализации.
+function stopResize(force = false, skipEmit = false) {
   if (!isResizing.value && !force) return
   isResizing.value = false
   document.removeEventListener('mousemove', onResize)
@@ -314,6 +371,16 @@ function stopResize(force = false) {
     document.body.style.userSelect = ''
   }
 
+  // Высота, оставленная пользователем: держим её поверх настройки и запоминаем
+  // в реестре (переживёт перезагрузку ответов). Программную высоту не трогаем.
+  if (!skipEmit) {
+    userHeight.value = localHeight.value
+    // saveHeight дополнительно запоминает высоту в реестре визуальной высоты —
+    // она приоритетнее настройки при следующих перестройках урока.
+    if (whiteboardRef.value) registrySaveHeight(whiteboardRef.value, localHeight.value)
+  }
+
+  if (skipEmit) return
   if (!answerNode.value?.children) return
   const hIdx = answerNode.value.children.findIndex(c => c.key === 'answerHeight')
   if (hIdx === -1) return
@@ -345,8 +412,8 @@ onBeforeUnmount(() => stopResize())
 // Сохранение высоту собирает у самой доски (getHeight), событие наружу не нужно —
 // только фиксируем её в настройке answerHeight (update/update:settings).
 function onWhiteboardResize(height: number) {
-  localHeight.value = Math.max(80, height)
-  stopResize(true)
+  localHeight.value = Math.max(MIN_BOARD_HEIGHT, height)
+  stopResize(true, true)
 }
 
 // Доска регистрируется, чтобы Lesson мог прочитать её штрихи и высоту.

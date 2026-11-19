@@ -90,6 +90,14 @@ function getWhiteboardHeights(): (number | null)[] {
   return whiteboards.getWhiteboards().map(wb => wb.getHeight?.() ?? null)
 }
 
+// Высоты досок из сохранённого прохождения (по порядку блоков). Каждая доска
+// получает свою высоту напрямую (Whiteboard.setHeight, без эмита 'resize'),
+// после чего контейнеры подгоняются под неё. Высота запоминается в реестре
+// как пол: перезагрузка ответов её не сбросит.
+function applyWhiteboardHeights(heights: (number | null)[] | null) {
+  whiteboards.setHeights(heights)
+}
+
 // На доске завершён штрих — сообщаем наружу (LearnProcessor тихо сохраняет ответы).
 const emitStrokeComplete = () => emit('whiteboard-stroke-complete')
 const stopStrokeListener = whiteboards.onStrokeComplete(emitStrokeComplete)
@@ -581,6 +589,8 @@ defineExpose({
   getWhiteboardStrokes,
   /** Реальные высоты тех же досок (px), порядок совпадает с getWhiteboardStrokes. */
   getWhiteboardHeights,
+  /** Выставить всем доскам урока высоты из прохождения (без эмита 'resize'). */
+  applyWhiteboardHeights,
 })
 </script>
 

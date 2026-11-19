@@ -169,7 +169,7 @@ export const useLearnDBcache = () => {
     return writeRecord(SNAPSHOT_STORE, record)
   }
 
-  function getLearn(userId: number, lessonId: number): Promise<LearnRecord | null> {
+  async function getLearn(userId: number, lessonId: number): Promise<LearnRecord | null> {
     return readRecordByUserLesson<LearnRecord>(LEARN_STORE, userId, lessonId)
   }
 

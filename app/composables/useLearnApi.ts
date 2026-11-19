@@ -95,6 +95,7 @@ export const useLearnApi = () => {
     )
 
     const learnId = response?.learn_id ?? response?.learn ?? response?.id
+
     if (userId !== null && learnId != null) {
       await dbCache.putLearn({
         ...response,
@@ -188,14 +189,12 @@ export const useLearnApi = () => {
       return { learn_id: learnId, saved: true }
     }
 
+    await api.patch<LearnSaveResponse>(
+      '/learn/save',
+      { learn_id: learnId, answers: payload },
+      { silent: false },
+    )
 
-     const response = await api.patch<LearnSaveResponse>(
-       '/learn/save',
-       { learn_id: learnId, answers: payload },
-       { silent: false },
-     )
-
-    // return { ...response, learn_id: learnId, saved: response?.saved ?? true }
     return { learn_id: learnId, saved: true }
   }
 

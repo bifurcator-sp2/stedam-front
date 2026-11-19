@@ -687,6 +687,18 @@ function currentHeight(): number {
   return Math.round(el.getBoundingClientRect().height)
 }
 
+// Программная установка высоты (высота из сохранённого прохождения).
+// В отличие от stopResize, 'resize' здесь НЕ эмитится: это не жест пользователя,
+// и подписчики не должны принимать её за ручной ресайз.
+// false — доска ещё не смонтирована, высоту применить нельзя.
+function setHeight(height: number | null | undefined): boolean {
+  const el = containerRef.value
+  const h = Number(height)
+  if (!el || !Number.isFinite(h) || h <= 0) return false
+  el.style.height = `${Math.max(MIN_HEIGHT.value, Math.round(h))}px`
+  return true
+}
+
 function startResize(e: PointerEvent) {
   const el = containerRef.value
   if (!el || e.button !== 0) return
@@ -902,6 +914,8 @@ defineExpose({
   getImage,
   /** Текущая отрисованная высота доски (CSS px, 0 — если ещё не смонтирована). */
   getHeight: currentHeight,
+  /** Задать высоту доске прозрачно для подписчиков: без эмита 'resize'. */
+  setHeight,
 })
 </script>
 
