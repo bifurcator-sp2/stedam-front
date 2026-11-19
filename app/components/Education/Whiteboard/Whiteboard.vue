@@ -311,20 +311,18 @@ function applyStabilizer(raw: StrokePoint, strength: number): StrokePoint {
   return { x, y, pressure: raw.pressure, isPen: raw.isPen }
 }
 
-// ==================== Автоувеличение высоты при письме ====================
-// Пока пользователь рисует, следим за нижней границей bbox всех штрихов
-// (в CSS-пикселях доски). Как только она подходит к низу ближе чем на
-// AUTO_GROW_GAP — высота разом растёт на AUTO_GROW_STEP, и наружу уходит
-// 'resize' с новой высотой. Работает и без ручки (resizable), т.к. штрихи
-// за нижнюю границу всё равно не дорисовались бы.
+// ==================== Автоувеличение высоты по завершении штриха ====================
+// Нижняя граница bbox всех штрихов (в CSS-пикселях доски) сравнивается с
+// низом доски только после того, как штрих завершён: во время рисования
+// высота не меняется. Если штрих подошёл к низу ближе чем на AUTO_GROW_GAP —
+// высота разом растёт на AUTO_GROW_STEP, и наружу уходит 'resize'.
 const AUTO_GROW_GAP = 25
 const AUTO_GROW_STEP = 100
 
-// Самый низкий штрих доски: текущий (в процессе рисования) и завершённые.
+// Самый низкий штрих доски (завершённые; текущий проверяется до сброса).
 function strokesBottom(): number {
-  const all = currentStroke ? [...strokes, currentStroke] : strokes
   let max = 0
-  for (const s of all) {
+  for (const s of strokes) {
     for (const p of s.points) {
       if (p.y > max) max = p.y
     }
@@ -640,9 +638,6 @@ function onPointerMove(e: PointerEvent) {
     pts.push(pt)
     drawCurrentSegment()
   }
-
-  // Штрих подошёл к нижней границе — доска подрастает (и шлёт 'resize').
-  growHeightIfNeeded()
 }
 
 function onPointerUp(e: PointerEvent) {
@@ -667,6 +662,9 @@ function onPointerUp(e: PointerEvent) {
   stabilizerState = null
   ctx.globalCompositeOperation = 'source-over'
 
+  // Штрих завершён — только теперь доска подрастает под его bbox (и шлёт 'resize').
+  growHeightIfNeeded()
+
   try {
     canvasRef.value.releasePointerCapture(e.pointerId)
   } catch { /* ignore */ }
@@ -690,6 +688,9 @@ function onPointerCancel(e: PointerEvent) {
   lastMid = null
   stabilizerState = null
   if (ctx) ctx.globalCompositeOperation = 'source-over'
+
+  // Штрих завершён (жест отменён) — доска подрастает под его bbox.
+  growHeightIfNeeded()
 
   // Отмена жеста — считаем, что взаимодействие прекращено
   setInteraction(false)
