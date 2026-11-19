@@ -8,6 +8,7 @@ import type {
   LearnSnapshotData,
   LearnSnapshotResponse
 } from '~/composables/useLearnApi'
+import type { InkDocument } from '~/types/ink'
 import { loadingPhrases } from '~/utils/loadingPhrases'
 
 // Папка learn/ может конфликтовать с приватной директорией Nuxt,
@@ -21,6 +22,16 @@ const props = defineProps<{
 const router = useRouter()
 const learnApi = useLearnApi()
 const runtimeConfig = useRuntimeConfig()
+const toast = useToast()
+
+// Ref на ConstructorLesson: через него забираем штрихи всех белых досок урока.
+const lessonRef = ref<{
+  getWhiteboardStrokes?: () => InkDocument[]
+} | null>(null)
+
+// Ответы прохождения (по документу штрихов на доску, в порядке блоков).
+// ConstructorLesson раздаёт их доскам через реестр lesson-whiteboards.
+const answers = ref<InkDocument[]>([])
 
 // Origin бэкенда: к нему приводим относительные '/storage/...' из снапшота.
 const storageOrigin = computed(() => {
@@ -74,6 +85,9 @@ const loadingStatus = ref('')
 const PHRASE_MS = 100
 const FINAL_PHRASE_MS = 350
 
+// Минимальная видимость индикатора фонового сохранения в кнопке.
+const SILENT_INDICATOR_MS = 100
+
 function setStage(action: string) {
   loadingAction.value = action
   loading.value = true
@@ -91,6 +105,16 @@ function tick(): Promise<void> {
 
 // Номер прогона: действия устаревших запросов после рестарта игнорируются.
 let runKey = 0
+
+// id текущего прохождения (из POST /learn/begin) — нужен для сохранения.
+// ref, а не let: writeLearnId меняет его позже, после await в beginLesson,
+// и «сырая» переменная в шаблоне/обработчиках осталась бы null.
+const currentLearnId = ref<number | null>(null)
+
+// Защита от повторного нажатия «Сохранить», пока идёт сохранение.
+const savePending = ref(false)
+// Фоновая (тихая) запись ответов: индикация в кнопке, без оверлея.
+const silentPending = ref(false)
 
 // Гасим цикл фраз, когда шаг закончился (или его сменил новый прогон).
 let phraseTimer: ReturnType<typeof setTimeout> | null = null
@@ -132,6 +156,45 @@ function learnIdFrom(res: Awaited<ReturnType<typeof learnApi.begin>> | null): nu
   return raw != null && Number.isFinite(n) ? n : null
 }
 
+function currentUserId(): number | null {
+  const { user } = useSanctumAuth<{ id: number }>()
+  return user.value?.id ?? null
+}
+
+// Ответы из кэша приводит к массиву InkDocument: пустые/битые пропускаем,
+// а строку (если пришла JSON-строкой) разбираем.
+function toAnswers(raw: unknown[]): InkDocument[] {
+  return raw
+    .map(item => {
+      if (typeof item === 'string') {
+        try { return JSON.parse(item) as InkDocument } catch { return null }
+      }
+      return item as InkDocument
+    })
+    .filter((d): d is InkDocument => !!d && Array.isArray((d as InkDocument).strokes))
+}
+
+async function loadAnswers(userId: number, learnId: number): Promise<InkDocument[]> {
+  try {
+    return toAnswers(await learnApi.getAnswers(userId, learnId))
+  } catch {
+    return []
+  }
+}
+
+// begin мог не вернуть learn_id (например, сервер недоступен): ответы всё равно
+// лежат локально — берём их из кэша по последнему известному прохождению урока.
+async function loadCachedAnswers(): Promise<InkDocument[]> {
+  const userId = currentUserId()
+  if (userId === null) return []
+  try {
+    const record = await useLearnDBcache().getLearn(userId, props.lessonId)
+    return toAnswers(record?.answers ?? [])
+  } catch {
+    return []
+  }
+}
+
 async function beginLesson() {
   const key = ++runKey
   const isCurrent = () => runKey === key
@@ -141,6 +204,8 @@ async function beginLesson() {
   loadingStatus.value = ''
 
   // Сброс предыдущего состояния.
+  currentLearnId.value = null
+  answers.value = []
   snapshot.value = null
   snapshotError.value = null
   beginError.value = null
@@ -156,6 +221,7 @@ async function beginLesson() {
 
   try {
     learnId = learnIdFrom(await learnApi.begin(props.lessonId))
+    currentLearnId.value = learnId
     if (learnId == null) {
       failed = true
       if (isCurrent()) beginError.value = { message: 'Не удалось загрузить урок' }
@@ -164,6 +230,22 @@ async function beginLesson() {
     failed = true
     if (isCurrent()) beginError.value = errorMessage(e, 'Не удалось начать урок')
   }
+
+  // Ответы грузим только после успешного begin: нужен learn_id.
+  // Ждём тик и читаем из локального кэша (IndexedDB).
+  await tick()
+  if (!isCurrent()) return
+
+  if (!failed && learnId != null) {
+    const userId = currentUserId()
+    answers.value = userId !== null
+      ? await loadAnswers(userId, learnId)
+      : []
+  } else {
+    // Урока нет, но нарисованное могло сохраниться локально раньше.
+    answers.value = await loadCachedAnswers()
+  }
+  if (!isCurrent()) return
 
   // Прелоадер шага живёт реальное время ответа + секунду.
   await delay(MIN_STAGE_MS - (Date.now() - startedAt))
@@ -312,6 +394,78 @@ const canRetry = computed(() => {
   return status != null && status < 500
 })
 
+// ==================== Сохранение ====================
+
+// Тихая запись (сработала доска): фоном, без оверлея и без MIN_STAGE_MS —
+// пользователь продолжает рисовать, индикация только в кнопке «Сохранить».
+// Ошибки не показываем: следующая тихая запись или обычное сохранение повторит.
+async function saveSilently() {
+  const learnId = currentLearnId.value
+  if (learnId == null || silentPending.value) return
+
+  silentPending.value = true
+  const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
+  const startedAt = Date.now()
+
+  try {
+    await learnApi.saveLearn(learnId, savedAnswers, true)
+  } catch {
+    // Молча: локальная запись saveLearn выполняется сама, оверлей не поднимаем.
+  }
+
+  // Запись в IndexedDB занимает миллисекунды — держим индикацию чуть дольше,
+  // чтобы её вообще можно было заметить в кнопке.
+  const elapsed = Date.now() - startedAt
+  if (elapsed < SILENT_INDICATOR_MS) await delay(SILENT_INDICATOR_MS - elapsed)
+
+  silentPending.value = false
+}
+
+// Сохраняет прохождение: собирает штрихи всех белых досок урока
+// (в натуральном порядке — ConstructorLesson отдаёт их по порядку блоков)
+// и отправляет в saveLearn.
+// silent = true — сохраняем только локально, без запроса на сервер.
+async function save(silent = false) {
+  // Тихая запись не блокирует пользователя и не ждёт окончания загрузки урока.
+  if (silent) {
+    await saveSilently()
+    return
+  }
+
+  if (loading.value || savePending.value) return
+
+  const learnId = currentLearnId.value
+
+  // Шаг «Сохранение урока»: поднимаем прелоадер и сразу идём в запрос.
+  setStage('идет сохранение урока')
+  loadingStatus.value = ''
+  savePending.value = true
+
+  const savedAnswers: InkDocument[] = lessonRef.value?.getWhiteboardStrokes?.() ?? []
+  const startedAt = Date.now()
+  let failed = false
+
+  try {
+    if (learnId == null) throw new Error('Не удалось определить прохождение урока')
+    await learnApi.saveLearn(learnId, savedAnswers, silent)
+  } catch (e) {
+    failed = true
+    toast.add({
+      title: 'Не удалось сохранить урок',
+      description: String(messageOf(e, 'Не удалось сохранить урок')),
+      color: 'error',
+    })
+  }
+
+  // Прелоадер шага живёт реальное время ответа + секунду.
+  await delay(MIN_STAGE_MS - (Date.now() - startedAt))
+
+  savePending.value = false
+  loadingStatus.value = ''
+  await tick()
+  loading.value = false
+}
+
 // ==================== Навигация ====================
 
 function goBack() {
@@ -376,11 +530,14 @@ function goBack() {
         <!-- Урок -->
         <ConstructorLesson
           v-else-if="lessonModel"
+          ref="lessonRef"
           :model-value="lessonModel"
+          :answers="answers"
           :struct-items="[]"
           :lesson-types="lessonTypes"
           :is-read-only="false"
           mode="learn"
+          @whiteboard-stroke-complete="save(true)"
         />
 
         <!-- Действия с уроком -->
@@ -389,13 +546,15 @@ function goBack() {
           class="grid grid-cols-2 gap-3 mt-4"
         >
           <UButton
-            icon="i-lucide-save"
+            :icon="silentPending ? 'i-lucide-loader-circle animate-spin' : 'i-lucide-save'"
             color="neutral"
             variant="soft"
             size="lg"
             block
+            :disabled="loading || savePending"
+            @click="save()"
           >
-            Сохранить
+            {{ silentPending ? 'Сохранение…' : 'Сохранить' }}
           </UButton>
           <UButton
             icon="i-lucide-send"

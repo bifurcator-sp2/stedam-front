@@ -1,20 +1,24 @@
 <!-- components/Constructor/ContentTypes/test.vue -->
 <script setup lang="ts">
-import { computed, inject, ref, onBeforeUnmount, watch, type Ref } from 'vue'
+import { computed, inject, ref, nextTick, onBeforeUnmount, watch, type Ref } from 'vue'
 import TextNode from '../TextNode.vue'
 import Whiteboard from '~/components/Education/Whiteboard/Whiteboard.vue'
 import type { InlineEditBinding } from '~/directives/inlineEdit'
 import type { SettingNode } from '~/utils/constructors'
+import { useLessonWhiteboard } from '~/composables/useLessonWhiteboards'
 
 const props = withDefaults(defineProps<{
   node: SettingNode
   settings?: SettingNode[] | null
   stylePath?: string
   editable?: boolean
+  /** localId блока в уроке — для реестра белых досок (порядок штрихов) */
+  blockLocalId?: string | null
 }>(), {
   editable: true,
   settings: null,
   stylePath: '',
+  blockLocalId: null,
 })
 
 const emit = defineEmits<{
@@ -23,6 +27,33 @@ const emit = defineEmits<{
 
 const lessonMode = inject<Ref<'edit' | 'learn'>>('lesson-mode', ref('edit'))
 const canEdit = computed(() => props.editable && lessonMode.value === 'edit')
+
+// ==================== Реестр белых досок ====================
+// Доска регистрируется в реестре урока, чтобы LearnProcessor мог собрать
+// штрихи всех досок в порядке блоков.
+const whiteboardRef = ref<InstanceType<typeof Whiteboard> | null>(null)
+const {
+  registry: whiteboards,
+  register: registerWhiteboard,
+  unregister: unregisterWhiteboard,
+} = useLessonWhiteboard(() => props.blockLocalId)
+
+// Штрих доски завершён — сообщаем реестру (LearnProcessor тихо сохраняет ответы).
+function onStrokeComplete() {
+  whiteboards?.notifyStrokeComplete()
+}
+
+// Регистрируем доску после того, как она смонтирована и её холст инициализирован
+// (flush: 'post' + nextTick) — иначе loadStrokes прилетит в 0×0-буфер и не отрисуется.
+watch(whiteboardRef, async wb => {
+  if (!wb) return
+  await nextTick()
+  registerWhiteboard(wb)
+}, { immediate: true, flush: 'post' })
+
+onBeforeUnmount(() => {
+  if (whiteboardRef.value) unregisterWhiteboard(whiteboardRef.value)
+})
 
 // ==================== Shared: solution из random.vue ====================
 
@@ -350,10 +381,12 @@ function onUpdateChildNode(updatedNode: SettingNode) {
             <!-- Холст для рисования -->
             <div class="flex-1 relative overflow-hidden">
               <Whiteboard
+                ref="whiteboardRef"
                 :pen-size="3"
                 :eraser-size="40"
                 color="#000000"
                 mode="pen"
+                @stroke-complete="onStrokeComplete"
               />
             </div>
 

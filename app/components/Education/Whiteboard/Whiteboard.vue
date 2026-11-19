@@ -1,7 +1,8 @@
 <!-- components/Education/Whiteboard/Whiteboard.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useProfile } from '~/composables/useProfile'
+import type { InkDocument, InkStroke } from '~/types/ink'
 
 // Тип настроек
 interface InkSettings {
@@ -36,14 +37,23 @@ const props = withDefaults(defineProps<{
   settings?: InkSettings
   color?: string
   hideToolbar?: boolean
+  /**
+   * Внешние штрихи (JSON). При монтировании доска ими заполняется, а при
+   * изменении массива — сверяется: новые добавляются, удалённые убираются.
+   * Штрихи, нарисованные пользователем, в пропсу не пишутся (без двусторонней привязки).
+   */
+  strokes?: InkDocument | InkStroke[]
 }>(), {
   color: '#000000',
   hideToolbar: false,
+  strokes: undefined,
 })
 
 // События
 const emit = defineEmits<{
   (e: 'stroke-end', strokes: Stroke[]): void
+  /** ★ Штрих завершён. Отдаёт весь документ в InkML-совместимом JSON. */
+  (e: 'strokeComplete', doc: InkDocument): void
   // ★ Новое событие для управления паузой ИИ-инференса
   (e: 'interaction', active: boolean): void
 }>()
@@ -107,6 +117,8 @@ interface StrokePoint {
 }
 
 interface Stroke {
+  id: string
+  startedAt: string
   points: StrokePoint[]
   color: string
   size: number
@@ -116,6 +128,71 @@ interface Stroke {
   minPw: number
   maxPw: number
   stabilizer: number
+}
+
+// ==================== Сериализация (JSON ↔ модель) ====================
+let strokeSeq = 0
+
+function newStrokeId(): string {
+  strokeSeq += 1
+  return `s${Date.now().toString(36)}_${strokeSeq.toString(36)}`
+}
+
+function serializeStrokes(): InkDocument {
+  return {
+    version: 1,
+    strokes: strokes.map(s => ({
+      id: s.id,
+      startedAt: s.startedAt,
+      color: s.color,
+      size: s.size,
+      eraser: s.eraser,
+      points: s.points.map(p => ({
+        x: round2(p.x),
+        y: round2(p.y),
+        pressure: Math.round(Math.max(0, Math.min(1, p.pressure ?? 0.5)) * 1000) / 1000,
+      })),
+    })),
+  }
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
+function deserializeStroke(input: InkStroke, settings: Required<InkSettings>): Stroke {
+  const rawPoints = input.points ?? []
+  // Из JSON тип пера неизвестен — давление учитываем, только если оно реально меняется
+  const hasPressure = rawPoints.some(q => q.pressure !== 0.5)
+
+  const points = rawPoints
+    .filter(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))
+    .map(p => ({
+      x: p.x,
+      y: p.y,
+      pressure: Number.isFinite(p.pressure) ? p.pressure : 0.5,
+      isPen: hasPressure,
+    }))
+
+  return {
+    id: input.id || newStrokeId(),
+    startedAt: input.startedAt || new Date().toISOString(),
+    points,
+    color: input.color ?? props.color,
+    size: input.size > 0 ? input.size : settings.penSize,
+    eraser: Boolean(input.eraser),
+    smooth: settings.smoothingEnabled,
+    usePressure: settings.pressureEnabled,
+    minPw: settings.minPressureWidth,
+    maxPw: settings.maxPressureWidth,
+    stabilizer: 0, // стабилизатор — только для живого ввода
+  }
+}
+
+function extractInkStrokes(input: InkDocument | InkStroke[] | undefined): InkStroke[] {
+  if (!input) return []
+  if (Array.isArray(input)) return input
+  return Array.isArray(input.strokes) ? input.strokes : []
 }
 
 const strokes: Stroke[] = []
@@ -404,6 +481,8 @@ function onPointerDown(e: PointerEvent) {
 
   const pt = pointerToPoint(e)
   currentStroke = {
+    id: newStrokeId(),
+    startedAt: new Date().toISOString(),
     points: [pt],
     color: props.color,
     size: currentIsErasing ? currentEraserSize.value : currentPenSize.value,
@@ -429,11 +508,8 @@ function onPointerMove(e: PointerEvent) {
   // Если перо двигается — значит взаимодействие продолжается
   setInteraction(true)
 
-  if (currentMode.value === 'eraser' || isCtrlPressed.value || e.ctrlKey || e.metaKey) {
-    showEraserCursor.value = true
-  } else {
-    showEraserCursor.value = false
-  }
+  showEraserCursor.value = currentMode.value === 'eraser'
+    || isCtrlPressed.value || e.ctrlKey || e.metaKey
 
   if (!drawing || !ctx || !currentStroke) return
   if (e.pointerId !== currentPointerId) return
@@ -466,6 +542,7 @@ function onPointerUp(e: PointerEvent) {
     strokes.push(finished)
     redoStack.length = 0
     emit('stroke-end', [...strokes])
+    emit('strokeComplete', serializeStrokes())
   }
 
   drawing = false
@@ -489,6 +566,7 @@ function onPointerCancel(e: PointerEvent) {
     strokes.push(currentStroke)
     redoStack.length = 0
     emit('stroke-end', [...strokes])
+    emit('strokeComplete', serializeStrokes())
   }
 
   drawing = false
@@ -581,13 +659,70 @@ function getImage(): string {
   return out.toDataURL('image/webp', 1)
 }
 
+// ==================== Внешние штрихи (prop strokes) ====================
+let lastAppliedStrokeIds: string[] = []
+// true, как только холст получил рабочий размер (иначе redrawAll рисует в буфер 0×0)
+let layoutReady = false
+
+function syncExternalStrokes() {
+  if (props.strokes === undefined) return
+
+  const incomingIds = extractInkStrokes(props.strokes).map(s => s.id).filter(Boolean)
+  // Пропа не изменилась (например, собственная запись родителя) — ничего не трогаем
+  if (incomingIds.length === lastAppliedStrokeIds.length
+    && incomingIds.every((id, i) => id === lastAppliedStrokeIds[i])) {
+    return
+  }
+  lastAppliedStrokeIds = incomingIds
+
+  // Убираем штрихи, которых больше нет во внешних данных
+  const allowed = new Set(incomingIds)
+  const currentIds = new Set(strokes.map(s => s.id))
+  const removed = strokes.some(s => !allowed.has(s.id))
+    || incomingIds.some(id => !currentIds.has(id))
+
+  if (!removed) return
+
+  const byId = new Map(strokes.map(s => [s.id, s] as const))
+  const settings = effectiveSettings.value
+  for (const ink of extractInkStrokes(props.strokes)) {
+    if (!byId.has(ink.id)) byId.set(ink.id, deserializeStroke(ink, settings))
+  }
+
+  // Порядок — как во входящем документе
+  strokes.length = 0
+  for (const ink of extractInkStrokes(props.strokes)) {
+    const s = byId.get(ink.id)
+    if (s) strokes.push(s)
+  }
+  redoStack.length = 0
+  lastMid = null
+  stabilizerState = null
+  redrawAll()
+  emit('stroke-end', [...strokes])
+}
+
+watch(() => props.strokes, syncExternalStrokes, { deep: true })
+
 // ==================== Lifecycle ====================
 onMounted(() => {
   initCanvas()
+
+  // Восстанавливаем внешние штрихи до первого resize/redraw.
+  // syncExternalStrokes сам запоминает применённые id — повторного срабатывания watch не будет.
+  syncExternalStrokes()
+
   handleResize()
 
   if (containerRef.value) {
-    resizeObserver = new ResizeObserver(() => handleResize())
+    resizeObserver = new ResizeObserver(() => {
+      const rect = containerRef.value!.getBoundingClientRect()
+      if (!layoutReady) {
+        if (rect.width < 1 || rect.height < 1) return
+        layoutReady = true
+      }
+      handleResize()
+    })
     resizeObserver.observe(containerRef.value)
   }
 
@@ -608,7 +743,28 @@ onBeforeUnmount(() => {
 
 // ==================== Публичный API ====================
 defineExpose({
-  getStrokes: () => strokes,
+  /**
+   * Штрихи доски в JSON (InkML-совместимая схема, см. ~/types/ink).
+   * `getStrokes()` — документ целиком, `getStrokes(true)` — только массив штрихов.
+   */
+  getStrokes: (asArray = false): InkDocument | InkStroke[] => {
+    const doc = serializeStrokes()
+    return asArray ? doc.strokes : doc
+  },
+  /** Загрузить штрихи (JSON-документ или массив) — заменяет текущее содержимое. */
+  loadStrokes: (input: InkDocument | InkStroke[]) => {
+    strokes.length = 0
+    for (const ink of extractInkStrokes(input)) {
+      strokes.push(deserializeStroke(ink, effectiveSettings.value))
+    }
+    lastAppliedStrokeIds = strokes.map(s => s.id)
+    redoStack.length = 0
+    currentStroke = null
+    lastMid = null
+    stabilizerState = null
+    redrawAll()
+    emit('stroke-end', [...strokes])
+  },
   clear: () => {
     strokes.length = 0
     redoStack.length = 0

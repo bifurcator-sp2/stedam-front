@@ -19,6 +19,8 @@ const props = withDefaults(defineProps<{
   showToDeleteImages?: boolean
   initialImages?: any[]
   modelName?: string | null
+  /** localId блока в уроке — прокидывается в test.vue для реестра белых досок */
+  blockLocalId?: string | null
 }>(), {
   isTest: false,
   allowDragAndDrop: true,
@@ -377,6 +379,7 @@ function onUpdateChild(blockIndex: number, updatedNode: SettingNode) {
             :settings="value"
             :style-path="`type.content-blocks.test`"
             :editable="isEditable"
+            :block-local-id="props.blockLocalId"
             @update="onUpdateTestNode"
           />
         </div>

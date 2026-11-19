@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import {computed, ref, onBeforeUnmount, onMounted, toRaw, provide} from 'vue'
+import {computed, ref, watch, onBeforeUnmount, onMounted, toRaw, provide} from 'vue'
+import type { InkDocument } from '~/types/ink'
 import {VueDraggable} from 'vue-draggable-plus'
 import LessonBlockWrapper from '~/components/Constructor/LessonBlockWrapper.vue'
 import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
@@ -7,6 +8,7 @@ import ReadOnlyWrapper from '~/components/Constructor/ReadOnlyWrapper.vue'
 import ComplexitySelector from '~/components/Constructor/ComplexitySelector.vue'
 
 import {useContentStats} from '~/composables/useContentStats'
+import {provideLessonWhiteboards} from '~/composables/useLessonWhiteboards'
 import type {
   LessonModel,
   LessonBlockModel,
@@ -28,6 +30,11 @@ interface Props {
   isReadOnly?: boolean
   mode?: 'edit' | 'learn'
   displayReadOnlyToast?: boolean
+  /**
+   * Ответы прохождения: документ штрихов на каждую доску, порядок = порядок блоков.
+   * Необязательно — без ответов доски работают как обычно.
+   */
+  answers?: InkDocument[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -36,6 +43,7 @@ const props = withDefaults(defineProps<Props>(), {
   isReadOnly: false,
   mode: 'edit',
   displayReadOnlyToast: true,
+  answers: () => [],
 })
 
 // ==================== Модель ====================
@@ -49,6 +57,8 @@ const emit = defineEmits<{
   (e: 'register-files', blockLocalId: string, inst: any): void
   (e: 'test-warning', payload: { index: number, source: DraggedBlockSource }): void
   (e: 'open-task-collection', index: number): void
+  /** На одной из белых досок урока завершён штрих. */
+  (e: 'whiteboard-stroke-complete'): void
 }>()
 
 // ==================== Провайд режима ====================
@@ -59,6 +69,23 @@ const lessonTaxonomyIds = computed(() => lesson.value.taxonomy_ids || [])
 provide('lesson-taxonomy-ids', lessonTaxonomyIds)
 const lessonComplexity = computed(() => lesson.value.complexity ?? null)
 provide('task-complexity', lessonComplexity)
+
+// Реестр белых досок урока: LearnProcessor по нему собирает штрихи всех досок.
+const whiteboards = provideLessonWhiteboards()
+function getWhiteboardStrokes() {
+  return whiteboards.getWhiteboards().map(wb => wb.getStrokes())
+}
+
+// На доске завершён штрих — сообщаем наружу (LearnProcessor тихо сохраняет ответы).
+const emitStrokeComplete = () => emit('whiteboard-stroke-complete')
+const stopStrokeListener = whiteboards.onStrokeComplete(emitStrokeComplete)
+onBeforeUnmount(stopStrokeListener)
+
+// Ответы приходят извне (LearnProcessor) — раздаём их доскам через реестр.
+// Пустой массив ничего не затирает: доски остаются как есть (автономный режим).
+watch(() => props.answers, list => whiteboards.setAnswers(list ?? []), {
+  immediate: true,
+})
 
 // ==================== Утилита поиска блока в дереве ====================
 
@@ -477,6 +504,8 @@ defineExpose({
   duplicateBlock,
   handleDropAtIndex,
   contentRef,
+  /** Документы штрихов всех белых досок урока, в порядке блоков. */
+  getWhiteboardStrokes,
 })
 </script>
 
@@ -644,6 +673,7 @@ defineExpose({
                     model-name="lesson_blocks"
                     :initial-images="block.images ?? []"
                     :show-to-delete-images="true"
+                    :block-local-id="block.localId"
                     v-model:settings="block.settings"
                     @register-files="onRegisterFiles(block, $event)"
                   />
@@ -659,6 +689,7 @@ defineExpose({
                   model-name="lesson_blocks"
                   :initial-images="block.images ?? []"
                   :show-to-delete-images="true"
+                  :block-local-id="block.localId"
                   v-model:settings="block.settings"
                   @register-files="onRegisterFiles(block, $event)"
                 />

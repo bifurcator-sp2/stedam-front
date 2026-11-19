@@ -8,8 +8,9 @@
 //   3. Прокидывает v-model:settings.
 //   4. Рендерит fallback-заглушку, если компонент не найден.
 
-import { computed } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { resolveBlockComponent, type SettingNode } from '~/utils/constructors'
+import { useLessonWhiteboardBlock } from '~/composables/useLessonWhiteboards'
 
 // ==================== Props ====================
 
@@ -22,6 +23,8 @@ interface Props {
   allowDragAndDrop?: boolean
   /** Готовые изображения — проброс в блок (например, text_image) */
   initialImages?: any[]
+  /** localId блока в уроке — для реестра белых досок в порядке блоков */
+  blockLocalId?: string | null
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -31,6 +34,7 @@ const props = withDefaults(defineProps<Props>(), {
   showToDeleteImages: false,
   allowDragAndDrop: true,
   initialImages: () => [],
+  blockLocalId: null,
 })
 
 // ==================== Модель ====================
@@ -54,6 +58,16 @@ const isResolved = computed(() => component.value !== null)
 function onRegisterFiles(inst: any) {
   emit('register-files', inst)
 }
+
+// ==================== Реестр белых досок ====================
+// Сообщаем реестру урока, в каком порядке блоки отрисованы:
+// внутренние Whiteboard регистрируются в этот блок через provide/inject.
+
+const blockLocalId = computed(() => props.blockLocalId)
+const { sync: syncBlock } = useLessonWhiteboardBlock(() => blockLocalId.value)
+
+onMounted(syncBlock)
+watch(blockLocalId, syncBlock)
 </script>
 
 <template>
@@ -69,6 +83,7 @@ function onRegisterFiles(inst: any) {
     :show-to-delete-images="props.showToDeleteImages"
     :allow-drag-and-drop="props.allowDragAndDrop"
     :initial-images="props.initialImages"
+    :block-local-id="props.blockLocalId"
     @register-files="onRegisterFiles"
   />
 
