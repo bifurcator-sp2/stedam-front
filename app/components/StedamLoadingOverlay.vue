@@ -62,7 +62,7 @@ const actionText = computed(() => {
       -->
       <div
         v-if="loading"
-        class="fixed inset-x-0 top-0 h-dvh z-[1000] bg-default/60 backdrop-blur-sm overflow-hidden flex items-center justify-center px-4"
+        class="fixed inset-x-0 top-0 h-dvh z-[1000] bg-default/100 backdrop-blur-sm overflow-hidden flex items-center justify-center px-4"
       >
         <div class="flex flex-col items-center gap-3 min-w-0 max-w-full">
           <div class="stedam-loader flex items-center justify-center">

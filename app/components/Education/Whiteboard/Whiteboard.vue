@@ -1,6 +1,6 @@
 <!-- components/Education/Whiteboard/Whiteboard.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useProfile } from '~/composables/useProfile'
 
 // Тип настроек
@@ -36,9 +36,12 @@ const props = withDefaults(defineProps<{
   settings?: InkSettings
   color?: string
   hideToolbar?: boolean
+  // Восстановленное состояние: grayscale-негатив маски штрихов, полученный из getImage()
+  image?: string | null
 }>(), {
-  color: '#000000',
+  color: '#1e3a8a', // тёмно-синий (Tailwind blue-900)
   hideToolbar: false,
+  image: null,
 })
 
 // События
@@ -120,6 +123,63 @@ interface Stroke {
 
 const strokes: Stroke[] = []
 const redoStack: Stroke[] = []
+
+// ==================== Восстановленное состояние ====================
+// Растеризованные штрихи из маски (перекрашенные в текущий цвет) — лежат под новыми штрихами.
+let backgroundImage: HTMLImageElement | null = null
+let backgroundLoadToken = 0
+
+function loadBackground(src: string | null | undefined) {
+  const token = ++backgroundLoadToken
+
+  if (!src) {
+    backgroundImage = null
+    redrawAll()
+    return
+  }
+
+  const img = new Image()
+  img.decoding = 'async'
+
+  const done = () => {
+    if (token !== backgroundLoadToken) return
+    // Восстановление состояния: маска перекрашивается в текущий цвет письма
+    restoreFromMask(img, token)
+  }
+  const fail = () => {
+    if (token !== backgroundLoadToken) return
+    backgroundImage = null
+    redrawAll()
+  }
+
+  img.onload = done
+  img.onerror = fail
+  img.src = src
+
+  // data URL может декодироваться синхронно
+  if (img.complete && img.naturalWidth > 0) done()
+}
+
+function drawBackground() {
+  if (!ctx || !canvasRef.value || !backgroundImage) return
+  if (backgroundImage.naturalWidth === 0) return
+
+  // «contain»: вписываем в буфер без искажений и обрезки
+  const cw = canvasRef.value.width
+  const ch = canvasRef.value.height
+  const iw = backgroundImage.naturalWidth
+  const ih = backgroundImage.naturalHeight
+  const scale = Math.min(cw / iw, ch / ih)
+  const dw = iw * scale
+  const dh = ih * scale
+  const dx = (cw - dw) / 2
+  const dy = (ch - dh) / 2
+
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.drawImage(backgroundImage, dx, dy, dw, dh)
+}
 
 // ==================== Состояние канвы ====================
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -208,8 +268,8 @@ function drawCurrentSegment() {
 
   if (!currentStroke.smooth) {
     if (pts.length < 2) return
-    const prev = pts[pts.length - 2]
-    const curr = pts[pts.length - 1]
+    const prev = pts[pts.length - 2]!
+    const curr = pts[pts.length - 1]!
     ctx.lineWidth = segmentWidth(curr, currentStroke)
     ctx.beginPath()
     ctx.moveTo(prev.x, prev.y)
@@ -220,8 +280,8 @@ function drawCurrentSegment() {
   }
 
   if (pts.length === 2) {
-    const mid = midpoint(pts[0], pts[1])
-    ctx.lineWidth = segmentWidth(pts[0], currentStroke)
+    const mid = midpoint(pts[0]!, pts[1]!)
+    ctx.lineWidth = segmentWidth(pts[0]!, currentStroke)
     ctx.beginPath()
     ctx.moveTo(lastMid.x, lastMid.y)
     ctx.lineTo(mid.x, mid.y)
@@ -231,8 +291,8 @@ function drawCurrentSegment() {
   }
 
   if (pts.length >= 3) {
-    const prev = pts[pts.length - 2]
-    const curr = pts[pts.length - 1]
+    const prev = pts[pts.length - 2]!
+    const curr = pts[pts.length - 1]!
     const mid = midpoint(prev, curr)
     ctx.lineWidth = segmentWidth(curr, currentStroke)
     ctx.beginPath()
@@ -247,7 +307,7 @@ function finishStroke() {
   if (!ctx || !currentStroke) return
   const pts = currentStroke.points
   if (pts.length >= 2 && lastMid && currentStroke.smooth) {
-    const last = pts[pts.length - 1]
+    const last = pts[pts.length - 1]!
     setStrokeStyle(currentStroke)
     ctx.lineWidth = segmentWidth(last, currentStroke)
     ctx.beginPath()
@@ -269,42 +329,42 @@ function redrawStroke(stroke: Stroke) {
   ctx.lineJoin = 'round'
 
   if (pts.length === 1) {
-    drawDot(pts[0], stroke)
+    drawDot(pts[0]!, stroke)
     ctx.globalCompositeOperation = 'source-over'
     return
   }
 
   if (!stroke.smooth) {
     for (let i = 1; i < pts.length; i++) {
-      ctx.lineWidth = segmentWidth(pts[i], stroke)
+      ctx.lineWidth = segmentWidth(pts[i]!, stroke)
       ctx.beginPath()
-      ctx.moveTo(pts[i - 1].x, pts[i - 1].y)
-      ctx.lineTo(pts[i].x, pts[i].y)
+      ctx.moveTo(pts[i - 1]!.x, pts[i - 1]!.y)
+      ctx.lineTo(pts[i]!.x, pts[i]!.y)
       ctx.stroke()
     }
     ctx.globalCompositeOperation = 'source-over'
     return
   }
 
-  const mid01 = midpoint(pts[0], pts[1])
-  ctx.lineWidth = segmentWidth(pts[0], stroke)
+  const mid01 = midpoint(pts[0]!, pts[1]!)
+  ctx.lineWidth = segmentWidth(pts[0]!, stroke)
   ctx.beginPath()
-  ctx.moveTo(pts[0].x, pts[0].y)
+  ctx.moveTo(pts[0]!.x, pts[0]!.y)
   ctx.lineTo(mid01.x, mid01.y)
   ctx.stroke()
 
   let last = mid01
   for (let i = 1; i < pts.length - 1; i++) {
-    const mid = midpoint(pts[i], pts[i + 1])
-    ctx.lineWidth = segmentWidth(pts[i], stroke)
+    const mid = midpoint(pts[i]!, pts[i + 1]!)
+    ctx.lineWidth = segmentWidth(pts[i]!, stroke)
     ctx.beginPath()
     ctx.moveTo(last.x, last.y)
-    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y)
+    ctx.quadraticCurveTo(pts[i]!.x, pts[i]!.y, mid.x, mid.y)
     ctx.stroke()
     last = mid
   }
 
-  const tail = pts[pts.length - 1]
+  const tail = pts[pts.length - 1]!
   ctx.lineWidth = segmentWidth(tail, stroke)
   ctx.beginPath()
   ctx.moveTo(last.x, last.y)
@@ -318,8 +378,8 @@ function recomputeLastMid() {
   if (!currentStroke) { lastMid = null; return }
   const pts = currentStroke.points
   if (pts.length === 0) { lastMid = null; return }
-  if (pts.length === 1) { lastMid = { x: pts[0].x, y: pts[0].y }; return }
-  lastMid = midpoint(pts[pts.length - 2], pts[pts.length - 1])
+  if (pts.length === 1) { lastMid = { x: pts[0]!.x, y: pts[0]!.y }; return }
+  lastMid = midpoint(pts[pts.length - 2]!, pts[pts.length - 1]!)
 }
 
 function redrawAll() {
@@ -328,6 +388,8 @@ function redrawAll() {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
   ctx.restore()
+
+  drawBackground()
 
   for (const s of strokes) redrawStroke(s)
   if (currentStroke) {
@@ -445,7 +507,7 @@ function onPointerMove(e: PointerEvent) {
   for (const ev of events) {
     const raw = pointerToPoint(ev)
     const pt = applyStabilizer(raw, currentStroke.stabilizer)
-    const last = pts[pts.length - 1]
+    const last = pts[pts.length - 1]!
     const dx = pt.x - last.x
     const dy = pt.y - last.y
     if (dx * dx + dy * dy < 0.01) continue
@@ -530,6 +592,189 @@ function onKeyUp(e: KeyboardEvent) {
   }
 }
 
+// ==================== Экспорт / восстановление маски штрихов ====================
+// Модель цвета пишется в RGB, маска непрозрачности штрихов сохраняется в grayscale-негативе:
+//   белый  → прозрачно;  чёрный → полная непрозрачность (там, где писали).
+// При восстановлении маска перекрашивается в текущий цвет письма (props.color).
+
+type MaskableCanvas = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+
+// Рисуем штрих (с учётом «резиновой» сегментации пера) в произвольный контекст
+function paintStroke(context: MaskableCanvas, stroke: Stroke) {
+  const savedCtx = ctx
+  ctx = context as CanvasRenderingContext2D
+
+  const pts = stroke.points
+  context.globalCompositeOperation = stroke.eraser ? 'destination-out' : 'source-over'
+  context.strokeStyle = stroke.eraser ? '#000' : stroke.color
+  context.fillStyle = stroke.eraser ? '#000' : stroke.color
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+
+  if (pts.length === 1) {
+    drawDot(pts[0]!, stroke)
+  } else if (!stroke.smooth) {
+    for (let i = 1; i < pts.length; i++) {
+      context.lineWidth = segmentWidth(pts[i]!, stroke)
+      context.beginPath()
+      context.moveTo(pts[i - 1]!.x, pts[i - 1]!.y)
+      context.lineTo(pts[i]!.x, pts[i]!.y)
+      context.stroke()
+    }
+  } else {
+    // То же геометрическое разбиение, что и в redrawStroke(), но на переданном контексте
+    const mid01 = midpoint(pts[0]!, pts[1]!)
+    context.lineWidth = segmentWidth(pts[0]!, stroke)
+    context.beginPath()
+    context.moveTo(pts[0]!.x, pts[0]!.y)
+    context.lineTo(mid01.x, mid01.y)
+    context.stroke()
+
+    let last = mid01
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mid = midpoint(pts[i]!, pts[i + 1]!)
+      context.lineWidth = segmentWidth(pts[i]!, stroke)
+      context.beginPath()
+      context.moveTo(last.x, last.y)
+      context.quadraticCurveTo(pts[i]!.x, pts[i]!.y, mid.x, mid.y)
+      context.stroke()
+      last = mid
+    }
+
+    const tail = pts[pts.length - 1]!
+    context.lineWidth = segmentWidth(tail, stroke)
+    context.beginPath()
+    context.moveTo(last.x, last.y)
+    context.lineTo(tail.x, tail.y)
+    context.stroke()
+  }
+
+  context.globalCompositeOperation = 'source-over'
+  ctx = savedCtx
+}
+
+// Полная маска непрозрачности (белое = писалось, прозрачное = нет)
+function buildCoverageMask(w: number, h: number): HTMLCanvasElement | null {
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const mctx = canvas.getContext('2d')
+  if (!mctx) return null
+
+  const all = recomposeStrokes()
+  for (const s of all) {
+    if (s.points.length > 0) paintStroke(mctx, s)
+  }
+  mctx.globalCompositeOperation = 'source-over'
+  return canvas
+}
+
+// Штрихи модели + незавершённый текущий штрих (getImage вызывается из onPointerUp до сохранения)
+function recomposeStrokes(): Stroke[] {
+  return currentStroke ? [...strokes, currentStroke] : strokes
+}
+
+// Отдаёт маску штрихов: grayscale-негатив WebP без потерь, без альфа-канала.
+function getImage(): string {
+  if (!canvasRef.value) return ''
+
+  const w = canvasRef.value.width
+  const h = canvasRef.value.height
+  if (w === 0 || h === 0) return ''
+
+  const mask = buildCoverageMask(w, h)
+  if (!mask) return ''
+
+  const mctx = mask.getContext('2d')
+  if (!mctx) return ''
+
+  // Негатив + grayscale, альфа принудительно в 255
+  const imageData = mctx.getImageData(0, 0, w, h)
+  const data = imageData.data
+  for (let i = 0; i < data.length; i += 4) {
+    const alpha = data[i + 3]!
+    const gray = 255 - alpha
+    data[i] = gray
+    data[i + 1] = gray
+    data[i + 2] = gray
+    data[i + 3] = 255
+  }
+  mctx.putImageData(imageData, 0, 0)
+
+  return mask.toDataURL('image/webp', 1)
+}
+
+// Перекрашивает сохранённую маску (grayscale-негатив) в текущий цвет письма.
+// Возвращает canvas с непрозрачными штрихами нужного цвета на прозрачном фоне.
+function applyMaskToColor(src: HTMLImageElement): HTMLCanvasElement | null {
+  const sw = src.naturalWidth
+  const sh = src.naturalHeight
+  if (sw === 0 || sh === 0) return null
+
+  const maskCanvas = document.createElement('canvas')
+  maskCanvas.width = sw
+  maskCanvas.height = sh
+  const mctx = maskCanvas.getContext('2d', { willReadFrequently: true })
+  if (!mctx) return null
+  mctx.drawImage(src, 0, 0)
+
+  let imageData: ImageData | null
+  try {
+    imageData = mctx.getImageData(0, 0, sw, sh)
+  } catch {
+    // CORS без заголовков (для ссылок) — перекрасить нельзя, рисуем как есть
+    imageData = null
+  }
+
+  const outCanvas = document.createElement('canvas')
+  outCanvas.width = sw
+  outCanvas.height = sh
+  const octx = outCanvas.getContext('2d')
+  if (!octx) return null
+
+  if (!imageData) {
+    octx.drawImage(src, 0, 0)
+    return outCanvas
+  }
+
+  // Цвет письма на весь буфер + маска непрозрачности из негатива
+  octx.fillStyle = props.color
+  octx.fillRect(0, 0, sw, sh)
+  const outData = octx.getImageData(0, 0, sw, sh)
+  const whole = outData.data
+  const mask = imageData.data
+  for (let i = 0; i < mask.length; i += 4) {
+    whole[i + 3] = 255 - mask[i]! // белый негатив → прозрачно, чёрный → непрозрачно
+  }
+  octx.putImageData(outData, 0, 0)
+
+  return outCanvas
+}
+
+// Восстановление штрихов из маски: результат становится фоном (картинкой) под новыми штрихами
+function restoreFromMask(src: HTMLImageElement, token: number) {
+  const colored = applyMaskToColor(src)
+  if (!colored) {
+    backgroundImage = src
+    redrawAll()
+    return
+  }
+
+  const img = new Image()
+  img.decoding = 'async'
+  img.onload = () => {
+    if (token !== backgroundLoadToken) return
+    backgroundImage = img
+    redrawAll()
+  }
+  img.onerror = () => {
+    if (token !== backgroundLoadToken) return
+    backgroundImage = src
+    redrawAll()
+  }
+  img.src = colored.toDataURL('image/png')
+}
+
 // ==================== Lifecycle ====================
 onMounted(() => {
   initCanvas()
@@ -540,9 +785,15 @@ onMounted(() => {
     resizeObserver.observe(containerRef.value)
   }
 
+  // Восстановление состояния (если image передан при монтировании)
+  loadBackground(props.image)
+
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
 })
+
+// Смена сохранённого состояния извне
+watch(() => props.image, (src) => loadBackground(src))
 
 onBeforeUnmount(() => {
   if (resizeObserver && containerRef.value) {
@@ -584,6 +835,7 @@ defineExpose({
     return true
   },
   toDataURL: () => canvasRef.value?.toDataURL() ?? '',
+  getImage,
 })
 </script>
 

@@ -1,5 +1,5 @@
 // app/directives/stedamLoading.ts
-import { createVNode, reactive, render, type Directive, type VNode } from 'vue'
+import { createVNode, render, type Directive, type VNode } from 'vue'
 import StedamLoadingOverlay from '~/components/StedamLoadingOverlay.vue'
 
 export type StedamLoadingBinding
@@ -22,9 +22,10 @@ interface State {
   /** render-корень оверлея */
   shell: VNode | null
   /**
-   * Живые пропсы оверлея: один reactive-объект на всё время жизни.
-   * Фразы меняются часто, поэтому палец шарит сюда, а Vue сам перерисовывает
-   * StedamLoadingOverlay — без ручного render на каждый тик.
+   * Живые значения оверлея. Храним примитивы, а не общий reactive-объект:
+   * тот же объект нельзя отдавать и в createVNode(props), и в instance.props —
+   * Vue при перерисовке подхватывал reactive-обёртку и в интерполяции
+   * получался «[object Object]».
    */
   shellProps: { loading: boolean, actionText: string, statusText: string }
   contentHost: HTMLElement | null
@@ -77,7 +78,7 @@ function getState(el: HTMLElement): State {
     host: null,
     shellHost,
     shell: null,
-    shellProps: reactive({ loading: false, actionText: '', statusText: '' }),
+    shellProps: { loading: false, actionText: '', statusText: '' },
     contentHost: null,
     opacity: '',
     pointerEvents: '',
@@ -125,14 +126,14 @@ function mount(state: State, parsed: ParsedBinding) {
   state.opacity = contentHost.style.opacity
   state.pointerEvents = contentHost.style.pointerEvents
 
-  // Значения ставим ДО render(): vnode сразу собирается поверх reactive-объекта,
-  // поэтому первый кадр уже показывает оверлей с фразой, а последующие смены
-  // статуса Vue видит сам.
+  // Значения ставим ДО render(), чтобы первый кадр уже показывал оверлей с фразой.
   state.shellProps.loading = true
   state.shellProps.actionText = parsed.actionText
   state.shellProps.statusText = parsed.statusText
 
-  const shell = createVNode(StedamLoadingOverlay, state.shellProps)
+  // В vnode отдаём новый обычный объект с тремя строковыми/булевыми полями:
+  // общий mutable-объект в props привёл бы к «[object Object]» после патчей.
+  const shell = createVNode(StedamLoadingOverlay, { ...state.shellProps })
   shell.children = { default: () => [] }
   render(shell, state.shellHost)
   state.shell = shell
@@ -143,12 +144,13 @@ function updateOverlay(state: State, loading: boolean, parsed: ParsedBinding) {
   state.shellProps.actionText = parsed.actionText
   state.shellProps.statusText = parsed.statusText
 
-  // Подпись шага сменилась, пока оверлей уже поднят. Через reactive-пропсы
-  // компонент узнает об этом отдельным патчем — в текущем тике он ещё держит
-  // старый текст. Правим его props напрямую, чтобы новый шаг был виден
-  // не позже следующего кадра.
-  if (loading && state.shell?.component) {
-    Object.assign(state.shell.component.props, state.shellProps)
+  // Подпись шага сменилась, пока оверлей уже поднят. Перерисовываем корень
+  // с новым обычным объектом пропсов: писать напрямую в instance.props нельзя —
+  // туда попадут ссылки на общий объект, и в интерполяции выйдет «[object Object]».
+  if (loading && state.shell) {
+    state.shell = createVNode(StedamLoadingOverlay, { ...state.shellProps })
+    state.shell.children = { default: () => [] }
+    render(state.shell, state.shellHost)
   }
 
   const contentHost = state.contentHost
