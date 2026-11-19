@@ -942,6 +942,44 @@ onBeforeUnmount(() => {
 const answerDragging = ref(false)
 let answerStartY = 0
 let answerStartSize = 0
+// Штрихи, которые полоса сдвинула за этот жест: смещение от стартового
+// положения полосы в px. При возврате полосы на место штрихи едут обратно.
+const shiftedStrokes = new Map<Stroke, number>()
+
+// Штрих целиком (с учётом толщины) лежит ниже линии полосы. При проверке
+// учитывается уже применённый к штриху сдвиг: сам штрих в модели сдвинут.
+function isStrokeBelowLine(stroke: Stroke, lineY: number): boolean {
+  if (stroke.points.length === 0) return false
+  const applied = shiftedStrokes.get(stroke) ?? 0
+  let top = Number.POSITIVE_INFINITY
+  for (const p of stroke.points) top = Math.min(top, p.y - segmentWidth(p, stroke) / 2)
+  return top - applied >= lineY
+}
+
+// Штрих, целиком лежащий под полосой, едет вместе с ней. Сдвигаются все точки
+// на одну и ту же дельту — форма и непрерывность штриха сохраняются.
+function shiftStrokesUnderLine(delta: number) {
+  const height = currentHeight()
+  if (height <= 0) return
+  const lineY = height - answerSize.value
+  let changed = false
+  for (const s of strokes) {
+    const applied = shiftedStrokes.get(s) ?? 0
+    if (isStrokeBelowLine(s, lineY)) {
+      if (applied !== delta) {
+        for (const p of s.points) p.y += delta - applied
+        shiftedStrokes.set(s, delta)
+        changed = true
+      }
+    } else if (applied !== 0) {
+      // Полоса ушла выше штриха — возвращаем штрих на исходное место.
+      for (const p of s.points) p.y -= applied
+      shiftedStrokes.delete(s)
+      changed = true
+    }
+  }
+  if (changed) redrawAll()
+}
 
 function startAnswerDrag(e: PointerEvent) {
   if (e.button !== 0) return
@@ -951,6 +989,7 @@ function startAnswerDrag(e: PointerEvent) {
   answerDragging.value = true
   answerStartY = e.clientY
   answerStartSize = answerSize.value
+  shiftedStrokes.clear()
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -961,6 +1000,9 @@ function onAnswerDragMove(e: PointerEvent) {
   // Вверх (delta < 0) — линия уходит от нижнего края, вниз — приближается.
   const next = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize - (e.clientY - answerStartY)))
   answerSize.value = next
+  // Смещение полосы в координатах холста = смещение указателя по экрану:
+  // тянем вниз (e.clientY растёт) — штрихи под полосой тоже едут вниз.
+  shiftStrokesUnderLine(e.clientY - answerStartY)
   // Как и рисование: пока полосу тянут, ИИ-инференс на паузе.
   setInteraction(true)
 }
@@ -976,8 +1018,14 @@ function stopAnswerDrag(e?: PointerEvent) {
     } catch { /* ignore */ }
   }
   setInteraction(false)
-  // Позиция изменилась — просим сохранить ответ (тихая запись).
-  if (answerSize.value !== answerStartSize) emit('answerSizeChange', answerSize.value)
+  const moved = answerSize.value !== answerStartSize
+  const strokesMoved = shiftedStrokes.size > 0
+  shiftedStrokes.clear()
+  // Позиция полосы и/или штрихи изменились — просим сохранить ответ (тихая запись).
+  if (moved || strokesMoved) {
+    emit('answerSizeChange', answerSize.value)
+    if (strokesMoved) emitStrokeUpdate()
+  }
 }
 
 // ==================== Публичный API ====================
