@@ -939,47 +939,13 @@ onBeforeUnmount(() => {
 // ==================== Линия «Зона ответа» ====================
 // Горизонтальная полоса на answerSize px от нижней границы доски. Тянется
 // указателем вверх-вниз (координата clientY, как у ручки ресайза высоты).
+// Полоса тянет за собой нижний край: тянем вниз — доска растягивается на то же
+// расстояние. Штрихи при этом стоят на месте и относительно полосы, и на экране.
 const answerDragging = ref(false)
 let answerStartY = 0
 let answerStartSize = 0
-// Штрихи, которые полоса сдвинула за этот жест: смещение от стартового
-// положения полосы в px. При возврате полосы на место штрихи едут обратно.
-const shiftedStrokes = new Map<Stroke, number>()
-
-// Штрих целиком (с учётом толщины) лежит ниже линии полосы. При проверке
-// учитывается уже применённый к штриху сдвиг: сам штрих в модели сдвинут.
-function isStrokeBelowLine(stroke: Stroke, lineY: number): boolean {
-  if (stroke.points.length === 0) return false
-  const applied = shiftedStrokes.get(stroke) ?? 0
-  let top = Number.POSITIVE_INFINITY
-  for (const p of stroke.points) top = Math.min(top, p.y - segmentWidth(p, stroke) / 2)
-  return top - applied >= lineY
-}
-
-// Штрих, целиком лежащий под полосой, едет вместе с ней. Сдвигаются все точки
-// на одну и ту же дельту — форма и непрерывность штриха сохраняются.
-function shiftStrokesUnderLine(delta: number) {
-  const height = currentHeight()
-  if (height <= 0) return
-  const lineY = height - answerSize.value
-  let changed = false
-  for (const s of strokes) {
-    const applied = shiftedStrokes.get(s) ?? 0
-    if (isStrokeBelowLine(s, lineY)) {
-      if (applied !== delta) {
-        for (const p of s.points) p.y += delta - applied
-        shiftedStrokes.set(s, delta)
-        changed = true
-      }
-    } else if (applied !== 0) {
-      // Полоса ушла выше штриха — возвращаем штрих на исходное место.
-      for (const p of s.points) p.y -= applied
-      shiftedStrokes.delete(s)
-      changed = true
-    }
-  }
-  if (changed) redrawAll()
-}
+// Высота доски на старте жеста (px).
+let answerStartHeight = 0
 
 function startAnswerDrag(e: PointerEvent) {
   if (e.button !== 0) return
@@ -989,7 +955,7 @@ function startAnswerDrag(e: PointerEvent) {
   answerDragging.value = true
   answerStartY = e.clientY
   answerStartSize = answerSize.value
-  shiftedStrokes.clear()
+  answerStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -997,12 +963,18 @@ function startAnswerDrag(e: PointerEvent) {
 
 function onAnswerDragMove(e: PointerEvent) {
   if (!answerDragging.value) return
-  // Вверх (delta < 0) — линия уходит от нижнего края, вниз — приближается.
-  const next = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize - (e.clientY - answerStartY)))
-  answerSize.value = next
-  // Смещение полосы в координатах холста = смещение указателя по экрану:
-  // тянем вниз (e.clientY растёт) — штрихи под полосой тоже едут вниз.
-  shiftStrokesUnderLine(e.clientY - answerStartY)
+  // Смещение указателя по экрану. Вниз (delta > 0) — низ доски едет вместе с
+  // полосой: высота растёт на то же расстояние, поэтому положение полосы от
+  // нижнего края (answerSize) не меняется. Вверх — доска ужимается.
+  const delta = e.clientY - answerStartY
+  const el = containerRef.value
+  if (el) {
+    const height = Math.max(MIN_HEIGHT.value, Math.round(answerStartHeight + delta))
+    if (height !== currentHeight()) el.style.height = `${height}px`
+  }
+  // Полоса идёт под курсором, но расстояние до нижнего края не растёт:
+  // answerSize <= answerStartSize (при ужатии доски полоса догоняет край).
+  answerSize.value = Math.min(answerStartSize, Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize + delta)))
   // Как и рисование: пока полосу тянут, ИИ-инференс на паузе.
   setInteraction(true)
 }
@@ -1018,13 +990,13 @@ function stopAnswerDrag(e?: PointerEvent) {
     } catch { /* ignore */ }
   }
   setInteraction(false)
-  const moved = answerSize.value !== answerStartSize
-  const strokesMoved = shiftedStrokes.size > 0
-  shiftedStrokes.clear()
-  // Позиция полосы и/или штрихи изменились — просим сохранить ответ (тихая запись).
-  if (moved || strokesMoved) {
+  const height = currentHeight()
+  const heightChanged = height > 0 && Math.round(answerStartHeight) !== height
+  // Позиция полосы и/или высота доски изменились — просим сохранить ответ.
+  if (answerSize.value !== answerStartSize || heightChanged) {
+    // 'resize' раньше 'answerSizeChange': подписчик к сохранению уже знает новую высоту.
+    if (heightChanged) emit('resize', height)
     emit('answerSizeChange', answerSize.value)
-    if (strokesMoved) emitStrokeUpdate()
   }
 }
 
