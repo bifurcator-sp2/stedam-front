@@ -260,6 +260,23 @@ const showEraserCursor = ref(false)
 const isPointerInside = ref(false)
 const isCtrlPressed = ref(false)
 
+// ==================== Режим перемещения штрихов ====================
+// В этом режиме рисования нет: указатель либо тянет выделенные штрихи, либо
+// выделяет их рамкой. Режим включается кнопкой тулбара и выключается ей же или
+// двойным кликом по пустому месту.
+const moveMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+// Рамка выделения в координатах холста (CSS-пиксели); null — рамки нет.
+const marquee = ref<{ left: number; top: number; width: number; height: number } | null>(null)
+// Жест в режиме перемещения: null — указатель ничего не держит.
+let moveGesture:
+  | { kind: 'marquee' | 'drag', pointerId: number, startX: number, startY: number }
+  | null = null
+// Сдвиг, уже применённый к выделенным штрихам текущим жестом (px).
+let moveApplied = { x: 0, y: 0 }
+
+const selectedCount = computed(() => selectedIds.value.size)
+
 // ★ Логика управления состоянием взаимодействия (для паузы ИИ)
 let interactionActive = false
 function setInteraction(active: boolean) {
@@ -473,6 +490,34 @@ function recomputeLastMid() {
 }
 
 // ==================== Перерисовка ====================
+// Обводка выделенного штриха: та же геометрия, что и у самого штриха (через
+// redrawStroke), но синяя и шире на пару пикселей — лежит под чернилами.
+const SELECT_COLOR = '#2563eb'
+const SELECT_EXTRA = 8
+
+function redrawSelection(s: Stroke) {
+  if (!ctx) return
+  const saved = { color: s.color, size: s.size }
+  s.color = SELECT_COLOR
+  s.size = s.size + SELECT_EXTRA
+  redrawStroke(s)
+  s.color = saved.color
+  s.size = saved.size
+}
+
+function redrawMarquee() {
+  const m = marquee.value
+  if (!ctx || !m) return
+  ctx.save()
+  ctx.fillStyle = 'rgba(37, 99, 235, 0.10)'
+  ctx.strokeStyle = SELECT_COLOR
+  ctx.lineWidth = 1
+  ctx.setLineDash([4, 3])
+  ctx.fillRect(m.left, m.top, m.width, m.height)
+  ctx.strokeRect(m.left + 0.5, m.top + 0.5, m.width, m.height)
+  ctx.restore()
+}
+
 function redrawAll() {
   if (!ctx || !canvasRef.value) return
   ctx.save()
@@ -480,11 +525,17 @@ function redrawAll() {
   ctx.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height)
   ctx.restore()
 
+  if (selectedIds.value.size > 0) {
+    for (const s of strokes) {
+      if (selectedIds.value.has(s.id) && !s.eraser) redrawSelection(s)
+    }
+  }
   for (const s of strokes) redrawStroke(s)
   if (currentStroke) {
     redrawStroke(currentStroke)
     recomputeLastMid()
   }
+  redrawMarquee()
   if (ctx) ctx.globalCompositeOperation = 'source-over'
 }
 
@@ -579,9 +630,132 @@ function pointerToPoint(e: PointerEvent): StrokePoint {
 }
 
 // ==================== Pointer-события ====================
+// Ветка режима перемещения. Рисование в нём отключено, поэтому все события
+// canvas сначала уходят сюда: down — старт рамки или перетаскивания,
+// move — рост рамки или шаг группы, up — завершение жеста.
+function leaveMoveMode() {
+  if (!moveMode.value) return
+  moveMode.value = false
+  gestureEnded()
+  // Подсветка выделения живёт в холсте — после выхода её надо стереть.
+  redrawAll()
+}
+
+function toggleMoveMode() {
+  if (moveMode.value) leaveMoveMode()
+  else moveMode.value = true
+}
+
+function gestureEnded() {
+  moveGesture = null
+  moveApplied = { x: 0, y: 0 }
+  marquee.value = null
+}
+
+function onMoveModePointerDown(e: PointerEvent) {
+  if (!canvasRef.value || !ctx) return
+  if (e.button !== 0) return
+  e.preventDefault()
+
+  setInteraction(true)
+  const { x, y } = getCoordinates(e)
+  const target = strokeAtPoint(x, y)
+
+  // По пустому месту — начинаем новую рамку: прежнее выделение ей и заменится.
+  if (!target) {
+    selectedIds.value = new Set()
+    redrawAll()
+    moveGesture = { kind: 'marquee', pointerId: e.pointerId, startX: x, startY: y }
+    marquee.value = { left: x, top: y, width: 0, height: 0 }
+    canvasRef.value.setPointerCapture(e.pointerId)
+    return
+  }
+
+  // По штриху — хватаем его. Если штрих не в выделении, выделение идёт только он,
+  // иначе тащим всю группу.
+  if (!selectedIds.value.has(target.id)) {
+    selectedIds.value = new Set([target.id])
+    redrawAll()
+  }
+  moveGesture = { kind: 'drag', pointerId: e.pointerId, startX: x, startY: y }
+  canvasRef.value.setPointerCapture(e.pointerId)
+}
+
+function onMoveModePointerMove(e: PointerEvent) {
+  if (!canvasRef.value || !ctx) return
+  const { x, y } = getCoordinates(e)
+  cursorPos.value = { x, y }
+  setInteraction(true)
+
+  if (!moveGesture) {
+    // Курсор над штрихом — его можно тащить; над пустотой — обычная стрелка.
+    canvasRef.value.style.cursor = strokeAtPoint(x, y) ? 'move' : 'default'
+    return
+  }
+  if (e.pointerId !== moveGesture.pointerId) return
+
+  const dx = x - moveGesture.startX
+  const dy = y - moveGesture.startY
+
+  if (moveGesture.kind === 'marquee') {
+    marquee.value = {
+      left: Math.min(moveGesture.startX, x),
+      top: Math.min(moveGesture.startY, y),
+      width: Math.abs(dx),
+      height: Math.abs(dy),
+    }
+    selectedIds.value = new Set(strokesInRect({
+      x1: moveGesture.startX,
+      y1: moveGesture.startY,
+      x2: x,
+      y2: y,
+    }))
+    redrawAll()
+    return
+  }
+
+  // Шаг считаем от уже применённого смещения: так группа не «накапливает»
+  // округления и не дёргается назад.
+  const stepX = Math.round(dx) - moveApplied.x
+  const stepY = Math.round(dy) - moveApplied.y
+  if (stepX === 0 && stepY === 0) return
+  moveSelectedStrokes(stepX, stepY)
+  moveApplied = { x: moveApplied.x + stepX, y: moveApplied.y + stepY }
+  redrawAll()
+}
+
+function onMoveModePointerUp(e: PointerEvent) {
+  if (!canvasRef.value) return
+  if (!moveGesture || e.pointerId !== moveGesture.pointerId) return
+
+  const kind = moveGesture.kind
+  gestureEnded()
+  redrawAll()
+
+  try {
+    canvasRef.value.releasePointerCapture(e.pointerId)
+  } catch { /* ignore */ }
+
+  if (kind === 'drag') {
+    // Сдвинутые штрихи — обычное изменение ответа: отдаём наружу как штрихи.
+    emitStrokeUpdate()
+    growHeightIfNeeded()
+  }
+  setInteraction(false)
+}
+
+// Двойной клик по пустому месту выключает режим — привычный выход из выделения.
+function onCanvasDblClick(e: MouseEvent) {
+  if (!moveMode.value || !canvasRef.value) return
+  const rect = canvasRef.value.getBoundingClientRect()
+  if (strokeAtPoint(e.clientX - rect.left, e.clientY - rect.top)) return
+  leaveMoveMode()
+}
+
 function onPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest('.wb-toolbar')) return
   if ((e.target as HTMLElement).closest('.wb-resize-handle')) return
+  if (moveMode.value) return onMoveModePointerDown(e)
   if (!canvasRef.value || !ctx) return
   e.preventDefault()
 
@@ -617,6 +791,7 @@ function onPointerDown(e: PointerEvent) {
 
 function onPointerMove(e: PointerEvent) {
   if (!canvasRef.value) return
+  if (moveMode.value) return onMoveModePointerMove(e)
   const { x, y } = getCoordinates(e)
   cursorPos.value = { x, y }
 
@@ -647,6 +822,7 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  if (moveMode.value) return onMoveModePointerUp(e)
   if (!canvasRef.value || !ctx) return
   if (e.pointerId !== currentPointerId) return
 
@@ -677,6 +853,7 @@ function onPointerUp(e: PointerEvent) {
 }
 
 function onPointerCancel(e: PointerEvent) {
+  if (moveMode.value) return onMoveModePointerUp(e)
   if (e.pointerId !== currentPointerId) return
 
   finishStroke()
@@ -705,6 +882,7 @@ function onPointerCancel(e: PointerEvent) {
 function onPointerEnter(e: PointerEvent) {
   isPointerInside.value = true
   setInteraction(true) // ★ Курсор зашел на холст (даже без клика)
+  if (moveMode.value) return onMoveModePointerMove(e)
   onPointerMove(e)
 }
 
@@ -1006,6 +1184,104 @@ function moveAnswerStrokes(dy: number) {
   }
 }
 
+// ==================== Выбор и перемещение штрихов ====================
+// Попадание считаем по ломаной точек с учётом толщины пера: на тач-экранах
+// промах на пару пикселей не должен значить «пустое место».
+const HIT_SLOP = 6
+
+// Расстояние от точки до отрезка, px.
+function distToSegment(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay)
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq))
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
+// Ближайший к точке штрих для перетаскивания; null — точка в пустоте.
+// Идём от верхних слоёв: перекрывающиеся штрихи хватаются за тот, что виден.
+function strokeAtPoint(x: number, y: number): Stroke | null {
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i]!
+    const pts = s.points
+    if (pts.length === 0) continue
+    let best = Number.POSITIVE_INFINITY
+    if (pts.length === 1) {
+      best = Math.hypot(x - pts[0]!.x, y - pts[0]!.y)
+    } else {
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1]!
+        const b = pts[k]!
+        best = Math.min(best, distToSegment(x, y, a.x, a.y, b.x, b.y))
+      }
+    }
+    if (best <= s.size / 2 + HIT_SLOP) return s
+  }
+  return null
+}
+
+// Штрихи, которые рамка задела: рамка и штрих пересекаются по любому отрезку.
+function strokesInRect(r: { x1: number, y1: number, x2: number, y2: number }): string[] {
+  const left = Math.min(r.x1, r.x2)
+  const right = Math.max(r.x1, r.x2)
+  const top = Math.min(r.y1, r.y2)
+  const bottom = Math.max(r.y1, r.y2)
+  const hit: string[] = []
+
+  for (const s of strokes) {
+    const pts = s.points
+    if (pts.length === 0) continue
+    // Непрозрачный прямоугольник штриха не заходит в рамку — мимо.
+    let sLeft = Number.POSITIVE_INFINITY
+    let sRight = Number.NEGATIVE_INFINITY
+    let sTop = Number.POSITIVE_INFINITY
+    let sBottom = Number.NEGATIVE_INFINITY
+    for (const p of pts) {
+      const half = segmentWidth(p, s) / 2
+      sLeft = Math.min(sLeft, p.x - half)
+      sRight = Math.max(sRight, p.x + half)
+      sTop = Math.min(sTop, p.y - half)
+      sBottom = Math.max(sBottom, p.y + half)
+    }
+    if (sRight < left || sLeft > right || sBottom < top || sTop > bottom) continue
+    // Одна точка внутри рамки — уже пересечение.
+    if (pts.some(p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom)) {
+      hit.push(s.id)
+      continue
+    }
+    // Иначе рёбра штриха могут пройти рамку насквозь.
+    const corners = [
+      [left, top], [right, top], [right, bottom], [left, bottom],
+    ] as const
+    let crosses = false
+    for (let k = 1; k < pts.length && !crosses; k++) {
+      const a = pts[k - 1]!
+      const b = pts[k]!
+      for (const [cx, cy] of corners) {
+        if (distToSegment(cx, cy, a.x, a.y, b.x, b.y) <= s.size / 2 + HIT_SLOP) {
+          crosses = true
+          break
+        }
+      }
+    }
+    if (crosses) hit.push(s.id)
+  }
+  return hit
+}
+
+// Сдвиг выделенных штрихов по вертикали и горизонтали, px.
+function moveSelectedStrokes(dx: number, dy: number) {
+  if (dx === 0 && dy === 0) return
+  for (const s of strokes) {
+    if (!selectedIds.value.has(s.id)) continue
+    for (const p of s.points) {
+      p.x += dx
+      p.y += dy
+    }
+  }
+}
+
 // ==================== Линия «Зона ответа» ====================
 // Горизонтальная полоса на answerSize px от верхнего края доски. Тянется
 // указателем вверх-вниз (координата clientY, как у ручки ресайза высоты).
@@ -1167,6 +1443,7 @@ defineExpose({
       @pointercancel="onPointerCancel"
       @pointerleave="onPointerLeave"
       @pointerenter="onPointerEnter"
+      @dblclick="onCanvasDblClick"
     ></canvas>
 
     <!-- Undo / redo -->
@@ -1194,6 +1471,17 @@ defineExpose({
       >
         <UIcon name="i-lucide-redo" class="size-4" />
       </button>
+      <!-- Перемещение: кнопка есть всегда, в том числе в режиме прохождения,
+           где основной тулбар с пером и ластиком скрыт. -->
+      <button
+        type="button"
+        class="p-1.5 rounded-md transition-colors"
+        :class="moveMode ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
+        :title="moveMode ? 'Выйти из режима перемещения' : 'Перемещение штрихов'"
+        @click="toggleMoveMode"
+      >
+        <UIcon name="i-lucide-mouse-pointer-2" class="size-4" />
+      </button>
     </div>
 
     <!-- Тулбар -->
@@ -1205,18 +1493,18 @@ defineExpose({
       <button
         type="button"
         class="p-1.5 rounded-md transition-colors"
-        :class="currentMode === 'pen' ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
+        :class="currentMode === 'pen' && !moveMode ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
         title="Перо"
-        @click="currentMode = 'pen'"
+        @click="currentMode = 'pen'; leaveMoveMode()"
       >
         <UIcon name="i-lucide-pencil" class="size-4" />
       </button>
       <button
         type="button"
         class="p-1.5 rounded-md transition-colors"
-        :class="currentMode === 'eraser' ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
+        :class="currentMode === 'eraser' && !moveMode ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
         title="Ластик"
-        @click="currentMode = 'eraser'"
+        @click="currentMode = 'eraser'; leaveMoveMode()"
       >
         <UIcon name="i-lucide-eraser" class="size-4" />
       </button>
