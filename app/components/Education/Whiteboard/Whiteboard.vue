@@ -780,10 +780,20 @@ function startResize(e: PointerEvent) {
   document.body.style.userSelect = 'none'
 }
 
+// Минимальное расстояние от линии «Зона ответа» до верхнего края доски, px.
+const ANSWER_TOP_GAP = 25
+
+// Нижняя граница высоты при ресайзе. Линия стоит на answerSize от низа,
+// поэтому высота не может быть меньше answerSize + ANSWER_TOP_GAP.
+function minResizeHeight(): number {
+  if (!props.answerZone) return MIN_HEIGHT.value
+  return Math.max(MIN_HEIGHT.value, answerSize.value + ANSWER_TOP_GAP)
+}
+
 function onResizeMove(e: PointerEvent) {
   const el = containerRef.value
   if (!resizing.value || !el) return
-  const height = Math.max(MIN_HEIGHT.value, Math.round(resizeStartHeight + e.clientY - resizeStartY))
+  const height = Math.max(minResizeHeight(), Math.round(resizeStartHeight + e.clientY - resizeStartY))
   el.style.height = `${height}px`
   // Линия «Зона ответа» привязана к нижнему краю: при ресайзе компенсируем
   // смещение низа, чтобы линия оставалась на месте относительно верха доски.
