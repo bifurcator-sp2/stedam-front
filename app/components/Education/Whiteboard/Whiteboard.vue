@@ -732,6 +732,8 @@ const resizing = ref(false)
 const MIN_HEIGHT = computed(() => Math.max(40, props.minHeight))
 let resizeStartY = 0
 let resizeStartHeight = 0
+// Позиция линии «Зона ответа» на старте ручного ресайза (px от нижнего края).
+let resizeStartAnswerSize = 0
 
 // Реальная высота доски в CSS-пикселях (без учёта dpr).
 function currentHeight(): number {
@@ -772,6 +774,7 @@ function startResize(e: PointerEvent) {
   // высоту. Без inline-высоты (вертикальная тяга ещё не происходила) берём
   // отрисованную — тягание вниз идёт от неё, а не от MIN_HEIGHT.
   resizeStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
+  resizeStartAnswerSize = answerSize.value
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -782,6 +785,12 @@ function onResizeMove(e: PointerEvent) {
   if (!resizing.value || !el) return
   const height = Math.max(MIN_HEIGHT.value, Math.round(resizeStartHeight + e.clientY - resizeStartY))
   el.style.height = `${height}px`
+  // Линия «Зона ответа» привязана к нижнему краю: при ресайзе компенсируем
+  // смещение низа, чтобы линия оставалась на месте относительно верха доски.
+  if (props.answerZone) {
+    const drift = height - resizeStartHeight
+    answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(resizeStartAnswerSize + drift))
+  }
 }
 
 function stopResize(e?: PointerEvent) {
@@ -799,6 +808,10 @@ function stopResize(e?: PointerEvent) {
   // знает новую высоту, и она попадает в документ вместе со штрихами.
   const height = currentHeight()
   if (height > 0) emit('resize', height)
+  // Линия «Зона ответа» сдвинулась вместе с низом доски — сохраняем новую позицию.
+  if (height > 0 && answerSize.value !== resizeStartAnswerSize) {
+    emit('answerSizeChange', answerSize.value)
+  }
 }
 
 // ==================== Экспорт изображения ====================
