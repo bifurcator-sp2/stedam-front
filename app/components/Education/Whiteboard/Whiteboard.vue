@@ -994,16 +994,16 @@ function startAnswerDrag(e: PointerEvent) {
 
 function onAnswerDragMove(e: PointerEvent) {
   if (!answerDragging.value) return
-  // Смещение указателя по экрану (delta > 0 — вниз). Высота доски растёт только
-  // при тяге вниз: нижний край едет за курсором. При тяге вверх доска не меняется.
+  // Смещение указателя по экрану (delta > 0 — вниз).
   const delta = e.clientY - answerStartY
   const el = containerRef.value
+  // Высота доски — только вниз: низ едет за курсором ровно на величину тяги.
   if (el && delta > 0) {
     const height = Math.max(MIN_HEIGHT.value, Math.round(answerStartHeight + delta))
     if (height !== currentHeight()) el.style.height = `${height}px`
   }
   // Полоса идёт под курсором в обе стороны: answerSize растёт при тяге вверх
-  // и падает при тяге вниз; высота доски при этом меняется только вниз (см. выше).
+  // и падает при тяге вниз.
   answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize - delta))
   // Как и рисование: пока полосу тянут, ИИ-инференс на паузе.
   setInteraction(true)
@@ -1021,11 +1021,10 @@ function stopAnswerDrag(e?: PointerEvent) {
   }
   setInteraction(false)
   const height = currentHeight()
-  const heightChanged = height > 0 && Math.round(answerStartHeight) !== height
   // Позиция полосы и/или высота доски изменились — просим сохранить ответ.
-  if (answerSize.value !== answerStartSize || heightChanged) {
+  if (answerSize.value !== answerStartSize || height > 0) {
     // 'resize' раньше 'answerSizeChange': подписчик к сохранению уже знает новую высоту.
-    if (heightChanged) emit('resize', height)
+    if (height > 0) emit('resize', height)
     emit('answerSizeChange', answerSize.value)
   }
 }
