@@ -775,6 +775,7 @@ function startResize(e: PointerEvent) {
   // отрисованную — тягание вниз идёт от неё, а не от MIN_HEIGHT.
   resizeStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
   resizeStartAnswerSize = answerSize.value
+  resizeStartAnswerTop = resizeStartHeight - answerSize.value
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -783,16 +784,23 @@ function startResize(e: PointerEvent) {
 // Минимальное расстояние от линии «Зона ответа» до верхнего края доски, px.
 const ANSWER_TOP_GAP = 25
 
-// Нижняя граница высоты при ресайзе. Линия стоит на answerSize от низа,
-// поэтому высота не может быть меньше answerSize + ANSWER_TOP_GAP.
+// Позиция линии от верхнего края на старте ресайза (px). Линия при ресайзе
+// стоит на месте относительно верха, поэтому предел высоты не зависит от того,
+// насколько высота уже изменилась в этом жесте.
+let resizeStartAnswerTop = 0
+
+// Нижняя граница высоты при ресайзе: от верха до линии (позиция на старте
+// жеста) + ANSWER_TOP_GAP. От answerSize намеренно НЕ считаем — иначе линия,
+// привязанная к верху, уезжала бы вместе с низом и предел «уползал».
 function minResizeHeight(): number {
   if (!props.answerZone) return MIN_HEIGHT.value
-  return Math.max(MIN_HEIGHT.value, answerSize.value + ANSWER_TOP_GAP)
+  return Math.max(MIN_HEIGHT.value, Math.round(resizeStartAnswerTop + ANSWER_TOP_GAP))
 }
 
 function onResizeMove(e: PointerEvent) {
   const el = containerRef.value
   if (!resizing.value || !el) return
+  // Высота «упирается» в minResizeHeight: ниже низ доски не уйдёт.
   const height = Math.max(minResizeHeight(), Math.round(resizeStartHeight + e.clientY - resizeStartY))
   el.style.height = `${height}px`
   // Линия «Зона ответа» привязана к нижнему краю: при ресайзе компенсируем
