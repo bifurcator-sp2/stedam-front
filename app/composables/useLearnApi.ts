@@ -219,17 +219,23 @@ export const useLearnApi = () => {
   // Отправка прохождения на проверку: POST /learns/{learn}/done
   // Переводит learn в статус done (complete_date) и отдаёт LearnResource.
   // Запрос и тело — точно такие же, как в saveLearn на /learn/save.
+  // Успех: прохождение отправлено — забираем его из локального кэша.
   // Ошибки не глушим: вызывающий сам решает, что показать.
   async function markDone(
     learnId: number,
     answers: InkDocument[],
     whiteboardHeights: (number | null)[] = [],
   ): Promise<LearnDoneResponse> {
-    return api.post<LearnDoneResponse>(
+    const response = await api.post<LearnDoneResponse>(
       `/learns/${learnId}/done`,
       { learn_id: learnId, answers: answersPayload(answers, whiteboardHeights) },
       { silent: true },
     )
+
+    const userId = currentUserId()
+    if (userId !== null) await dbCache.deleteLearn(userId, learnId)
+
+    return response
   }
 
   // Ответы прохождения из локального кэша (таблица learns, ключ [user_id, id]).

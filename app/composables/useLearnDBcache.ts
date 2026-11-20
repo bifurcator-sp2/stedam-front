@@ -157,6 +157,27 @@ async function writeRecord(storeName: string, record: unknown): Promise<void> {
   }
 }
 
+// Удаление записей по списку ключей в одной транзакции (одним стором).
+async function deleteRecords(
+  storeName: string,
+  keys: [number, number][],
+): Promise<void> {
+  if (!keys.length) return
+  try {
+    const db = await openDb()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite')
+      const store = tx.objectStore(storeName)
+      keys.forEach(key => store.delete(key))
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  } catch {
+    // Не смогли удалить кэш — не мешаем основному действию.
+  }
+}
+
 export const useLearnDBcache = () => {
   function getSnapshot(
     userId: number,
@@ -212,5 +233,12 @@ export const useLearnDBcache = () => {
     }
   }
 
-  return { getSnapshot, putSnapshot, getLearn, putLearn, getAnswers, updateLearnAnswers }
+  // Удаляет прохождение из кэша (таблица learns, ключ [user_id, id]).
+  // Снапшот урока (lesson_snapshots) не трогаем: он не зависит от прохождения.
+  // Мягко: ошибки IndexedDB не всплывают наружу.
+  function deleteLearn(userId: number, learnId: number): Promise<void> {
+    return deleteRecords(LEARN_STORE, [[userId, learnId]])
+  }
+
+  return { getSnapshot, putSnapshot, getLearn, putLearn, getAnswers, updateLearnAnswers, deleteLearn }
 }
