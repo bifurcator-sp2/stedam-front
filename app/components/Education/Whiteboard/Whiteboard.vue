@@ -1509,20 +1509,15 @@ function stopAnswerDrag(e?: PointerEvent) {
     if (height > 0) emit('resize', height)
     emit('answerSizeChange', answerSize.value)
   }
+  // Полосу отпустили — это жест пользователя: тихое сохранение ответов
+  // (подписчик 'strokeComplete', как после штриха).
+  if (answerSize.value !== answerStartSize) emit('strokeComplete', serializeStrokes())
 }
 
 // ==================== «Поля тетради» (розовая полоса справа) ====================
 // Вертикальная полоса на marginSize px от правого края. Тянется влево-вправо
 // указателем (clientX). Со штрихами и «Зоной ответа» не связана.
 const marginDragging = ref(false)
-
-// Перетаскивание полосы — жест пользователя: о нём сообщаем наружу тем же
-// событием, что и о завершённом штрихе, иначе тихое сохранение ответов его
-// не заметит и новый отступ полей не переживёт перезагрузку.
-function notifyMarginGestureStart(e: PointerEvent) {
-  if (e.button !== 0) return
-  emit('strokeComplete', serializeStrokes())
-}
 
 // Отступ от правого края из координаты указателя: влево — больше.
 function marginFromX(clientX: number): number {
@@ -1533,7 +1528,6 @@ function marginFromX(clientX: number): number {
 
 function startMarginDrag(e: PointerEvent) {
   if (e.button !== 0) return
-  notifyMarginGestureStart(e)
   e.preventDefault()
   e.stopPropagation() // не начинать штрих на холсте
 
@@ -1563,6 +1557,9 @@ function stopMarginDrag(e?: PointerEvent) {
   }
   setInteraction(false)
   emit('marginSizeChange', marginSize.value)
+  // Полосу отпустили — это жест пользователя: тихое сохранение ответов
+  // (подписчик 'strokeComplete', как после штриха).
+  emit('strokeComplete', serializeStrokes())
 }
 
 // Сужение доски (ресайз контейнера, поворот экрана) может сделать текущий
