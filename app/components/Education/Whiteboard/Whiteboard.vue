@@ -964,6 +964,48 @@ onBeforeUnmount(() => {
   stabilizerState = null
 })
 
+// ==================== Деление штрихов зоной ответа ====================
+// Штрих считается целиком: выше линии — решение, ниже неё — ответ. Штрихи,
+// пересекающие линию, все уходят в ответ. Набор фиксируется на старте жеста
+// (до первого сдвига) и живёт до следующего.
+let decisionStrokeIds = new Set<string>()
+let answerStrokeIds = new Set<string>()
+
+// Нижняя граница штриха с учётом толщины пера, px.
+function strokeBottom(s: Stroke): number {
+  let max = Number.NEGATIVE_INFINITY
+  for (const p of s.points) {
+    max = Math.max(max, p.y + segmentWidth(p, s) / 2)
+  }
+  return max
+}
+
+// Делим текущие штрихи по линии, стоящей на `lineY` px от верхнего края.
+// Проверка идёт по нижней точке штриха: если она не опускается ниже линии —
+// штрих целиком над ней и это решение. Пересекающий линию штрих — ответ.
+function captureAnswerZones(lineY: number) {
+  decisionStrokeIds = new Set()
+  answerStrokeIds = new Set()
+  for (const s of strokes) {
+    if (s.points.length === 0) continue
+    if (strokeBottom(s) <= lineY) decisionStrokeIds.add(s.id)
+    else answerStrokeIds.add(s.id)
+  }
+  movedAnswerDy = 0
+}
+
+// На сколько штрихи-ответ уже сдвинуты текущим жестом (px).
+let movedAnswerDy = 0
+
+// Сдвиг штрихов-ответа вниз на dy (dy > 0 — вниз).
+function moveAnswerStrokes(dy: number) {
+  if (dy === 0) return
+  for (const s of strokes) {
+    if (!answerStrokeIds.has(s.id)) continue
+    for (const p of s.points) p.y += dy
+  }
+}
+
 // ==================== Линия «Зона ответа» ====================
 // Горизонтальная полоса на answerSize px от верхнего края доски. Тянется
 // указателем вверх-вниз (координата clientY, как у ручки ресайза высоты).
@@ -989,6 +1031,8 @@ function startAnswerDrag(e: PointerEvent) {
   answerStartY = e.clientY
   answerStartSize = answerSize.value
   answerStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
+  // Решение/ответ считаем один раз, по линии там, где она стоит до сдвига.
+  captureAnswerZones(answerSize.value)
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -1012,6 +1056,14 @@ function onAnswerDragMove(e: PointerEvent) {
   } else if (el && delta <= 0) {
     // Полосу поднимают — доска возвращается к состоянию из вёрстки.
     el.style.height = ''
+  }
+  // Ответ едет вниз ровно за полосой: место под ним появится само, потому
+  // что при тяге вниз доска уже выросла. Вверх ответ не возвращаем.
+  const shift = Math.max(0, Math.round(delta))
+  if (shift !== movedAnswerDy) {
+    moveAnswerStrokes(shift - movedAnswerDy)
+    movedAnswerDy = shift
+    redrawAll()
   }
   // Выше верхнего края жестом показываем полосу под курсором, в модель пишется 0.
   answerDragOffset.value = raw < 0 ? Math.round(raw) : 0
