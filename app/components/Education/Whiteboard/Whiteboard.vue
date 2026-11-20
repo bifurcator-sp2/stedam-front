@@ -1471,17 +1471,6 @@ defineExpose({
       >
         <UIcon name="i-lucide-redo" class="size-4" />
       </button>
-      <!-- Перемещение: кнопка есть всегда, в том числе в режиме прохождения,
-           где основной тулбар с пером и ластиком скрыт. -->
-      <button
-        type="button"
-        class="p-1.5 rounded-md transition-colors"
-        :class="moveMode ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
-        :title="moveMode ? 'Выйти из режима перемещения' : 'Перемещение штрихов'"
-        @click="toggleMoveMode"
-      >
-        <UIcon name="i-lucide-mouse-pointer-2" class="size-4" />
-      </button>
     </div>
 
     <!-- Тулбар -->
@@ -1498,6 +1487,16 @@ defineExpose({
         @click="currentMode = 'pen'; leaveMoveMode()"
       >
         <UIcon name="i-lucide-pencil" class="size-4" />
+      </button>
+      <!-- Перемещение: между пером и ластиком. -->
+      <button
+        type="button"
+        class="p-1.5 rounded-md transition-colors"
+        :class="moveMode ? 'bg-primary text-white' : 'text-muted hover:bg-elevated'"
+        :title="moveMode ? 'Выйти из режима перемещения' : 'Перемещение штрихов'"
+        @click="toggleMoveMode"
+      >
+        <UIcon name="i-lucide-mouse-pointer-2" class="size-4" />
       </button>
       <button
         type="button"
