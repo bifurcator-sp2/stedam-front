@@ -140,6 +140,15 @@ const bgStyle = computed(() => {
   }
 })
 
+// ==================== Поведение ластика ====================
+// Как работает ластик:
+//  - 'strokes' — основной режим: стирает штрихи целиком, которые он задел.
+//    В модель попадает само удаление, маска-штрих не создаётся.
+//  - 'mask' — альтернативный режим: ластик рисует прозрачный штрих, который
+//    вырезает всё под собой (destination-out). Такие штрихи живут в JSON как
+//    eraser: true и входят в undo/redo наравне с обычными.
+const ERASER_MODE: 'strokes' | 'mask' = 'strokes'
+
 // ==================== Модель штрихов ====================
 interface StrokePoint {
   x: number
@@ -768,6 +777,13 @@ function onPointerDown(e: PointerEvent) {
   drawing = true
   currentIsErasing = currentMode.value === 'eraser' || e.ctrlKey || e.metaKey
 
+  // Ластик-удаление: вместо маски стираем целиком всё, чего коснулись.
+  if (currentIsErasing && ERASER_MODE === 'strokes') {
+    eraseStrokesAt(pointerToPoint(e), currentEraserSize.value / 2)
+    erasingStrokes = true
+    return
+  }
+
   const pt = pointerToPoint(e)
   currentStroke = {
     id: newStrokeId(),
@@ -801,6 +817,18 @@ function onPointerMove(e: PointerEvent) {
   showEraserCursor.value = currentMode.value === 'eraser'
     || isCtrlPressed.value || e.ctrlKey || e.metaKey
 
+  // Ластик-удаление: за один жест стираем всё, что прошли.
+  if (erasingStrokes) {
+    if (e.pointerId !== currentPointerId) return
+    e.preventDefault()
+    // Стираем по всей траектории кадра, иначе быстрый жест проскакивает мимо
+    // штрихов между отдельными событиями.
+    const coalesced = typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : null
+    const events = coalesced && coalesced.length > 0 ? coalesced : [e]
+    for (const ev of events) eraseStrokesAt(pointerToPoint(ev), currentEraserSize.value / 2)
+    return
+  }
+
   if (!drawing || !ctx || !currentStroke) return
   if (e.pointerId !== currentPointerId) return
   e.preventDefault()
@@ -825,6 +853,18 @@ function onPointerUp(e: PointerEvent) {
   if (moveMode.value) return onMoveModePointerUp(e)
   if (!canvasRef.value || !ctx) return
   if (e.pointerId !== currentPointerId) return
+
+  if (erasingStrokes) {
+    finishEraseGesture()
+    drawing = false
+    currentIsErasing = false
+    currentPointerId = null
+    try {
+      canvasRef.value.releasePointerCapture(e.pointerId)
+    } catch { /* ignore */ }
+    setInteraction(false)
+    return
+  }
 
   const finished = currentStroke
   finishStroke()
@@ -855,6 +895,15 @@ function onPointerUp(e: PointerEvent) {
 function onPointerCancel(e: PointerEvent) {
   if (moveMode.value) return onMoveModePointerUp(e)
   if (e.pointerId !== currentPointerId) return
+
+  if (erasingStrokes) {
+    finishEraseGesture()
+    drawing = false
+    currentIsErasing = false
+    currentPointerId = null
+    setInteraction(false)
+    return
+  }
 
   finishStroke()
   if (currentStroke) {
@@ -1182,6 +1231,62 @@ function moveAnswerStrokes(dy: number) {
     if (!answerStrokeIds.has(s.id)) continue
     for (const p of s.points) p.y += dy
   }
+}
+
+// ==================== Ластик-удаление штрихов целиком ====================
+// Удалённые за один жест штрихи складываются отдельным снимком: undo возвращает
+// их все разом, как одну операцию, а не по одному штриху.
+let erasingStrokes = false
+let erasedBatch: Stroke[] = []
+
+// Расстояние от точки до ломаной штриха без учёта толщины.
+function distanceToStroke(x: number, y: number, s: Stroke): number {
+  const pts = s.points
+  if (pts.length === 0) return Number.POSITIVE_INFINITY
+  if (pts.length === 1) return Math.hypot(x - pts[0]!.x, y - pts[0]!.y)
+  let best = Number.POSITIVE_INFINITY
+  for (let k = 1; k < pts.length; k++) {
+    const a = pts[k - 1]!
+    const b = pts[k]!
+    best = Math.min(best, distToSegment(x, y, a.x, a.y, b.x, b.y))
+  }
+  return best
+}
+
+// Стирает штрихи, попавшие под круг ластика. Маски не создаёт.
+function eraseStrokesAt(pt: StrokePoint, radius: number) {
+  let changed = false
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const s = strokes[i]!
+    // Маски от прошлого режима не трогаем: они не рисуют видимых чернил.
+    if (s.eraser) continue
+    if (distanceToStroke(pt.x, pt.y, s) > radius + s.size / 2) continue
+    strokes.splice(i, 1)
+    erasedBatch.push(s)
+    // Удалённый штрих больше не выделен — иначе подсветка висела бы в ID.
+    if (selectedIds.value.has(s.id)) {
+      const next = new Set(selectedIds.value)
+      next.delete(s.id)
+      selectedIds.value = next
+    }
+    changed = true
+  }
+  if (changed) redrawAll()
+  return changed
+}
+
+// Завершение жеста ластика: отмена возвращает удалённые за жест разом, как одну
+// операцию. Ластик может задеть штрихи на разных слоях, поэтому батч ставится
+// поверх redo-стека — дальше его снимает обычный doRedo.
+function finishEraseGesture() {
+  const removed = erasedBatch
+  erasingStrokes = false
+  erasedBatch = []
+  if (removed.length === 0) return
+  dropRedoStack()
+  pendingRedoId = null
+  redoStack.push(...removed)
+  emitStrokeUpdate()
 }
 
 // ==================== Выбор и перемещение штрихов ====================
