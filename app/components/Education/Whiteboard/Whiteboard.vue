@@ -64,11 +64,11 @@ const props = withDefaults(defineProps<{
   answerZone: false,
 })
 
-// Позиция линии «Зона ответа»: расстояние (px) от нижней границы доски.
+// Позиция линии «Зона ответа»: расстояние (px) от верхнего края доски.
 // Двусторонняя модель (v-model:answer-size) — доступна родителю.
 const answerSize = defineModel<number>('answerSize', { default: 75 })
 
-// Сколько пикселей от нижнего края доски линия не может пересечь.
+// Сколько пикселей от верхнего края доски линия не может пересечь.
 const ANSWER_SIZE_MIN = 0
 
 // События
@@ -80,7 +80,7 @@ const emit = defineEmits<{
   (e: 'interaction', active: boolean): void
   /** Высота доски изменилась перетаскиванием ручки. */
   (e: 'resize', height: number): void
-  /** Линию «Зона ответа» перетащили: новое расстояние от нижнего края, px. */
+  /** Линию «Зона ответа» перетащили: новое расстояние от верхнего края, px. */
   (e: 'answerSizeChange', size: number): void
 }>()
 
@@ -732,8 +732,6 @@ const resizing = ref(false)
 const MIN_HEIGHT = computed(() => Math.max(40, props.minHeight))
 let resizeStartY = 0
 let resizeStartHeight = 0
-// Позиция линии «Зона ответа» на старте ручного ресайза (px от нижнего края).
-let resizeStartAnswerSize = 0
 
 // Реальная высота доски в CSS-пикселях (без учёта dpr).
 function currentHeight(): number {
@@ -774,8 +772,7 @@ function startResize(e: PointerEvent) {
   // высоту. Без inline-высоты (вертикальная тяга ещё не происходила) берём
   // отрисованную — тягание вниз идёт от неё, а не от MIN_HEIGHT.
   resizeStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
-  resizeStartAnswerSize = answerSize.value
-  resizeStartAnswerTop = resizeStartHeight - answerSize.value
+  resizeStartAnswerTop = answerSize.value
   ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
@@ -784,14 +781,11 @@ function startResize(e: PointerEvent) {
 // Минимальное расстояние от линии «Зона ответа» до верхнего края доски, px.
 const ANSWER_TOP_GAP = 25
 
-// Позиция линии от верхнего края на старте ресайза (px). Линия при ресайзе
-// стоит на месте относительно верха, поэтому предел высоты не зависит от того,
-// насколько высота уже изменилась в этом жесте.
+// Позиция линии от верхнего края на старте ресайза (px). Линия привязана к
+// верху и при ресайзе стоит на месте, поэтому предел высоты — её позиция + зазор.
 let resizeStartAnswerTop = 0
 
-// Нижняя граница высоты при ресайзе: от верха до линии (позиция на старте
-// жеста) + ANSWER_TOP_GAP. От answerSize намеренно НЕ считаем — иначе линия,
-// привязанная к верху, уезжала бы вместе с низом и предел «уползал».
+// Нижняя граница высоты при ресайзе: от верха до линии + ANSWER_TOP_GAP.
 function minResizeHeight(): number {
   if (!props.answerZone) return MIN_HEIGHT.value
   return Math.max(MIN_HEIGHT.value, Math.round(resizeStartAnswerTop + ANSWER_TOP_GAP))
@@ -803,12 +797,8 @@ function onResizeMove(e: PointerEvent) {
   // Высота «упирается» в minResizeHeight: ниже низ доски не уйдёт.
   const height = Math.max(minResizeHeight(), Math.round(resizeStartHeight + e.clientY - resizeStartY))
   el.style.height = `${height}px`
-  // Линия «Зона ответа» привязана к нижнему краю: при ресайзе компенсируем
-  // смещение низа, чтобы линия оставалась на месте относительно верха доски.
-  if (props.answerZone) {
-    const drift = height - resizeStartHeight
-    answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(resizeStartAnswerSize + drift))
-  }
+  // Линия «Зона ответа» привязана к верхнему краю — при ресайзе она остаётся
+  // на месте, компенсировать смещение низа не нужно.
 }
 
 function stopResize(e?: PointerEvent) {
@@ -826,10 +816,6 @@ function stopResize(e?: PointerEvent) {
   // знает новую высоту, и она попадает в документ вместе со штрихами.
   const height = currentHeight()
   if (height > 0) emit('resize', height)
-  // Линия «Зона ответа» сдвинулась вместе с низом доски — сохраняем новую позицию.
-  if (height > 0 && answerSize.value !== resizeStartAnswerSize) {
-    emit('answerSizeChange', answerSize.value)
-  }
 }
 
 // ==================== Экспорт изображения ====================
@@ -968,11 +954,16 @@ onBeforeUnmount(() => {
 })
 
 // ==================== Линия «Зона ответа» ====================
-// Горизонтальная полоса на answerSize px от нижней границы доски. Тянется
+// Горизонтальная полоса на answerSize px от верхнего края доски. Тянется
 // указателем вверх-вниз (координата clientY, как у ручки ресайза высоты).
-// Вниз — полоса опускается, а нижний край доски едет вместе с ней (доска
-// растягивается). Вверх — доска не меняется, полоса просто уходит от нижнего края.
+// Вниз — полоса опускается, доска не меняется. Вверх — полоса идёт к верху,
+// а низ доски едет за ней (доска растягивается).
 const answerDragging = ref(false)
+// Коррекция отображения полосы на время жеста: высота доски может упереться в
+// MIN_HEIGHT, и тогда полоса не сможет дойти до верхнего края (answerSize = 0).
+// Визуально полоса всё равно идёт под курсором, а в модель пишется честное
+// расстояние от верхнего края. На отпускании коррекция сбрасывается.
+const answerDragOffset = ref(0)
 let answerStartY = 0
 let answerStartSize = 0
 // Высота доски на старте жеста (px).
@@ -984,6 +975,7 @@ function startAnswerDrag(e: PointerEvent) {
   e.stopPropagation() // не начинать штрих на холсте
 
   answerDragging.value = true
+  answerDragOffset.value = 0
   answerStartY = e.clientY
   answerStartSize = answerSize.value
   answerStartHeight = Math.max(MIN_HEIGHT.value, appliedHeight() || currentHeight())
@@ -997,14 +989,18 @@ function onAnswerDragMove(e: PointerEvent) {
   // Смещение указателя по экрану (delta > 0 — вниз).
   const delta = e.clientY - answerStartY
   const el = containerRef.value
-  // Высота доски — только вниз: низ едет за курсором ровно на величину тяги.
-  if (el && delta > 0) {
+  // Полоса идёт под курсором: от верха — при тяге вниз, к верху — при тяге вверх.
+  answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize + delta))
+  // Низ доски едет за курсором той же величины, что и полоса. Зона между
+  // полосой и низом сохраняет размер, но нижний край следует за жестом.
+  if (el) {
     const height = Math.max(MIN_HEIGHT.value, Math.round(answerStartHeight + delta))
     if (height !== currentHeight()) el.style.height = `${height}px`
   }
-  // Полоса идёт под курсором в обе стороны: answerSize растёт при тяге вверх
-  // и падает при тяге вниз.
-  answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize - delta))
+  // Предел полосы сверху — верхний край доски; если доска уже не даёт полосе
+  // дойти до него (уперлась в MIN_HEIGHT), жестом показываем её под курсором.
+  const raw = answerStartSize + delta
+  answerDragOffset.value = raw < 0 ? Math.round(raw) : 0
   // Как и рисование: пока полосу тянут, ИИ-инференс на паузе.
   setInteraction(true)
 }
@@ -1012,6 +1008,7 @@ function onAnswerDragMove(e: PointerEvent) {
 function stopAnswerDrag(e?: PointerEvent) {
   if (!answerDragging.value) return
   answerDragging.value = false
+  answerDragOffset.value = 0
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
   if (e) {
@@ -1074,7 +1071,7 @@ defineExpose({
   getHeight: currentHeight,
   /** Задать высоту доске прозрачно для подписчиков: без эмита 'resize'. */
   setHeight,
-  /** Позиция линии «Зона ответа» (px от нижнего края доски). */
+  /** Позиция линии «Зона ответа» (px от верхнего края доски). */
   getAnswerSize: () => answerSize.value,
   /** Выставить позицию линии «Зона ответа» (из сохранённого прохождения). */
   setAnswerSize: (size: number) => {
@@ -1178,7 +1175,7 @@ defineExpose({
       v-if="answerZone"
       class="wb-answer-zone"
       :class="{ 'is-active': answerDragging }"
-      :style="{ bottom: `${answerSize}px` }"
+      :style="{ top: `${answerSize + answerDragOffset}px` }"
       title="Потяните, чтобы изменить зону ответа"
       @pointerdown="startAnswerDrag"
       @pointermove="onAnswerDragMove"
@@ -1254,8 +1251,12 @@ canvas {
   /* Поднята над холстом, чтобы указатель тянул полосу, а не рисовал. */
   z-index: 35;
   height: 12px;
-  transform: translateY(50%);
-  cursor: ns-resize;
+  /* top задаёт Vue: по умолчанию он совпал бы с верхним краем линии,
+     поэтому полоса поднята на половину своей высоты. */
+  transform: translateY(-50%);
+  /* Верхний край доски может совпасть с полосой — верх не обрезаем,
+     иначе полоса у него пропадёт. */
+  overflow: visible;  cursor: ns-resize;
   touch-action: none;
 }
 
