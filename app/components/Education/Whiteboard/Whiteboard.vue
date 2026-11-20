@@ -1658,7 +1658,7 @@ defineExpose({
 
     <!-- Undo / redo -->
     <div
-      class="wb-toolbar absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-lg border border-default bg-default/90 p-1 shadow-sm backdrop-blur-sm"
+      class="wb-toolbar absolute top-2 left-2 z-50 flex items-center gap-1.5 rounded-lg border border-default bg-default/90 p-1 shadow-sm backdrop-blur-sm"
       @pointerdown.stop
     >
       <button
@@ -1686,7 +1686,7 @@ defineExpose({
     <!-- Тулбар -->
     <div
       v-if="!hideToolbar"
-      class="wb-toolbar absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-lg border border-default bg-default/90 p-1 shadow-sm backdrop-blur-sm"
+      class="wb-toolbar absolute top-2 right-2 z-50 flex items-center gap-1.5 rounded-lg border border-default bg-default/90 p-1 shadow-sm backdrop-blur-sm"
       @pointerdown.stop
     >
       <button
@@ -1881,7 +1881,8 @@ canvas {
   top: 0;
   bottom: 0;
   width: 12px;
-  /* Выше зоны ответа (35), курсора ластика (40) и ручки высоты (30). */
+  /* Ниже тулбаров (50): они не должны перекрываться полосой. Выше зоны ответа
+     (35), курсора ластика (40) и ручки высоты (30). */
   z-index: 45;
   /* right задаёт Vue: полоса поднята на половину ширины, чтобы её середина
      стояла ровно на отступе. */
