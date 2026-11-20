@@ -55,6 +55,12 @@ const props = withDefaults(defineProps<{
    * тянуть вверх-вниз. Её позиция живёт в модели answerSize (v-model).
    */
   answerZone?: boolean
+  /**
+   * Розовая вертикальная полоса «поля тетради» справа. Живёт отдельно от
+   * «Зоны ответа» и штрихи не делит — это только граница полей. Её отступ от
+   * правого края живёт в модели marginSize (v-model).
+   */
+  marginLine?: boolean
 }>(), {
   color: '#000000',
   hideToolbar: false,
@@ -62,6 +68,7 @@ const props = withDefaults(defineProps<{
   resizable: false,
   minHeight: 120,
   answerZone: false,
+  marginLine: false,
 })
 
 // Позиция линии «Зона ответа»: расстояние (px) от верхнего края доски.
@@ -70,6 +77,28 @@ const answerSize = defineModel<number>('answerSize', { default: 75 })
 
 // Сколько пикселей от верхнего края доски линия не может пересечь.
 const ANSWER_SIZE_MIN = 0
+
+// «Поля тетради»: отступ полосы от правого края доски, px. По умолчанию 50.
+const marginSize = defineModel<number>('marginSize', { default: 50 })
+
+// Ширина доски: граница отступа считается от неё, поэтому ресайз доски
+// должен пересчитывать предел.
+const containerRef = ref<HTMLDivElement | null>(null)
+const containerWidth = ref(0)
+
+// Полоса не ближе 25 px к правому краю. Вглубь доски её пускают не дальше
+// трети ширины: для доски 900 px это 300 px. На узкой доске треть может
+// оказаться меньше 25 — тогда действует минимум.
+const MARGIN_MIN = 25
+const MARGIN_MAX_FRACTION = 3
+
+function clampMargin(value: number): number {
+  // Ширину берём из замеров, а не из живого rect: до первого ResizeObserver
+  // getBoundingClientRect может вернуть 0 и зажать полосу в минимум.
+  const width = containerWidth.value || containerRef.value?.getBoundingClientRect().width || 0
+  const max = Math.max(MARGIN_MIN, Math.floor(width / MARGIN_MAX_FRACTION))
+  return Math.min(max, Math.max(MARGIN_MIN, Math.round(value)))
+}
 
 // События
 const emit = defineEmits<{
@@ -88,6 +117,8 @@ const emit = defineEmits<{
   (e: 'resizeMove', height: number): void
   /** Линию «Зона ответа» перетащили: новое расстояние от верхнего края, px. */
   (e: 'answerSizeChange', size: number): void
+  /** Полосу «поля» перетащили: новый отступ от правого края, px. */
+  (e: 'marginSizeChange', size: number): void
 }>()
 
 const { userData } = useProfile()
@@ -148,6 +179,13 @@ const bgStyle = computed(() => {
 //    вырезает всё под собой (destination-out). Такие штрихи живут в JSON как
 //    eraser: true и входят в undo/redo наравне с обычными.
 const ERASER_MODE: 'strokes' | 'mask' = 'strokes'
+
+// Ширина доски в CSS-пикселях — предел отступа «полей» зависит от неё.
+watch(containerWidth, () => {
+  if (!props.marginLine) return
+  const clamped = clampMargin(marginSize.value)
+  if (clamped !== marginSize.value) marginSize.value = clamped
+})
 
 // ==================== Модель штрихов ====================
 interface StrokePoint {
@@ -250,7 +288,6 @@ function syncCounters() {
 }
 
 // ==================== Состояние канвы ====================
-const containerRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 
 let ctx: CanvasRenderingContext2D | null = null
@@ -1165,6 +1202,7 @@ onMounted(() => {
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       const rect = containerRef.value!.getBoundingClientRect()
+      containerWidth.value = rect.width
       if (!layoutReady) {
         if (rect.width < 1 || rect.height < 1) return
         layoutReady = true
@@ -1473,6 +1511,59 @@ function stopAnswerDrag(e?: PointerEvent) {
   }
 }
 
+// ==================== «Поля тетради» (розовая полоса справа) ====================
+// Вертикальная полоса на marginSize px от правого края. Тянется влево-вправо
+// указателем (clientX). Со штрихами и «Зоной ответа» не связана.
+const marginDragging = ref(false)
+
+// Отступ от правого края из координаты указателя: влево — больше.
+function marginFromX(clientX: number): number {
+  const rect = containerRef.value?.getBoundingClientRect()
+  if (!rect) return marginSize.value
+  return clampMargin(rect.right - clientX)
+}
+
+function startMarginDrag(e: PointerEvent) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  e.stopPropagation() // не начинать штрих на холсте
+
+  marginDragging.value = true
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+  document.body.style.cursor = 'ew-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function onMarginDragMove(e: PointerEvent) {
+  if (!marginDragging.value) return
+  // Тянем по абсолютной координате, а не по дельте: граница доли ширины
+  // считается от правого края, и упор должен быть виден сразу.
+  marginSize.value = marginFromX(e.clientX)
+  setInteraction(true)
+}
+
+function stopMarginDrag(e?: PointerEvent) {
+  if (!marginDragging.value) return
+  marginDragging.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  if (e) {
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+    } catch { /* ignore */ }
+  }
+  setInteraction(false)
+  emit('marginSizeChange', marginSize.value)
+}
+
+// Сужение доски (ресайз контейнера, поворот экрана) может сделать текущий
+// отступ недопустимым — подтягиваем его к новой границе.
+watch(containerWidth, () => {
+  if (!props.marginLine) return
+  const clamped = clampMargin(marginSize.value)
+  if (clamped !== marginSize.value) marginSize.value = clamped
+})
+
 // ==================== Публичный API ====================
 defineExpose({
   /**
@@ -1525,6 +1616,14 @@ defineExpose({
     const n = Number(size)
     if (!Number.isFinite(n)) return
     answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(n))
+  },
+  /** Отступ «полей тетради» от правого края доски, px. */
+  getMarginSize: () => marginSize.value,
+  /** Выставить отступ «полей тетради» (с зажимом в допустимые границы). */
+  setMarginSize: (size: number) => {
+    const n = Number(size)
+    if (!Number.isFinite(n)) return
+    marginSize.value = clampMargin(n)
   },
 })
 </script>
@@ -1626,6 +1725,24 @@ defineExpose({
         <path d="M22 21H7"></path>
         <path d="m5 11 9 9"></path>
       </svg>
+    </div>
+
+    <!-- Поля тетради: розовая полоса справа, тянется влево-вправо.
+         Лежит НАД зоной ответа и курсором ластика: внизу доски они иначе
+         перекрывают полосу и та пропадает из вида. -->
+    <div
+      v-show="marginLine"
+      class="wb-margin-line"
+      :class="{ 'is-active': marginDragging }"
+      :style="{ right: `${marginSize}px` }"
+      title="Потяните, чтобы изменить поля"
+      @pointerdown="startMarginDrag"
+      @pointermove="onMarginDragMove"
+      @pointerup="stopMarginDrag"
+      @pointercancel="stopMarginDrag"
+      @lostpointercapture="stopMarginDrag"
+    >
+      <div class="wb-margin-bar"></div>
     </div>
 
     <!-- Линия «Зона ответа»: тянется вверх-вниз, надпись двигается вместе с ней -->
@@ -1749,5 +1866,37 @@ canvas {
 /* Во время перетаскивания полосы кисть на холсте не нужна */
 .wb-answer-dragging canvas {
   cursor: ns-resize;
+}
+
+/* ==================== Поля тетради ==================== */
+/* Полоса-захват: 12px вокруг линии, чтобы её было удобно тянуть. */
+.wb-margin-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  /* Выше зоны ответа (35), курсора ластика (40) и ручки высоты (30). */
+  z-index: 45;
+  /* right задаёт Vue: полоса поднята на половину ширины, чтобы её середина
+     стояла ровно на отступе. */
+  transform: translateX(50%);
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.wb-margin-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+  background: #ec4899;
+  transition: background-color 0.15s;
+}
+
+.wb-margin-line:hover .wb-margin-bar,
+.wb-margin-line.is-active .wb-margin-bar {
+  background: #db2777;
 }
 </style>
