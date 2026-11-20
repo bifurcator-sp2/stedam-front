@@ -615,6 +615,50 @@ async function save(silent = false) {
   loading.value = false
 }
 
+// ==================== Отправка на проверку ====================
+
+// POST /learns/{learn}/done: переводит прохождение в статус done.
+// Локальный кэш (IndexedDB) при этом не трогаем: статус в нём стареет,
+// а актуальный сервер отдаёт в ответе LearnResource.
+const donePending = ref(false)
+
+async function submitForReview() {
+  if (loading.value || savePending.value || donePending.value) return
+
+  const learnId = currentLearnId.value
+
+  // Шаг «Идет отправка задания на проверку»: поднимаем прелоадер и сразу идём в запрос.
+  setStage('Идет отправка задания на проверку')
+  loadingStatus.value = ''
+  donePending.value = true
+
+  const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
+  const startedAt = Date.now()
+
+  try {
+    if (learnId == null) throw new Error('Не удалось определить прохождение урока')
+    await learnApi.markDone(learnId, savedAnswers)
+    toast.add({
+      title: 'Задание отправлено на проверку',
+      color: 'success'
+    })
+  } catch (e) {
+    toast.add({
+      title: 'Не удалось отправить задание на проверку',
+      description: String(messageOf(e, 'Не удалось отправить задание на проверку')),
+      color: 'error'
+    })
+  }
+
+  // Прелоадер шага живёт реальное время ответа + секунду.
+  await delay(MIN_STAGE_MS - (Date.now() - startedAt))
+
+  donePending.value = false
+  loadingStatus.value = ''
+  await tick()
+  loading.value = false
+}
+
 // ==================== Навигация ====================
 
 function goBack() {
@@ -700,7 +744,7 @@ function goBack() {
             variant="soft"
             size="lg"
             block
-            :disabled="loading || savePending"
+            :disabled="loading || savePending || donePending"
             @click="save()"
           >
             {{ silentPending ? 'Сохранение…' : 'Сохранить' }}
@@ -711,6 +755,8 @@ function goBack() {
             variant="solid"
             size="lg"
             block
+            :disabled="loading || savePending || donePending"
+            @click="submitForReview"
           >
             Отправить на проверку
           </UButton>

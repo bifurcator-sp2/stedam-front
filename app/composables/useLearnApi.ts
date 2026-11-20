@@ -45,6 +45,15 @@ export interface LearnSaveResponse {
   saved: boolean
 }
 
+// Ответ POST /learns/{learn}/done — LearnResource (см. LearnController::markDone).
+export interface LearnDoneResponse {
+  id: number | null
+  lesson_id: number
+  status: 'created' | 'scheduled' | 'in_progress' | 'done' | 'graded'
+  complete_date: string | null
+  score: number | null
+}
+
 export interface LearnBeginResponse {
   id?: number
   learn_id?: number
@@ -198,10 +207,26 @@ export const useLearnApi = () => {
     return { learn_id: learnId, saved: true }
   }
 
+  // Отправка прохождения на проверку: POST /learns/{learn}/done
+  // Переводит learn в статус done (complete_date) и отдаёт LearnResource.
+  // Ответы передаём финальные — те же документы, что и в saveLearn
+  // (multipart с картинками сервер ждёт только для записи ответов-изображений).
+  // Ошибки не глушим: вызывающий сам решает, что показать.
+  async function markDone(
+    learnId: number,
+    answers: InkDocument[] = [],
+  ): Promise<LearnDoneResponse> {
+    return api.post<LearnDoneResponse>(
+      `/learns/${learnId}/done`,
+      { answers },
+      { silent: true },
+    )
+  }
+
   // Ответы прохождения из локального кэша (таблица learns, ключ [user_id, id]).
   async function getAnswers(userId: number, learnId: number): Promise<unknown[]> {
     return dbCache.getAnswers(userId, learnId)
   }
 
-  return { begin, snapshot, saveLearn, getAnswers }
+  return { begin, snapshot, saveLearn, markDone, getAnswers }
 }
