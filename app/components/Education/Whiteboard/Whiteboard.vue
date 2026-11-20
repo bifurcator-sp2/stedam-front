@@ -939,8 +939,8 @@ onBeforeUnmount(() => {
 // ==================== Линия «Зона ответа» ====================
 // Горизонтальная полоса на answerSize px от нижней границы доски. Тянется
 // указателем вверх-вниз (координата clientY, как у ручки ресайза высоты).
-// Полоса тянет за собой нижний край: тянем вниз — доска растягивается на то же
-// расстояние. Штрихи при этом стоят на месте и относительно полосы, и на экране.
+// Вниз — полоса опускается, а нижний край доски едет вместе с ней (доска
+// растягивается). Вверх — доска не меняется, полоса просто уходит от нижнего края.
 const answerDragging = ref(false)
 let answerStartY = 0
 let answerStartSize = 0
@@ -963,18 +963,17 @@ function startAnswerDrag(e: PointerEvent) {
 
 function onAnswerDragMove(e: PointerEvent) {
   if (!answerDragging.value) return
-  // Смещение указателя по экрану. Вниз (delta > 0) — низ доски едет вместе с
-  // полосой: высота растёт на то же расстояние, поэтому положение полосы от
-  // нижнего края (answerSize) не меняется. Вверх — доска ужимается.
+  // Смещение указателя по экрану (delta > 0 — вниз). Высота доски растёт только
+  // при тяге вниз: нижний край едет за курсором. При тяге вверх доска не меняется.
   const delta = e.clientY - answerStartY
   const el = containerRef.value
-  if (el) {
+  if (el && delta > 0) {
     const height = Math.max(MIN_HEIGHT.value, Math.round(answerStartHeight + delta))
     if (height !== currentHeight()) el.style.height = `${height}px`
   }
-  // Полоса идёт под курсором, но расстояние до нижнего края не растёт:
-  // answerSize <= answerStartSize (при ужатии доски полоса догоняет край).
-  answerSize.value = Math.min(answerStartSize, Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize + delta)))
+  // Полоса идёт под курсором в обе стороны: answerSize растёт при тяге вверх
+  // и падает при тяге вниз; высота доски при этом меняется только вниз (см. выше).
+  answerSize.value = Math.max(ANSWER_SIZE_MIN, Math.round(answerStartSize - delta))
   // Как и рисование: пока полосу тянут, ИИ-инференс на паузе.
   setInteraction(true)
 }
