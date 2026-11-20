@@ -418,6 +418,13 @@ function onWhiteboardResize(height: number) {
   stopResize(true, true)
 }
 
+// Высота меняется прямо во время жеста: контейнер с фиксированной высотой и
+// overflow-hidden без этого обрезал бы растущую доску до отпускания ручки.
+// Настройки здесь не эмитятся — сохранение делает onWhiteboardResize на отпускании.
+function onWhiteboardResizeMove(height: number) {
+  localHeight.value = Math.max(MIN_BOARD_HEIGHT, height)
+}
+
 // Доска регистрируется, чтобы Lesson мог прочитать её штрихи и высоту.
 onMounted(registerCurrentWhiteboard)
 
@@ -513,6 +520,7 @@ function onUpdateChildNode(updatedNode: SettingNode) {
                 answer-zone
                 @stroke-complete="onStrokeComplete"
                 @resize="onWhiteboardResize"
+                @resize-move="onWhiteboardResizeMove"
               />
             </div>
 

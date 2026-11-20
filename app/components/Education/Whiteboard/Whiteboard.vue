@@ -80,6 +80,12 @@ const emit = defineEmits<{
   (e: 'interaction', active: boolean): void
   /** Высота доски изменилась перетаскиванием ручки. */
   (e: 'resize', height: number): void
+  /**
+   * Высота меняется прямо во время жеста. Нужна подписчикам, которые держат
+   * доску в контейнере фиксированной высоты (overflow-hidden): без живой
+   * высоты контейнер обрезал бы растущую доску до отпускания ручки.
+   */
+  (e: 'resizeMove', height: number): void
   /** Линию «Зона ответа» перетащили: новое расстояние от верхнего края, px. */
   (e: 'answerSizeChange', size: number): void
 }>()
@@ -796,7 +802,12 @@ function onResizeMove(e: PointerEvent) {
   if (!resizing.value || !el) return
   // Высота «упирается» в minResizeHeight: ниже низ доски не уйдёт.
   const height = Math.max(minResizeHeight(), Math.round(resizeStartHeight + e.clientY - resizeStartY))
+  // Inline height ставим всегда: без него доска на долю кадра схлопнулась бы
+  // до высоты вёрстки, как только курсор уйдёт выше точки захвата.
   el.style.height = `${height}px`
+  // Живая высота во время жеста: контейнер с фиксированной высотой и
+  // overflow-hidden без неё обрезал бы доску до отпускания ручки.
+  emit('resizeMove', height)
   // Линия «Зона ответа» привязана к верхнему краю — при ресайзе она остаётся
   // на месте, компенсировать смещение низа не нужно.
 }
@@ -994,7 +1005,13 @@ function onAnswerDragMove(e: PointerEvent) {
   // Низ доски едет за курсором только вниз (доска не уменьшается).
   if (el && delta > 0) {
     const height = Math.max(MIN_HEIGHT.value, Math.round(answerStartHeight + delta))
-    if (height !== currentHeight()) el.style.height = `${height}px`
+    if (height !== currentHeight()) {
+      el.style.height = `${height}px`
+      emit('resizeMove', height)
+    }
+  } else if (el && delta <= 0) {
+    // Полосу поднимают — доска возвращается к состоянию из вёрстки.
+    el.style.height = ''
   }
   // Выше верхнего края жестом показываем полосу под курсором, в модель пишется 0.
   answerDragOffset.value = raw < 0 ? Math.round(raw) : 0
@@ -1253,7 +1270,8 @@ canvas {
   transform: translateY(-50%);
   /* Верхний край доски может совпасть с полосой — верх не обрезаем,
      иначе полоса у него пропадёт. */
-  overflow: visible;  cursor: ns-resize;
+  overflow: visible;
+  cursor: ns-resize;
   touch-action: none;
 }
 
