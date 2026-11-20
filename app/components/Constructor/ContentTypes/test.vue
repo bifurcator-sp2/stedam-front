@@ -501,7 +501,7 @@ function onUpdateChildNode(updatedNode: SettingNode) {
         <!-- Контейнер ответа (Whiteboard) -->
         <div :style="answerMarginStyle">
           <div
-            class="answer-container relative w-full transition-all duration-150 flex flex-col group overflow-hidden"
+            class="answer-container relative w-full flex flex-col group overflow-hidden"
             :class="[
               { 'ring-2 ring-primary/50': isResizing },
             ]"
