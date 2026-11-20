@@ -98,6 +98,12 @@ function applyWhiteboardHeights(heights: (number | null)[] | null) {
   whiteboards.setHeights(heights)
 }
 
+// Отступы «полей тетради» из сохранённого прохождения (порядок блоков).
+// Каждая доска получает свой отступ напрямую (margin_size документа ответа).
+function applyWhiteboardMargins(margins: (number | null)[] | null) {
+  whiteboards.setMargins(margins)
+}
+
 // На доске завершён штрих — сообщаем наружу (LearnProcessor тихо сохраняет ответы).
 const emitStrokeComplete = () => emit('whiteboard-stroke-complete')
 const stopStrokeListener = whiteboards.onStrokeComplete(emitStrokeComplete)
@@ -114,10 +120,15 @@ watch(() => props.answers, list => whiteboards.setAnswers(list ?? []), {
 // Наружу события не эмитим: LearnProcessor читает её напрямую у доски
 // (getWhiteboardAnswerSizes) — по тому же принципу, что и высоты (getHeight).
 
-// Реальные позиции линий «Зона ответа» всех досок урока (px от нижнего края),
+// Реальные позиции линий «Зона ответа» всех досок урока (px от верхнего края),
 // порядок = порядок блоков / getWhiteboardStrokes.
 function getWhiteboardAnswerSizes(): number[] {
   return whiteboards.getWhiteboards().map(wb => wb.getAnswerSize?.() ?? 0)
+}
+
+// Отступы «полей тетради» (px от правого края доски), порядок тот же.
+function getWhiteboardMarginSizes(): number[] {
+  return whiteboards.getWhiteboards().map(wb => wb.getMarginSize?.() ?? 0)
 }
 
 // ==================== Утилита поиска блока в дереве ====================
@@ -602,8 +613,12 @@ defineExpose({
   getWhiteboardHeights,
   /** Позиции линий «Зона ответа» тех же досок (px), порядок совпадает. */
   getWhiteboardAnswerSizes,
+  /** Отступы «полей тетради» тех же досок (px от правого края), тот же порядок. */
+  getWhiteboardMarginSizes,
   /** Выставить всем доскам урока высоты из прохождения (без эмита 'resize'). */
   applyWhiteboardHeights,
+  /** Выставить всем доскам урока отступы «полей тетради» из прохождения. */
+  applyWhiteboardMargins,
 })
 </script>
 

@@ -29,9 +29,13 @@ const toast = useToast()
 const lessonRef = ref<{
   getWhiteboardStrokes?: () => InkDocument[]
   getWhiteboardHeights?: () => (number | null)[]
-  /** Позиции линий «Зона ответа» досок (px), порядок блоков. */
+  /** Позиции линий «Зона ответа» досок (px от верхнего края), порядок блоков. */
   getWhiteboardAnswerSizes?: () => number[]
+  /** Отступы «полей тетради» досок (px от правого края), порядок блоков. */
+  getWhiteboardMarginSizes?: () => number[]
   applyWhiteboardHeights?: (heights: (number | null)[] | null) => void
+  /** Выставить доскам отступы «полей тетради» из сохранённого прохождения. */
+  applyWhiteboardMargins?: (margins: (number | null)[] | null) => void
 } | null>(null)
 
 // Ответы прохождения (по документу штрихов на доску, в порядке блоков).
@@ -199,6 +203,13 @@ function heightOf(doc: InkDocument | undefined): number | null {
   return raw != null && Number.isFinite(n) ? n : null
 }
 
+// Отступ «полей тетради» лежит в документе ответа: answers[i].margin_size.
+function marginOf(doc: InkDocument | undefined): number | null {
+  const raw = (doc as { margin_size?: unknown } | undefined)?.margin_size
+  const n = Number(raw)
+  return raw != null && Number.isFinite(n) ? n : null
+}
+
 async function loadAnswers(userId: number, learnId: number): Promise<InkDocument[]> {
   try {
     return toAnswers(await learnApi.getAnswers(userId, learnId))
@@ -236,14 +247,29 @@ function applyLessonHeights() {
   heightsApplied.value = true
 }
 
-// Ответы с позициями линий «Зона ответа»: доски спрашиваем напрямую
-// (Whiteboard.getAnswerSize) в том же порядке, что и штрихи, и пишем позицию
-// рядом со strokes — answers[i].answer_size. Остальные поля документа не трогаем.
+// Отступы «полей тетради» из сохранённого прохождения (margin_size документов
+// ответов, порядок блоков). Доскам ставятся напрямую, без эмита 'marginSizeChange':
+// это не жест пользователя и не должно запускать тихое сохранение.
+function applyLessonMargins() {
+  const docs = toAnswers(learnRecord.value?.answers ?? [])
+  if (!docs.length) return
+  lessonRef.value?.applyWhiteboardMargins?.(docs.map(marginOf))
+}
+
+// Ответы с позициями линий «Зона ответа» и отступами «полей тетради»:
+// доски спрашиваем напрямую (Whiteboard.getAnswerSize / getMarginSize) в том же
+// порядке, что и штрихи, и пишем их рядом со strokes — answers[i].answer_size и
+// answers[i].margin_size. Остальные поля документа не трогаем.
 function withAnswerSizes(docs: InkDocument[]): InkDocument[] {
   const sizes = lessonRef.value?.getWhiteboardAnswerSizes?.() ?? []
+  const margins = lessonRef.value?.getWhiteboardMarginSizes?.() ?? []
   return docs.map((doc, i) => {
     const size = Number(sizes[i])
-    return Number.isFinite(size) ? { ...doc, answer_size: size } : doc
+    const margin = Number(margins[i])
+    const next: InkDocument = { ...doc }
+    if (Number.isFinite(size)) next.answer_size = size
+    if (Number.isFinite(margin)) next.margin_size = margin
+    return next
   })
 }
 
@@ -412,6 +438,12 @@ async function beginLesson() {
   await tick()
   if (!isCurrent()) return
   applyLessonHeights()
+
+  // Розовая полоса «полей тетради» встаёт на сохранённый отступ (margin_size).
+  applyLessonMargins()
+  await tick()
+  if (!isCurrent()) return
+  applyLessonMargins()
 
   loading.value = false
 }

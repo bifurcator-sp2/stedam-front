@@ -1516,6 +1516,14 @@ function stopAnswerDrag(e?: PointerEvent) {
 // указателем (clientX). Со штрихами и «Зоной ответа» не связана.
 const marginDragging = ref(false)
 
+// Перетаскивание полосы — жест пользователя: о нём сообщаем наружу тем же
+// событием, что и о завершённом штрихе, иначе тихое сохранение ответов его
+// не заметит и новый отступ полей не переживёт перезагрузку.
+function notifyMarginGestureStart(e: PointerEvent) {
+  if (e.button !== 0) return
+  emit('strokeComplete', serializeStrokes())
+}
+
 // Отступ от правого края из координаты указателя: влево — больше.
 function marginFromX(clientX: number): number {
   const rect = containerRef.value?.getBoundingClientRect()
@@ -1525,6 +1533,7 @@ function marginFromX(clientX: number): number {
 
 function startMarginDrag(e: PointerEvent) {
   if (e.button !== 0) return
+  notifyMarginGestureStart(e)
   e.preventDefault()
   e.stopPropagation() // не начинать штрих на холсте
 

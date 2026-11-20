@@ -25,9 +25,12 @@ export interface WhiteboardHandle {
    * false — доска ещё не отрисована (высоту нужно применить позже).
    */
   setHeight?: (height: number) => boolean
-  /** Позиция линии «Зона ответа» (px от нижнего края доски). */
+  /** Позиция линии «Зона ответа» (px от верхнего края доски). */
   getAnswerSize?: () => number
   setAnswerSize?: (size: number) => void
+  /** Отступ полосы «поля тетради» от правого края доски (px). */
+  getMarginSize?: () => number
+  setMarginSize?: (size: number) => void
   /**
    * Визуальная (контейнерная) высота доски: программная минимальная высота
    * из документа ответа (whiteboard_height, «пол») и последняя сохранённая
@@ -89,6 +92,11 @@ export interface LessonWhiteboardsRegistry {
    * запоминается в реестре. Порядок — от первой доски к последней.
    */
   applyHeights: () => void
+  /**
+   * Отступы «полей тетради» из сохранённого прохождения (null — не трогать).
+   * Порядок = порядок блоков, как у setAnswers.
+   */
+  setMargins: (margins: (number | null)[] | null) => void
 }
 
 export const LESSON_WHITEBOARDS_KEY: InjectionKey<LessonWhiteboardsRegistry> =
@@ -116,6 +124,8 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
     wb.loadStrokes(doc)
     // Позиция линии «Зона ответа» лежит в том же документе ответа.
     if (doc.answer_size != null) wb.setAnswerSize?.(doc.answer_size)
+    // Там же отступ «полей тетради».
+    if (doc.margin_size != null) wb.setMarginSize?.(doc.margin_size)
   }
 
   function setAnswers(list: InkDocument[]) {
@@ -225,12 +235,32 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
     }
   }
 
+  // ==================== Поля тетради ====================
+
+  // Отступы из документа ответа (margin_size); null — не трогаем.
+  let margins: (number | null)[] | null = null
+
+  function applyMargins() {
+    if (!margins) return
+    const boards = getWhiteboards()
+    boards.forEach((wb, i) => {
+      const size = Number(margins![i])
+      if (Number.isFinite(size)) wb.setMarginSize?.(size)
+    })
+  }
+
+  function setMargins(list: (number | null)[] | null) {
+    margins = Array.isArray(list) && list.length ? list : null
+    applyMargins()
+  }
+
   return {
     registerBlock,
     // Высота могла прийти раньше, чем доска отрисовалась.
     registerWhiteboard: (localId, wb) => {
       registerWhiteboard(localId, wb)
       applyHeights()
+      applyMargins()
     },
     unregisterWhiteboard,
     getWhiteboards,
@@ -241,7 +271,8 @@ export function createLessonWhiteboardsRegistry(): LessonWhiteboardsRegistry {
     setFloorHeight,
     getSavedHeight,
     saveHeight,
-    applyHeights
+    applyHeights,
+    setMargins
   }
 }
 
