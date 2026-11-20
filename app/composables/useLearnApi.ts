@@ -178,14 +178,7 @@ export const useLearnApi = () => {
     silent = false,
     whiteboardHeights: (number | null)[] = [],
   ): Promise<LearnSaveResponse> {
-    // Явная высота из массива приоритетнее; если её нет, оставляем ту, что
-    // уже лежит в документе (не затираем null-ом).
-    const payload = answers.map((doc, i) => ({
-      ...doc,
-      whiteboard_height: whiteboardHeights[i]
-        ?? (doc as { whiteboard_height?: number | null }).whiteboard_height
-        ?? null,
-    }))
+    const payload = answersPayload(answers, whiteboardHeights)
 
     // Сначала локальный кэш (таблица learns).
     const userId = currentUserId()
@@ -207,18 +200,34 @@ export const useLearnApi = () => {
     return { learn_id: learnId, saved: true }
   }
 
+  // Полезная нагрузка ответов ровно та же, что уходит в POST /learn/save:
+  // answers[i] = документ штрихов доски + whiteboard_height.
+  // Явная высота из массива приоритетнее; если её нет, оставляем ту, что
+  // уже лежит в документе (не затираем null-ом).
+  function answersPayload(
+    answers: InkDocument[],
+    whiteboardHeights: (number | null)[] = [],
+  ): InkDocument[] {
+    return answers.map((doc, i) => ({
+      ...doc,
+      whiteboard_height: whiteboardHeights[i]
+        ?? (doc as { whiteboard_height?: number | null }).whiteboard_height
+        ?? null,
+    }))
+  }
+
   // Отправка прохождения на проверку: POST /learns/{learn}/done
   // Переводит learn в статус done (complete_date) и отдаёт LearnResource.
-  // Ответы передаём финальные — те же документы, что и в saveLearn
-  // (multipart с картинками сервер ждёт только для записи ответов-изображений).
+  // Запрос и тело — точно такие же, как в saveLearn на /learn/save.
   // Ошибки не глушим: вызывающий сам решает, что показать.
   async function markDone(
     learnId: number,
-    answers: InkDocument[] = [],
+    answers: InkDocument[],
+    whiteboardHeights: (number | null)[] = [],
   ): Promise<LearnDoneResponse> {
     return api.post<LearnDoneResponse>(
       `/learns/${learnId}/done`,
-      { answers },
+      { learn_id: learnId, answers: answersPayload(answers, whiteboardHeights) },
       { silent: true },
     )
   }

@@ -632,12 +632,14 @@ async function submitForReview() {
   loadingStatus.value = ''
   donePending.value = true
 
+  // Тело запроса — то же, что уходит в save(): штрихи + позиции/поля и высоты досок.
   const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
+  const savedHeights = currentWhiteboardHeights(savedAnswers)
   const startedAt = Date.now()
 
   try {
     if (learnId == null) throw new Error('Не удалось определить прохождение урока')
-    await learnApi.markDone(learnId, savedAnswers)
+    await learnApi.markDone(learnId, savedAnswers, savedHeights)
     toast.add({
       title: 'Задание отправлено на проверку',
       color: 'success'
