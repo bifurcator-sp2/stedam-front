@@ -89,6 +89,10 @@ function getWhiteboardStrokes() {
 function getWhiteboardHeights(): (number | null)[] {
   return whiteboards.getWhiteboards().map(wb => wb.getHeight?.() ?? null)
 }
+// Реальные ширины досок — тем же способом, что и высоты (getWidth у каждой доски).
+function getWhiteboardWidths(): (number | null)[] {
+  return whiteboards.getWhiteboards().map(wb => wb.getWidth?.() ?? null)
+}
 
 // Высоты досок из сохранённого прохождения (по порядку блоков). Каждая доска
 // получает свою высоту напрямую (Whiteboard.setHeight, без эмита 'resize'),
@@ -611,6 +615,8 @@ defineExpose({
   getWhiteboardStrokes,
   /** Реальные высоты тех же досок (px), порядок совпадает с getWhiteboardStrokes. */
   getWhiteboardHeights,
+  /** Реальные ширины тех же досок (px), порядок совпадает с getWhiteboardStrokes. */
+  getWhiteboardWidths,
   /** Позиции линий «Зона ответа» тех же досок (px), порядок совпадает. */
   getWhiteboardAnswerSizes,
   /** Отступы «полей тетради» тех же досок (px от правого края), тот же порядок. */

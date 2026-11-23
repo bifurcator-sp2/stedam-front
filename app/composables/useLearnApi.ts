@@ -169,16 +169,18 @@ export const useLearnApi = () => {
   // answers — документы штрихов белых досок урока в порядке блоков
   // (индекс массива = порядок доски в уроке).
   // whiteboardHeights — высоты досок ответов (px) в том же порядке, что и answers.
-  // В сохраняемый документ высота попадает рядом со strokes: answers[i].whiteboard_height
-  // (null — высота неизвестна).
+  // whiteboardWidths — реальные ширины досок (px) в том же порядке.
+  // В сохраняемый документ высота и ширина попадают рядом со strokes:
+  // answers[i].whiteboard_height и answers[i].whiteboard_width (null — неизвестны).
   // silent: true — только локальный кэш (IndexedDB), без запроса на сервер.
   async function saveLearn(
     learnId: number,
     answers: InkDocument[],
     silent = false,
     whiteboardHeights: (number | null)[] = [],
+    whiteboardWidths: (number | null)[] = [],
   ): Promise<LearnSaveResponse> {
-    const payload = answersPayload(answers, whiteboardHeights)
+    const payload = answersPayload(answers, whiteboardHeights, whiteboardWidths)
 
     // Сначала локальный кэш (таблица learns).
     const userId = currentUserId()
@@ -201,17 +203,21 @@ export const useLearnApi = () => {
   }
 
   // Полезная нагрузка ответов ровно та же, что уходит в POST /learn/save:
-  // answers[i] = документ штрихов доски + whiteboard_height.
-  // Явная высота из массива приоритетнее; если её нет, оставляем ту, что
-  // уже лежит в документе (не затираем null-ом).
+  // answers[i] = документ штрихов доски + whiteboard_height + whiteboard_width.
+  // Явные значения из массивов приоритетнее; если их нет, оставляем те, что
+  // уже лежат в документе (не затираем null-ом).
   function answersPayload(
     answers: InkDocument[],
     whiteboardHeights: (number | null)[] = [],
+    whiteboardWidths: (number | null)[] = [],
   ): InkDocument[] {
     return answers.map((doc, i) => ({
       ...doc,
       whiteboard_height: whiteboardHeights[i]
         ?? (doc as { whiteboard_height?: number | null }).whiteboard_height
+        ?? null,
+      whiteboard_width: whiteboardWidths[i]
+        ?? (doc as { whiteboard_width?: number | null }).whiteboard_width
         ?? null,
     }))
   }
@@ -225,10 +231,11 @@ export const useLearnApi = () => {
     learnId: number,
     answers: InkDocument[],
     whiteboardHeights: (number | null)[] = [],
+    whiteboardWidths: (number | null)[] = [],
   ): Promise<LearnDoneResponse> {
     const response = await api.post<LearnDoneResponse>(
       `/learns/${learnId}/done`,
-      { learn_id: learnId, answers: answersPayload(answers, whiteboardHeights) },
+      { learn_id: learnId, answers: answersPayload(answers, whiteboardHeights, whiteboardWidths) },
       { silent: true },
     )
 

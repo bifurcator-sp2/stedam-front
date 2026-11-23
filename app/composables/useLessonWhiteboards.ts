@@ -20,6 +20,8 @@ export interface WhiteboardHandle {
   loadStrokes?: (input: InkDocument | InkStroke[]) => void
   /** Текущая высота доски (CSS px), 0 — доска ещё не отрисована. */
   getHeight?: () => number
+  /** Текущая ширина доски (CSS px), 0 — доска ещё не отрисована. */
+  getWidth?: () => number
   /**
    * Задать высоту доски из сохранённого прохождения — без эмита 'resize'.
    * false — доска ещё не отрисована (высоту нужно применить позже).

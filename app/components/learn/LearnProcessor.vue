@@ -29,6 +29,8 @@ const toast = useToast()
 const lessonRef = ref<{
   getWhiteboardStrokes?: () => InkDocument[]
   getWhiteboardHeights?: () => (number | null)[]
+  /** Реальные ширины досок (px), порядок блоков. */
+  getWhiteboardWidths?: () => (number | null)[]
   /** Позиции линий «Зона ответа» досок (px от верхнего края), порядок блоков. */
   getWhiteboardAnswerSizes?: () => number[]
   /** Отступы «полей тетради» досок (px от правого края), порядок блоков. */
@@ -210,6 +212,14 @@ function marginOf(doc: InkDocument | undefined): number | null {
   return raw != null && Number.isFinite(n) ? n : null
 }
 
+// Ширина доски лежит в самом документе ответа: answers[i].whiteboard_width.
+// Нужна как запасное значение: живой замер ширины берём у самой доски.
+function widthOf(doc: InkDocument | undefined): number | null {
+  const raw = (doc as { whiteboard_width?: unknown } | undefined)?.whiteboard_width
+  const n = Number(raw)
+  return raw != null && Number.isFinite(n) ? n : null
+}
+
 async function loadAnswers(userId: number, learnId: number): Promise<InkDocument[]> {
   try {
     return toAnswers(await learnApi.getAnswers(userId, learnId))
@@ -286,6 +296,19 @@ function currentWhiteboardHeights(docs: InkDocument[]): (number | null)[] {
     const measured = Number(actual[i])
     if (Number.isFinite(measured) && measured > 0) return measured
     return lessonHeights.value[i] ?? heightOf(doc)
+  })
+}
+
+// Ширины досок для сохранения: реальная ширина каждой доски (getWidth) на
+// момент сохранения/отправки, порядок блоков. Если доска ещё не отрисована
+// (getWidth вернул 0) — берём ширину из документа ответа, чтобы не затереть
+// сохранённое значение пустым.
+function currentWhiteboardWidths(docs: InkDocument[]): (number | null)[] {
+  const actual = lessonRef.value?.getWhiteboardWidths?.() ?? []
+  return docs.map((doc, i) => {
+    const measured = Number(actual[i])
+    if (Number.isFinite(measured) && measured > 0) return measured
+    return widthOf(doc)
   })
 }
 
@@ -555,10 +578,11 @@ async function saveSilently() {
   silentPending.value = true
   const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
   const savedHeights = currentWhiteboardHeights(savedAnswers)
+  const savedWidths = currentWhiteboardWidths(savedAnswers)
   const startedAt = Date.now()
 
   try {
-    await learnApi.saveLearn(learnId, savedAnswers, true, savedHeights)
+    await learnApi.saveLearn(learnId, savedAnswers, true, savedHeights, savedWidths)
   } catch {
     // Молча: локальная запись saveLearn выполняется сама, оверлей не поднимаем.
   }
@@ -593,11 +617,12 @@ async function save(silent = false) {
 
   const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
   const savedHeights = currentWhiteboardHeights(savedAnswers)
+  const savedWidths = currentWhiteboardWidths(savedAnswers)
   const startedAt = Date.now()
 
   try {
     if (learnId == null) throw new Error('Не удалось определить прохождение урока')
-    await learnApi.saveLearn(learnId, savedAnswers, silent, savedHeights)
+    await learnApi.saveLearn(learnId, savedAnswers, silent, savedHeights, savedWidths)
   } catch (e) {
     toast.add({
       title: 'Не удалось сохранить урок',
@@ -632,14 +657,15 @@ async function submitForReview() {
   loadingStatus.value = ''
   donePending.value = true
 
-  // Тело запроса — то же, что уходит в save(): штрихи + позиции/поля и высоты досок.
+  // Тело запроса — то же, что уходит в save(): штрихи + позиции/поля, высоты и ширины досок.
   const savedAnswers = withAnswerSizes(lessonRef.value?.getWhiteboardStrokes?.() ?? [])
   const savedHeights = currentWhiteboardHeights(savedAnswers)
+  const savedWidths = currentWhiteboardWidths(savedAnswers)
   const startedAt = Date.now()
 
   try {
     if (learnId == null) throw new Error('Не удалось определить прохождение урока')
-    await learnApi.markDone(learnId, savedAnswers, savedHeights)
+    await learnApi.markDone(learnId, savedAnswers, savedHeights, savedWidths)
     toast.add({
       title: 'Задание отправлено на проверку',
       color: 'success'

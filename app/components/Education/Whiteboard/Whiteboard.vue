@@ -1010,6 +1010,14 @@ function currentHeight(): number {
   return Math.round(el.getBoundingClientRect().height)
 }
 
+// Реальная ширина доски в CSS-пикселях на момент замера (без учёта dpr).
+// Уходит в сохранение рядом с высотой: answers[i].whiteboard_width.
+function currentWidth(): number {
+  const el = containerRef.value
+  if (!el) return 0
+  return Math.round(el.getBoundingClientRect().width)
+}
+
 // Высота, заданная доске inline-стилем (0 — height не выставлен и берётся из вёрстки).
 function appliedHeight(): number {
   const h = Number.parseFloat(containerRef.value?.style.height ?? '')
@@ -1613,6 +1621,8 @@ defineExpose({
   getImage,
   /** Текущая отрисованная высота доски (CSS px, 0 — если ещё не смонтирована). */
   getHeight: currentHeight,
+  /** Текущая отрисованная ширина доски (CSS px, 0 — если ещё не смонтирована). */
+  getWidth: currentWidth,
   /** Задать высоту доске прозрачно для подписчиков: без эмита 'resize'. */
   setHeight,
   /** Позиция линии «Зона ответа» (px от верхнего края доски). */

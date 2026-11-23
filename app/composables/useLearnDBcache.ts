@@ -37,11 +37,13 @@ export interface LearnQuestion {
 }
 
 export interface LearnAnswer {
-  /** Документ штрихов доски; рядом лежит whiteboard_height. */
+  /** Документ штрихов доски; рядом лежат whiteboard_height и whiteboard_width. */
   version?: number
   strokes?: unknown[]
   /** Высота доски ответа (px). Пишется фронтендом рядом со strokes. */
   whiteboard_height?: number | null
+  /** Реальная ширина доски ответа (px) на момент сохранения. Пишется фронтендом рядом со strokes. */
+  whiteboard_width?: number | null
   [key: string]: unknown
 }
 

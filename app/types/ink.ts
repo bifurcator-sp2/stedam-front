@@ -36,4 +36,8 @@ export interface InkDocument {
   answer_size?: number
   /** Отступ полосы «поля тетради» от правого края доски (px), если задан. */
   margin_size?: number
+  /** Высота доски на момент сохранения (px) — пишется рядом со strokes в ответе. */
+  whiteboard_height?: number | null
+  /** Реальная ширина доски на момент сохранения (px) — пишется рядом со strokes в ответе. */
+  whiteboard_width?: number | null
 }
