@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<!--
+    ============================================================================
+    calibrate.html — автономная (standalone) версия Calibrate.vue
+    ============================================================================
+
+    ЧТО ЭТО:
+      Это обычный HTML-файл, который открывается двойным кликом в браузере без
+      сборки Nuxt/Vite. Он повторяет функционал и интерфейс Vue-компонента
+      Calibrate.vue (калибровка взгляда через WebGazer.js + показ "прицела"),
+      но написан на чистом JavaScript с подробными комментариями.
+
+    ЗАЧЕМ:
+      Это заготовка/полигон для разработчика, которому нужно придумать, как
+      анализировать видео с устройства с ДВУМЯ камерами (например, два глаза,
+      стерео-пара, фронтальная + боковая и т.п.).
+      Здесь показан основной поток данных WebGazer: точки калибровки ->
+      regression-модель -> поток координат взгляда (gaze listener).
+
+    ВАЖНО ПРО ДВЕ КАМЕРЫ:
+      WebGazer.js по умолчанию работает с ОДНОЙ камерой (он сам открывает
+      getUserMedia). Для двух камер есть два подхода:
+        1) Запустить два отдельных экземпляра WebGazer в двух iframe/окнах и
+           сопоставлять потоки по времени (см. секцию "ДВЕ КАМЕРЫ" ниже).
+        2) Использовать WebGazer ТОЛЬКО для калибровки/эталона, а собственное
+           покадровое распознавание на второй камере делать через MediaPipe
+           Face Mesh (см. test.html — там это и реализовано).
+      Реальные ограничения: большинство браузеров разрешают одновременно
+      открывать несколько камер, но не все; WebGazer можно перевести в режим
+      "использовать готовый video-элемент" — см. webgazer.params.videoElement
+      (в разных версиях API отличается, проверяйте свою сборку).
+
+    ЗАВИСИМОСТИ (Что подключено и как):
+      WebGazer.js — грузится через loadScript() ниже. Источники:
+        - Официальный репозиторий: https://github.com/brownhci/WebGazer
+        - npm-пакет (тот же код, собирается в dist/):
+              https://cdn.jsdelivr.net/npm/webgazer@3.5.3/dist/webgazer.js
+              https://unpkg.com/webgazer@3.5.3/dist/webgazer.js
+          ВНИМАНИЕ: старый путь gh/brownhci/WebGazer@master/build/webgazer.js
+          теперь отдаёт 403 — в репозитории нет собранного build/webgazer.js
+          для gh-доставки jsDelivr. Используем npm-пакет.
+        - Официальный сайт:        https://webgazer.cs.brown.edu/
+      MediaPipe Face Mesh (нужна WebGazer'у для "лица") грузится САМИМ WebGazer
+      по пути  webgazer.params.faceMeshSolutionPath. Официальный CDN:
+        https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/
+      Порядок поиска источника:
+        1) Локальная копия проекта: ../public/libs/webgazer/webgazer.js
+           (если положить этот html в public — путь станет /libs/... )
+        2) CDN (jsDelivr) — если локальной копии нет.
+
+    ЗАПУСК:
+      Браузер требует HTTPS или localhost для доступа к камере.
+      Откройте через любой локальный сервер, например:
+           python3 -m http.server 5500
+           # затем http://localhost:5500/app/components/video/calibrate.html
+-->
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Калибровка взгляда (standalone)</title>
+
+  <style>
+    /* ---------------------------------------------------------------------
+       Стили. Взрослый вариант: минимум зависимостей, без Tailwind/Nuxt UI.
+       Кнопки и точки калибровки нарисованы "вручную" через CSS.
+       --------------------------------------------------------------------- */
+    :root {
+      --primary: #3b82f6;      /* синий акцент (замена Nuxt UI "primary") */
+      --primary-dark: #2563eb;
+      --red: #ef4444;
+      --green: #22c55e;
+      --bg: #f8fafc;
+      --text: #0f172a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    .page-title { margin: 0 0 4px; font-size: 20px; }
+    .page-hint  { margin: 0 0 20px; color: #64748b; font-size: 14px; max-width: 760px; }
+
+    /* Кнопка "Калибровка камеры" */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      background: var(--primary);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .btn:hover { background: var(--primary-dark); }
+
+    /* --------------------------------------------------------------------
+       Модальное окно (90vw x 90vh), как UModal в оригинале
+       -------------------------------------------------------------------- */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: none;                 /* показываем через .is-open */
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,.5);
+      z-index: 1000;
+    }
+    .modal-backdrop.is-open { display: flex; }
+
+    .modal-content {
+      position: relative;
+      width: 90vw;
+      height: 90vh;
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+
+    /* Слой загрузки */
+    .loading {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 50;
+      background: rgba(248,250,252,.92);
+    }
+    .loading.is-visible { display: flex; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #e2e8f0;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Слой с точками калибровки */
+    .calibrating-layer {
+      position: absolute;
+      inset: 0;
+      display: none;
+    }
+    .calibrating-layer.is-visible { display: block; }
+
+    /* Точка калибровки */
+    .calib-point {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      margin-left: -20px;
+      margin-top: -20px;
+      border-radius: 50%;
+      border: 2px solid var(--red);
+      background: rgba(239,68,68,.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 10;
+      box-shadow: 0 1px 3px rgba(0,0,0,.15);
+      transition: transform .2s, background .2s, border-color .2s;
+    }
+    .calib-point:hover { transform: scale(1.1); background: rgba(239,68,68,.4); }
+    .calib-point .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--red);
+    }
+    /* Точка уже "откалибрована" */
+    .calib-point.done {
+      border-color: var(--green);
+      background: rgba(34,197,94,.2);
+      transform: scale(.9);
+      cursor: default;
+    }
+    .calib-point.done .dot { background: var(--green); }
+
+    /* Плавный "прицел" взгляда */
+    .gaze-dot {
+      position: fixed;
+      left: 0; top: 0;
+      z-index: 9999;
+      pointer-events: none;
+      transform: translate3d(-100px,-100px,0); /* начальное положение вне экрана */
+      will-change: transform;
+    }
+    .gaze-dot::before {
+      content: "";
+      position: absolute;
+      left: -24px; top: -24px;
+      width: 48px; height: 48px;
+      /* Прицел нарисован на CSS: круг + перекрестие */
+      background:
+        radial-gradient(circle, transparent 10px, rgba(59,130,246,.9) 11px, rgba(59,130,246,.9) 13px, transparent 14px),
+        linear-gradient(rgba(59,130,246,.9), rgba(59,130,246,.9)) center/2px 48px no-repeat,
+        linear-gradient(rgba(59,130,246,.9), rgba(59,130,246,.9)) center/48px 2px no-repeat;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.4));
+      opacity: .8;
+    }
+
+    /* Плашка-подсказка сверху */
+    .hint-bar {
+      position: absolute;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.75);
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 500;
+      z-index: 20;
+      box-shadow: 0 4px 12px rgba(0,0,0,.25);
+      white-space: nowrap;
+    }
+
+    /* Кнопка закрытия (чтобы можно было выйти без Esc) */
+    .modal-close {
+      position: absolute;
+      top: 12px; right: 12px;
+      z-index: 60;
+      width: 36px; height: 36px;
+      border: none; border-radius: 50%;
+      background: rgba(0,0,0,.55);
+      color: #fff; font-size: 20px; line-height: 1;
+      cursor: pointer;
+    }
+    .modal-close:hover { background: rgba(0,0,0,.8); }
+
+    /* Оригинальные элементы WebGazer, которые мы прячем, но оставляем в DOM */
+    #webgazerVideoContainer, #webgazerVideoFeed, #webgazerFaceOverlay,
+    #webgazerFaceFeedbackBox, #webgazerGazeDot {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+  <h1 class="page-title">Калибровка взгляда — standalone</h1>
+  <p class="page-hint">
+    Автономная версия компонента <code>Calibrate.vue</code>. Смотрите на точки и
+    кликайте по ним — WebGazer строит regression-модель и рисует «прицел» там,
+    куда вы смотрите. Калибровка сохраняется в localStorage под ключом
+    <code>video_calibration</code>.
+  </p>
+
+  <button id="openBtn" class="btn">▶ Калибровка камеры</button>
+
+  <!-- ======================= Модальное окно ======================= -->
+  <div id="modal" class="modal-backdrop">
+    <div class="modal-content">
+      <button id="closeBtn" class="modal-close" title="Закрыть">&times;</button>
+
+      <!-- Загрузка: пока грузится WebGazer / запускается камера -->
+      <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p style="font-size:18px;font-weight:500;">Запуск камеры...</p>
+      </div>
+
+      <!-- Слой калибровки: точки + прицел + подсказка -->
+      <div id="calibrating" class="calibrating-layer">
+        <!-- Точки создаются в JS (createCalibrationPoints) -->
+
+        <!-- Прицел (плавный) -->
+        <div id="gazeDot" class="gaze-dot" style="display:none;"></div>
+
+        <!-- Подсказка -->
+        <div class="hint-bar">
+          <span>ℹ Смотрите прямо на точки и кликайте по ним (<span id="progress">0</span> / 9)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* =========================================================================
+   1. КОНСТАНТЫ И СОСТОЯНИЕ
+   ========================================================================= */
+
+// 9 точек в процентах от размеров окна (как в Calibrate.vue)
+const CALIBRATION_POINTS = [
+  { id: 1, x: 10, y: 10 }, { id: 2, x: 50, y: 10 }, { id: 3, x: 90, y: 10 },
+  { id: 4, x: 10, y: 50 }, { id: 5, x: 50, y: 50 }, { id: 6, x: 90, y: 50 },
+  { id: 7, x: 10, y: 90 }, { id: 8, x: 50, y: 90 }, { id: 9, x: 90, y: 90 },
+];
+
+// Сглаживание прицела
+const SMOOTHING = 0.15;        // коэффициент сглаживания (0.01..1.0)
+const JUMP_THRESHOLD = 400;    // px; если скачок больше — «телепортируем» прицел
+
+// Ключ калибровки в localStorage (должен совпадать с Vue-компонентом)
+const STORAGE_KEY = 'video_calibration';
+
+// Источники зависимостей.
+// PROD_CDN — официальный npm-пакет webgazer (dist-сборка).
+// LOCAL_*  — локальные копии в этом проекте.
+const WEBGAZER_SOURCES = [
+  // В проекте Nuxt файл лежит в public/libs/webgazer/webgazer.js,
+  // т.е. относительно корня сайта: /libs/webgazer/webgazer.js
+  '/libs/webgazer/webgazer.js',
+  // npm-пакет webgazer v3.5.3 (jsDelivr) — тот же официальный код.
+  // Путь gh/.../build/ больше не работает (403), поэтому берём из npm.
+  'https://cdn.jsdelivr.net/npm/webgazer@3.5.3/dist/webgazer.js',
+  // Резервный CDN с тем же пакетом.
+  'https://unpkg.com/webgazer@3.5.3/dist/webgazer.js',
+];
+// Базовый путь к файлам MediaPipe Face Mesh (официальный CDN).
+const MEDIAPIPE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/';
+
+// Состояние
+const state = {
+  isOpen: false,
+  isLoading: false,
+  isCalibrating: false,
+  calibrationProgress: 0,
+  clickedPoints: new Set(),
+};
+
+// Экземпляр WebGazer
+let webgazerInstance = null;
+
+// Переменные сглаживания (target = «сырая» цель, current = плавное положение)
+let targetX = -100, targetY = -100;
+let currentX = -100, currentY = -100;
+let animFrameId = null;
+
+/* =========================================================================
+   2. DOM-ЭЛЕМЕНТЫ
+   ========================================================================= */
+const els = {
+  openBtn: document.getElementById('openBtn'),
+  closeBtn: document.getElementById('closeBtn'),
+  modal: document.getElementById('modal'),
+  loading: document.getElementById('loading'),
+  calibrating: document.getElementById('calibrating'),
+  gazeDot: document.getElementById('gazeDot'),
+  progress: document.getElementById('progress'),
+};
+
+/* =========================================================================
+   3. НАРИСОВКА ТОЧЕК КАЛИБРОВКИ
+   ========================================================================= */
+function createCalibrationPoints() {
+  // Удаляем старые точки (если были)
+  els.calibrating.querySelectorAll('.calib-point').forEach(el => el.remove());
+
+  CALIBRATION_POINTS.forEach(pt => {
+    const btn = document.createElement('button');
+    btn.className = 'calib-point';
+    btn.dataset.id = String(pt.id);
+    btn.style.left = pt.x + '%';
+    btn.style.top = pt.y + '%';
+    // stopPropagation, чтобы клик по точке не «всплывал» и не мешал
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onCalibrationClick(e, pt.id);
+    });
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    btn.appendChild(dot);
+
+    els.calibrating.appendChild(btn);
+  });
+}
+
+function markPointDone(id) {
+  const btn = els.calibrating.querySelector(`.calib-point[data-id="${id}"]`);
+  if (btn) btn.classList.add('done');
+}
+
+/* =========================================================================
+   4. ЗАГРУЗКА ВНЕШНИХ БИБЛИОТЕК
+   ========================================================================= */
+
+/**
+ * Пробует загрузить скрипт по списку источников по очереди.
+ * Возвращает Promise, который резолвится, когда какой-то источник загрузился.
+ */
+function loadScriptWithFallback(sources) {
+  return new Promise((resolve, reject) => {
+    let index = 0;
+
+    const tryNext = () => {
+      if (index >= sources.length) {
+        reject(new Error('Не удалось загрузить скрипт ни из одного источника'));
+        return;
+      }
+      const src = sources[index++];
+
+      // Уже подключён — не грузим повторно
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        console.warn(`Источник не загрузился: ${src}, пробуем следующий...`);
+        script.remove();
+        tryNext();
+      };
+      document.head.appendChild(script);
+    };
+
+    tryNext();
+  });
+}
+
+/** Загрузка WebGazer (если ещё не загружен). */
+function loadWebGazer() {
+  if (window.webgazer) return Promise.resolve();
+  return loadScriptWithFallback(WEBGAZER_SOURCES);
+}
+
+/* =========================================================================
+   5. ОТКРЫТИЕ / ЗАКРЫТИЕ МОДАЛА
+   ========================================================================= */
+async function openModal() {
+  state.isOpen = true;
+  state.isLoading = true;
+  state.isCalibrating = false;
+  state.calibrationProgress = 0;
+  state.clickedPoints.clear();
+  targetX = targetY = currentX = currentY = -100;
+
+  // UI: показать модал + загрузку
+  els.modal.classList.add('is-open');
+  els.loading.classList.add('is-visible');
+  els.calibrating.classList.remove('is-visible');
+  els.gazeDot.style.display = 'none';
+  els.progress.textContent = '0';
+  createCalibrationPoints();
+
+  try {
+    await loadWebGazer();
+    webgazerInstance = window.webgazer;
+
+    // ---- ВАЖНО: путь к файлам MediaPipe Face Mesh ----
+    // Если локальная копия есть — используем её; иначе официальный CDN.
+    webgazerInstance.params.faceMeshSolutionPath = await resolveFaceMeshPath();
+
+    // Прячем стандартные элементы WebGazer (видео-превью, рамки и точки)
+    webgazerInstance.showVideoPreview(false);
+    webgazerInstance.showFaceOverlay(false);
+    webgazerInstance.showFaceFeedbackBox(false);
+    webgazerInstance.params.showGazeDot = false;
+
+    // Загружаем сохранённую калибровку, если есть
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const regression = JSON.parse(saved);
+        if (regression) webgazerInstance.setRegression(regression);
+      } catch (e) {
+        console.warn('Не удалось загрузить сохранённую калибровку', e);
+      }
+    }
+
+    // Получаем поток «сырых» координат взгляда
+    webgazerInstance.setGazeListener((data) => {
+      if (data == null) return;
+
+      // Резкий скачок (моргнул / отвернулся) — телепортируем прицел
+      if (Math.abs(data.x - targetX) > JUMP_THRESHOLD ||
+          Math.abs(data.y - targetY) > JUMP_THRESHOLD) {
+        currentX = data.x;
+        currentY = data.y;
+      }
+      targetX = data.x;
+      targetY = data.y;
+    });
+
+    // Запуск камеры + трекинга
+    await webgazerInstance.begin();
+
+    // UI: переключаемся на калибровку
+    state.isLoading = false;
+    state.isCalibrating = true;
+    els.loading.classList.remove('is-visible');
+    els.calibrating.classList.add('is-visible');
+    els.gazeDot.style.display = 'block';
+
+    // Запуск цикла анимации сглаживания
+    if (animFrameId) cancelAnimationFrame(animFrameId);
+    animateGaze();
+  } catch (e) {
+    console.error(e);
+    alert('Не удалось запустить камеру или загрузить WebGazer.\n' + e.message);
+    closeModal();
+  }
+}
+
+/**
+ * Определяет путь к Face Mesh для WebGazer.
+ * Пробует локальную копию (/libs/webgazer/mediapipe/face_mesh), если её нет —
+ * возвращает официальный CDN.
+ */
+async function resolveFaceMeshPath() {
+  const localPath = '/libs/webgazer/mediapipe/face_mesh';
+  try {
+    // HEAD-проверка наличия файла (какого-нибудь служебного)
+    const res = await fetch(localPath + '/face_mesh_solution_packed_assets_loader.js', { method: 'HEAD' });
+    if (res.ok) return localPath;
+  } catch (_) { /* игнорируем — пойдём на CDN */ }
+  return MEDIAPIPE_CDN;
+}
+
+function onCalibrationClick(e, id) {
+  if (!webgazerInstance) return;
+
+  // Сообщаем WebGazer эталонную позицию: «я смотрел сюда и кликнул»
+  webgazerInstance.recordScreenPosition(e.clientX, e.clientY, 'click');
+
+  if (!state.clickedPoints.has(id)) {
+    state.clickedPoints.add(id);
+    state.calibrationProgress++;
+    els.progress.textContent = String(state.calibrationProgress);
+    markPointDone(id);
+  }
+}
+
+function closeModal() {
+  if (!state.isOpen) return;
+  state.isOpen = false;
+  state.isCalibrating = false;
+
+  if (animFrameId) {
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }
+
+  if (webgazerInstance) {
+    try {
+      // Сохраняем regression-модель, чтобы не калибровать каждый раз
+      const regression = webgazerInstance.getRegression();
+      if (regression) localStorage.setItem(STORAGE_KEY, JSON.stringify(regression));
+    } catch (e) {
+      console.error('Ошибка при сохранении калибровки', e);
+    }
+
+    webgazerInstance.clearGazeListener();
+    webgazerInstance.end();
+    webgazerInstance = null;
+  }
+
+  // UI
+  els.modal.classList.remove('is-open');
+  els.loading.classList.remove('is-visible');
+  els.calibrating.classList.remove('is-visible');
+}
+
+/* =========================================================================
+   6. СГЛАЖИВАНИЕ ПРИЦЕЛА (requestAnimationFrame)
+   ========================================================================= */
+function animateGaze() {
+  if (!state.isOpen) return;
+
+  if (targetX > 0 && targetY > 0) {
+    // Экспоненциальное сглаживание: current плавно догоняет target
+    currentX = currentX + SMOOTHING * (targetX - currentX);
+    currentY = currentY + SMOOTHING * (targetY - currentY);
+
+    // translate3d -> аппаратное ускорение
+    els.gazeDot.style.transform = `translate3d(${currentX}px, ${currentY}px, 0)`;
+  }
+
+  animFrameId = requestAnimationFrame(animateGaze);
+}
+
+/* =========================================================================
+   7. СОБЫТИЯ
+   ========================================================================= */
+els.openBtn.addEventListener('click', openModal);
+els.closeBtn.addEventListener('click', closeModal);
+// Клик по затемнённому фону — закрыть
+els.modal.addEventListener('click', (e) => {
+  if (e.target === els.modal) closeModal();
+});
+// Esc — закрыть
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.isOpen) closeModal();
+});
+// Убираемся при закрытии страницы
+window.addEventListener('beforeunload', closeModal);
+
+/* =========================================================================
+   8. ДВЕ КАМЕРЫ — заметки для разработчика
+   =========================================================================
+   Ниже — не исполняемый код, а «карта» того, что можно попробовать.
+
+   A) Получить список камер (у большинства камер нет меток, пока не дано
+      разрешение — поэтому сначала просим доступ):
+        const s = await navigator.mediaDevices.getUserMedia({ video: true });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const cams = devices.filter(d => d.kind === 'videoinput');
+
+   B) Открыть конкретную камеру по deviceId:
+        navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: cams[1].deviceId }, width: 640, height: 480 }
+        });
+
+   C) WebGazer на конкретном видео — в большинстве сборок WebGazer сам
+      открывает камеру. Чтобы использовать уже открытый поток, обычно делают
+      обёртку-мок: переопределяют navigator.mediaDevices.getUserMedia ДО
+      вызова webgazer.begin(), возвращая нужный stream. Пример скелета:
+
+        const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async () => myStream; // myStream — с нужной камеры
+        await webgazer.begin();
+        navigator.mediaDevices.getUserMedia = originalGetUserMedia; // вернуть обратно
+
+   D) Вторую камеру обрабатывайте отдельно через MediaPipe Face Mesh
+      (см. test.html) и сопоставляйте кадры по performance.now():
+        const t = performance.now();
+        // объединённая запись: { t, gaze: {x,y}, face2: {...landmarks} }
+
+   E) Всегда корректно останавливайте все дорожки, иначе камера "горит":
+        stream.getTracks().forEach(tr => tr.stop());
+   ========================================================================= */
+</script>
+</body>
+</html>

@@ -153,6 +153,63 @@ export interface LessonBreadcrumb {
   title: string
 }
 
+// Роль урока для текущего ученика в списке актуальных уроков
+export type ActualLessonScope = 'unassigned' | 'assigned' | 'continue' | 'grades'
+
+export interface ActualLessonScopeMeta {
+  color: 'neutral' | 'warning' | 'info' | 'success'
+  icon: string
+  label: string
+  // null — урок уже пройден и оценён, открывать некуда
+  href: string | null
+}
+
+export const ACTUAL_LESSON_SCOPES: Record<ActualLessonScope, ActualLessonScopeMeta> = {
+  unassigned: { color: 'neutral', icon: 'i-lucide-user-plus', label: 'Назначить и приступить', href: '/learn/:id' },
+  assigned: { color: 'info', icon: 'i-lucide-book-open', label: 'Начать прохождение', href: '/learn/:id' },
+  continue: { color: 'warning', icon: 'i-lucide-circle-play', label: 'Продолжить', href: '/learn/:id' },
+  grades: { color: 'success', icon: 'i-lucide-award', label: 'Оценено', href: null },
+}
+
+export function resolveActualLessonScopeMeta(
+  scope: ActualLessonScope | null | undefined,
+  lessonId: number,
+): ActualLessonScopeMeta {
+  const meta = ACTUAL_LESSON_SCOPES[scope ?? 'unassigned'] ?? ACTUAL_LESSON_SCOPES.unassigned
+  return {
+    ...meta,
+    href: meta.href ? meta.href.replace(':id', String(lessonId)) : null,
+  }
+}
+
+// Оценка урока (actual_lesson_scope === 'grades')
+export interface LessonGrade {
+  // 0.0 … 1.0
+  grade: number
+  status: string
+}
+
+// Нормализация 0.0…1.0 в шкалу 0.0…5.0 с округлением до 1 знака.
+export function normalizeGradeToRuScale(value: number): number {
+  const v = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0
+  return Math.round(v * 50) / 10 // 0.0 … 5.0
+}
+
+// Цвет по округлению вверх до целой оценки: 1 — чёрный, 2 — красный,
+// 3 — оранжевый, 4 — зелёный, 5 — самый яркий зелёный.
+export const RU_GRADE_MARK_COLORS: Record<1 | 2 | 3 | 4 | 5, string> = {
+  1: '#000000',
+  2: '#dc2626',
+  3: '#f97316',
+  4: '#1689a3',
+  5: '#00e676',
+}
+
+export function gradeMarkColor(mark: number): string {
+  const bucket = Math.min(5, Math.max(1, Math.ceil(mark))) as 1 | 2 | 3 | 4 | 5
+  return RU_GRADE_MARK_COLORS[bucket]
+}
+
 export interface LessonListItem {
   id: number
   title: string | null
@@ -164,6 +221,8 @@ export interface LessonListItem {
   created_at: string | null
   updated_at: string | null
   taxonomy_ids?: number[]
+  actual_lesson_scope?: ActualLessonScope | null
+  grade?: LessonGrade | null
 }
 export interface LessonsPage {
   data: LessonListItem[]

@@ -1,6 +1,7 @@
 <!-- app/components/Education/LessonListElement.vue -->
 <script setup lang="ts">
 import type { LessonListItem, LessonTypeOption } from '~/types/lesson'
+import { lessonTypeCssVars } from '~/utils/lessonType'
 
 interface TaxonomyNode {
   id: number
@@ -20,11 +21,17 @@ const props = withDefaults(
     taxonomyTree?: TaxonomyNode[]
     lessonTypes?: LessonTypeOption[]
     emitOpenOn?: 'click' | 'dblclick'
+    // Урок открывается только для чтения (пройден и оценён)
+    disabled?: boolean
+    // Нажатие на карточку не эмитит open — переход выполняет контент слота actions
+    cardReadonly?: boolean
   }>(),
   {
     taxonomyTree: () => [],
     lessonTypes: () => [],
     emitOpenOn: 'click',
+    disabled: false,
+    cardReadonly: false,
   }
 )
 
@@ -71,6 +78,9 @@ const lessonType = computed<LessonTypeOption | null>(() => {
   return props.lessonTypes.find((t) => t.code === code) ?? null
 })
 
+// Контур + заливка карточки по типу урока (home_work, class_work, …)
+const typeCssVars = computed(() => lessonTypeCssVars(lessonType.value))
+
 const openEvent = computed(() => props.emitOpenOn)
 
 function displayTitle(l: LessonWithTaxonomies): string {
@@ -96,11 +106,12 @@ function formatDate(iso: string | null): string {
 }
 
 function onCardClick(): void {
-  if (dragActive) return
+  if (dragActive || props.cardReadonly) return
   emit('open', props.lesson.id)
 }
 
 function onCardDblClick(): void {
+  if (props.cardReadonly) return
   if (props.emitOpenOn !== 'dblclick') {
     emit('open-dblclick', props.lesson.id)
   }
@@ -123,7 +134,10 @@ function onCardKeydown(ev: KeyboardEvent): void {
 let dragActive = false
 
 function onCardDragStart(ev: DragEvent): void {
-  if (!ev.dataTransfer) return
+  if (props.disabled || !ev.dataTransfer) {
+    ev.preventDefault()
+    return
+  }
   dragActive = true
 
   const source = {
@@ -156,20 +170,48 @@ function onCardDragEnd(): void {
   <div
     role="button"
     tabindex="0"
-    draggable="true"
-    class="lesson-card group w-full text-left rounded-lg border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] transition-colors hover:border-[var(--ui-primary,#3b82f6)] cursor-grab active:cursor-grabbing select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary,#3b82f6)] overflow-hidden border-l-4"
-    :class="lesson.published
-      ? 'border-l-emerald-500'
-      : 'border-l-slate-300 dark:border-l-slate-600'"
+    :draggable="!disabled"
+    class="lesson-card group flex items-stretch w-full text-left rounded-lg border transition-colors select-none overflow-hidden border-l-4"
+    :style="typeCssVars
+      ? { ...typeCssVars, borderColor: 'var(--lesson-type-border)', backgroundColor: 'var(--lesson-type-bg)' }
+      : undefined"
+    :class="[
+      typeCssVars
+        ? ''
+        : lesson.published
+          ? 'border-[var(--ui-border,#e5e7eb)] border-l-emerald-500 bg-[var(--ui-bg,#ffffff)]'
+          : 'border-[var(--ui-border,#e5e7eb)] border-l-slate-300 dark:border-l-slate-600 bg-[var(--ui-bg,#ffffff)]',
+      disabled
+        ? 'cursor-default opacity-80'
+        : 'cursor-grab active:cursor-grabbing hover:border-[var(--ui-primary,#3b82f6)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary,#3b82f6)]',
+    ]"
     :aria-label="`Открыть урок: ${displayTitle(lesson)}`"
+    :aria-disabled="disabled"
     @[openEvent]="onCardClick"
     @dblclick="onCardDblClick"
     @keydown="onCardKeydown"
     @dragstart="onCardDragStart"
     @dragend="onCardDragEnd"
   >
+    <!-- Слот правой части (кнопка действия); клики не всплывают на карточку.
+         Белая подложка под кнопкой, чтобы цвета кнопки не смешивались с фоном карточки. -->
     <div
-      class="p-3.5 transition-opacity duration-200"
+      v-if="$slots.actions"
+      class="order-2 flex shrink-0 items-center px-2"
+      @click.stop
+      @dblclick.stop
+    >
+      <div class="action-plate w-[145px] rounded-lg p-0.5">
+        <slot
+          name="actions"
+          :lesson="lesson"
+          :disabled="disabled"
+        />
+      </div>
+    </div>
+
+    <div
+      class="order-1 flex-1 min-w-0 p-3.5 transition-opacity duration-200"
       :class="lesson.published ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'"
     >
       <!-- Верхняя строка: ID, счётчик блоков, дата -->
@@ -185,7 +227,11 @@ function onCardDragEnd(): void {
         <span
           v-if="lessonType"
           class="inline-flex items-center gap-1 rounded-full border px-1.5 leading-tight whitespace-nowrap"
-          :style="{ borderColor: lessonType.color || undefined, color: lessonType.color || undefined }"
+          :style="{
+            borderColor: 'var(--lesson-type-badge)',
+            color: 'var(--lesson-type-badge)',
+            backgroundColor: 'var(--lesson-type-bg)',
+          }"
           :title="lessonType.description || undefined"
         >
           <UIcon name="i-lucide-tag" class="w-3 h-3" />
@@ -259,3 +305,15 @@ function onCardDragEnd(): void {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Белая подложка под кнопкой действия: кнопка рисуется поверх неё */
+.action-plate {
+  background-color: #ffffff;
+}
+
+/* Кнопка действия занимает всю фиксированную ширину подложки */
+.action-plate :deep(button) {
+  width: 100%;
+}
+</style>

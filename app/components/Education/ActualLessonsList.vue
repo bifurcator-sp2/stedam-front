@@ -1,7 +1,8 @@
 <!-- app/components/Education/ActualLessonsList.vue -->
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { LessonListItem, LessonsPage } from '~/types/lesson'
+import { ACTUAL_LESSON_SCOPES, gradeMarkColor, normalizeGradeToRuScale, resolveActualLessonScopeMeta } from '~/types/lesson'
+import type { ActualLessonScope, ActualLessonScopeMeta, LessonListItem, LessonsPage, LessonTypeOption } from '~/types/lesson'
 
 // ==================== Зависимости ====================
 
@@ -17,6 +18,38 @@ function getSearchFromQuery(): string {
 }
 
 const currentSearch = computed<string>(() => getSearchFromQuery())
+
+// ==================== Фильтр (из query) ====================
+
+// Цвет/иконка берутся из ACTUAL_LESSON_SCOPES — чтобы кнопки фильтров
+// совпадали с кнопками уроков в списке
+const FILTERS = [
+  { value: 'unassigned', label: 'Выбрать урок' },
+  { value: 'assigned', label: 'Нужно пройти' },
+  { value: 'continue', label: 'Продолжить прохождение' },
+  { value: 'grades', label: 'Мои оценки' },
+].map(f => ({
+  ...f,
+  ...ACTUAL_LESSON_SCOPES[f.value as ActualLessonScope],
+})) as { value: ActualLessonScope; label: string; icon: string; color: ActualLessonScopeMeta['color'] }[]
+
+type FilterValue = ActualLessonScope
+
+function getFilterFromQuery(): FilterValue | '' {
+  const raw = route.query.filter as string | string[] | undefined
+  const v = (Array.isArray(raw) ? raw[0] : raw) || ''
+  return FILTERS.some(f => f.value === v) ? (v as FilterValue) : ''
+}
+
+const currentFilter = computed<FilterValue | ''>(() => getFilterFromQuery())
+
+// Переключение фильтра: ставим свой параметр, убираем page, сохраняем поиск
+function setFilter(value: FilterValue) {
+  const next: FilterValue | '' = currentFilter.value === value ? '' : value
+  router.push({
+    query: { ...route.query, filter: next || undefined, page: undefined },
+  })
+}
 
 // ==================== Пагинация (из query) ====================
 
@@ -91,6 +124,7 @@ async function loadLessons(opts: { refresh?: boolean } = {}) {
         page: currentPage.value,
         per_page: PER_PAGE,
         search: currentSearch.value || undefined,
+        filter: currentFilter.value || undefined,
       },
       refresh: opts.refresh,
     })
@@ -103,7 +137,7 @@ async function loadLessons(opts: { refresh?: boolean } = {}) {
   }
 }
 
-watch([currentPage, currentSearch], () => loadLessons(), { immediate: true })
+watch([currentPage, currentSearch, currentFilter], () => loadLessons(), { immediate: true })
 
 // Принудительное обновление списка (игнорируя кэш useApi)
 function refresh() {
@@ -115,6 +149,21 @@ defineExpose({ refresh })
 const lessons = computed<LessonListItem[]>(() => data.value?.data ?? [])
 const meta = computed(() => data.value?.meta ?? null)
 
+// Справочник типов уроков (для цвета контура/бейджа): сначала из ответа списка,
+// иначе — тот же кэш, что в CourseTheme
+const { data: lessonTypesCatalog } = await useAsyncData('lesson-types-catalog', async () => {
+  try {
+    const res = await api.get<{ data?: LessonTypeOption[] }>('/lessons/types', { silent: true })
+    return res?.data ?? []
+  } catch {
+    return []
+  }
+})
+
+const lessonTypes = computed<LessonTypeOption[]>(() =>
+  data.value?.lesson_types?.length ? data.value.lesson_types : (lessonTypesCatalog.value ?? []),
+)
+
 // ==================== Переходы ====================
 
 function goToPage(page: number) {
@@ -122,8 +171,27 @@ function goToPage(page: number) {
   currentPage.value = page
 }
 
-function openLesson(id: number) {
-  router.push({ path: '/learn/' + String(id) })
+// Роль урока (unassigned/assigned/continue/grades) → цвет, иконка, подпись, ссылка
+function scopeMeta(l: LessonListItem) {
+  return resolveActualLessonScopeMeta(l.actual_lesson_scope, l.id)
+}
+
+function onLessonOpen(l: LessonListItem) {
+  const meta = scopeMeta(l)
+  if (!meta.href) return
+  router.push(meta.href)
+}
+
+// Оценка (0.0…1.0) → шкала 0.0…5.0 с округлением до 1 знака
+function lessonMark(l: LessonListItem): number | null {
+  if (l.grade?.grade == null) return null
+  return normalizeGradeToRuScale(l.grade.grade)
+}
+
+// Цвет фона по округлению вверх до целой оценки; текст всегда белый
+function lessonMarkStyle(l: LessonListItem): { backgroundColor: string } | undefined {
+  const mark = lessonMark(l)
+  return mark ? { backgroundColor: gradeMarkColor(mark) } : undefined
 }
 </script>
 
@@ -154,6 +222,22 @@ function openLesson(id: number) {
       </button>
     </div>
 
+    <!-- === Фильтры === -->
+    <div class="flex flex-nowrap gap-2">
+      <UButton
+        v-for="f in FILTERS"
+        :key="f.value"
+        :label="f.label"
+        :icon="f.icon"
+        size="sm"
+        class="flex-1 min-w-0 justify-center"
+        :ui="{ base: 'whitespace-normal' }"
+        :color="f.color"
+        :variant="currentFilter === f.value ? 'solid' : 'subtle'"
+        @click="setFilter(f.value)"
+      />
+    </div>
+
     <!-- === Контент с оверлеем === -->
     <LoadingOverlay :loading="pending">
       <!-- === Ошибка === -->
@@ -176,33 +260,48 @@ function openLesson(id: number) {
       <div v-else class="flex flex-col gap-5">
         <ul class="flex flex-col gap-2">
           <li v-for="l in lessons" :key="l.id">
-            <button
-              type="button"
-              class="group w-full flex items-center gap-4 p-2 rounded-lg text-left
-                     bg-elevated hover:bg-[var(--ui-bg-elevated,#1f2937)]
-                     transition-colors cursor-pointer
-                     focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              @click="openLesson(l.id)"
+            <EducationLessonListElement
+              :lesson="l"
+              :lesson-types="lessonTypes"
+              :disabled="scopeMeta(l).href === null"
+              card-readonly
+              @open="onLessonOpen(l)"
             >
-              <!-- Слева: сам урок -->
-              <div class="flex-1 min-w-0">
-                <EducationLessonListElement :lesson="l" />
-              </div>
+              <!-- Кнопка справа зависит от actual_lesson_scope -->
+              <template #actions>
+                <!-- grades: статус + нормализованная оценка -->
+                <UButton
+                  v-if="l.actual_lesson_scope === 'grades'"
+                  :icon="scopeMeta(l).icon"
+                  color="neutral"
+                  variant="solid"
+                  class="flex-col gap-1 px-3 py-2 text-white"
+                  :style="lessonMarkStyle(l)"
+                  :aria-disabled="true"
+                >
+                  <span class="text-[11px] leading-none font-medium">
+                    {{ l.grade?.status ?? scopeMeta(l).label }}
+                  </span>
+                  <span
+                    v-if="lessonMark(l)"
+                    class="text-2xl leading-none font-bold"
+                  >
+                    {{ lessonMark(l) }}
+                  </span>
+                </UButton>
 
-              <!-- Справа: крупная иконка «продолжить прохождение» -->
-              <span
-                class="shrink-0 flex flex-col items-center justify-center gap-1
-                       px-3 py-2 rounded-lg
-                       bg-primary/10 text-primary
-                       group-hover:bg-primary group-hover:text-inverted
-                       transition-colors"
-              >
-                <UIcon name="i-lucide-circle-play" class="w-8 h-8" />
-                <span class="text-[11px] leading-none font-medium">
-                  Приступить к уроку
-                </span>
-              </span>
-            </button>
+                <UButton
+                  v-else
+                  :icon="scopeMeta(l).icon"
+                  :label="scopeMeta(l).label"
+                  :color="scopeMeta(l).color"
+                  variant="subtle"
+                  class="flex-col gap-1 px-3 py-2 text-[11px]"
+                  :aria-disabled="scopeMeta(l).href === null"
+                  @click="onLessonOpen(l)"
+                />
+              </template>
+            </EducationLessonListElement>
           </li>
         </ul>
 

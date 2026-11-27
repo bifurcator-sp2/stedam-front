@@ -1,7 +1,8 @@
 <!-- app/components/Constructor/TeacherLessons.vue -->
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
+import type { CourseListItem } from '~/types/course'
 
 const api = useApi()
 const route = useRoute()
@@ -60,37 +61,20 @@ function createCourse() {
 }
 
 // ==================== Выбранный курс ====================
-const selectedCourseId = ref<number | null>(null)
+const selectedCourse = ref<CourseListItem | null>(null)
 
-function onSelectCourse(id: number) {
-  if (selectedCourseId.value === id) {
-    selectedCourseId.value = null
-  } else {
-    selectedCourseId.value = id
-  }
+function onCourseSelected(course: CourseListItem) {
+  selectedCourse.value = course
 }
 
-// ==================== Клик вне правой панели ====================
-function handleGlobalClick(event: MouseEvent) {
-  if (selectedCourseId.value === null) return
-
-  const target = event.target as HTMLElement
-  if (!target || !target.closest) return
-
-  if (target.closest('.cursor-col-resize')) return
-  if (target.closest('.right-panel-content')) return
-  if (target.closest('.course-card')) return
-
-  selectedCourseId.value = null
+function onCourseUnselected() {
+  selectedCourse.value = null
 }
 
-onMounted(() => {
-  document.addEventListener('pointerdown', handleGlobalClick)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', handleGlobalClick)
-})
+// Двойной клик — явное открытие конструктора курса
+function onOpenCourse(course: CourseListItem) {
+  router.push({ path: '/construct-course', query: { id: String(course.id) } })
+}
 </script>
 
 <template>
@@ -111,7 +95,7 @@ onBeforeUnmount(() => {
   >
     <template #left>
       <EducationTaxonomy
-        :data="taxonomyData"
+        :data="taxonomyData ?? undefined"
         :pending="taxonomyPending"
         :error="taxonomyError"
         :refresh="taxonomyRefresh"
@@ -134,22 +118,31 @@ onBeforeUnmount(() => {
     </template>
 
     <template #main>
-      <EducationCoursesSearch
-        :selected-taxonomy-id="selectedTaxonomyId"
-        :taxonomy-data="taxonomyData"
-        :autoRefresh = "true"
-        @open-taxonomy="onBreadcrumbOpen"
-        @select-course="onSelectCourse"
-      />
+      <div class="left-panel-content" @click.self="onCourseUnselected">
+        <EducationCoursesSearch
+          :selected-taxonomy-id="selectedTaxonomyId"
+          :taxonomy-data="taxonomyData ?? undefined"
+          :autoRefresh = "true"
+          @open-taxonomy="onBreadcrumbOpen"
+          @course-selected="onCourseSelected"
+          @course-unselected="onCourseUnselected"
+          @open-course="onOpenCourse"
+        />
+      </div>
     </template>
 
     <template #right>
-      <div v-if="!selectedCourseId" class="flex flex-col items-center justify-center h-full p-6 text-center text-slate-400">
+      <div v-if="!selectedCourse" class="right-panel-content flex flex-col items-center justify-center h-full p-6 text-center text-slate-400">
         <UIcon name="i-lucide-book-open" class="w-10 h-10 mb-3 opacity-20" />
         <p class="text-sm">Выберите курс для просмотра</p>
       </div>
 
-
+      <EducationCoursePropsPanel
+        v-else
+        :key="selectedCourse.id"
+        :course="selectedCourse"
+        :taxonomy-tree="taxonomyData ?? []"
+      />
     </template>
   </ConstructPanels>
 </template>

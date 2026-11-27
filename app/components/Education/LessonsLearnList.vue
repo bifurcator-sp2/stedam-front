@@ -116,7 +116,20 @@ function pageTo(page: number) {
             :lesson="l"
             :lesson-types="lessonTypes"
             @open="openLesson"
-          />
+          >
+            <template #actions>
+              <span
+                class="flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-lg
+                       bg-primary/10 text-primary group-hover:bg-primary group-hover:text-inverted
+                       transition-colors"
+              >
+                <UIcon name="i-lucide-circle-play" class="w-8 h-8" />
+                <span class="text-[11px] leading-none font-medium">
+                  Приступить к уроку
+                </span>
+              </span>
+            </template>
+          </EducationLessonListElement>
         </li>
       </ul>
 

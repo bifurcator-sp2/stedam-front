@@ -50,6 +50,7 @@ function isHomeWorkDrag(): boolean {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { LessonTypeOption } from '~/types/lesson'
 import type { ThemeLessonDrag, ThemeModel } from '~/types/course'
+import { normalizeLessonColor } from '~/utils/lessonType'
 
 // ==================== Props / Emits ====================
 
@@ -494,13 +495,7 @@ function formatTimeGap(gap: number | null): string {
 }
 
 // Цвет типа урока (как бейдж в Education/LessonListElement).
-function normalizeColor(raw: string | null | undefined): string | null {
-  const c = (raw ?? '').trim()
-  if (!c) return null
-  if (/^#([0-9a-f]{3,8})$/i.test(c)) return c
-  if (/^([0-9a-f]{3,8})$/i.test(c)) return `#${c}`
-  return c
-}
+const normalizeColor = normalizeLessonColor
 
 // Зависящий от цвета класс на data-type-accent: стили в <style scoped> ниже
 // выигрывают по специфичности у утилит .lesson-card.

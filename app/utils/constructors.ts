@@ -9,6 +9,9 @@ export interface SettingNode {
   allowed?: any[]
   purpose?: string
   public?: boolean
+  params?: Record<string, any>
+  description?: string
+  required?: boolean
   children?: SettingNode[]
 }
 
@@ -148,6 +151,78 @@ export function unmergeFlat(
   return result
 }
 
+// ==================== Обогащение настроек схемными метаданными ====================
+
+/** Не-boolean флаг трактуется как "не задан" (панель проверяет public === true). */
+function normalizeBool(value: unknown): boolean | undefined {
+  return value === true || value === false ? value : undefined
+}
+
+/** Ключи, которые берём из схемы без изменений. */
+const SCHEMA_META_KEYS = ['label', 'type', 'purpose', 'params', 'description', 'required'] as const
+
+/**
+ * Дополняет дерево настроек урока метаданными из схемы (label/type/params/...).
+ * Значения (default/public) остаются как в настройках урока, схема их не перетирает.
+ */
+export function enrichSettingsWithSchema(
+  rawSettings: SettingNode | null | undefined,
+  schema: SettingNode | null | undefined,
+): SettingNode | null {
+  if (!isPlainObject(rawSettings)) return null
+  return mergeSchemaNode(rawSettings, isPlainObject(schema) ? schema : undefined)
+}
+
+function mergeSchemaNode(raw: SettingNode, schema: SettingNode | undefined): SettingNode {
+  const result: SettingNode = { ...raw }
+
+  if (schema) {
+    for (const field of SCHEMA_META_KEYS) {
+      const value = schema[field]
+      if (value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0)) {
+        (result as any)[field] = value
+      }
+    }
+
+    const purpose = schema.params && typeof schema.params.purpose === 'string' ? schema.params.purpose : undefined
+    if (purpose) result.purpose = purpose
+
+    // Узлы-контейнеры (type 'array'/'object') — просто группы настроек
+    if (schema.type === 'array' || schema.type === 'object') {
+      delete result.type
+    }
+
+    const schemaPublic = normalizeBool(schema.public)
+    if (schemaPublic !== undefined) result.public = schemaPublic
+  }
+
+  const publicValue = normalizeBool(raw.public)
+  if (publicValue !== undefined) result.public = publicValue
+
+  if (Array.isArray(raw.children) && raw.children.length > 0) {
+    result.children = raw.children.map((child) => {
+      const schemaChild = schema?.children?.find((c) => c.key === child.key)
+      return mergeSchemaNode(child, schemaChild)
+    })
+  }
+
+  return result
+}
+
+// ==================== Очистка настроек перед сохранением ====================
+
+/** Убирает добавленные клиентом схемные метаданные (label/type/params/...), чтобы не менять формат сохранения. */
+export function stripSchemaMeta(node: SettingNode | null | undefined): SettingNode | null {
+  if (!isPlainObject(node)) return null
+
+  const copy: SettingNode = { ...node }
+  for (const field of SCHEMA_META_KEYS) delete (copy as any)[field]
+  if (Array.isArray(node.children) && node.children.length > 0) {
+    copy.children = node.children.map(child => stripSchemaMeta(child) as SettingNode)
+  }
+  return copy
+}
+
 // ==================== Public-настройки ====================
 
 export interface PublicSettingRef {
@@ -181,6 +256,20 @@ export function collectPublicSettingsWithPaths(
   return result
 }
 
+export function findNodeAtPath(
+  nodes: SettingNode[] | null | undefined,
+  path: number[],
+): SettingNode | null {
+  if (!Array.isArray(nodes) || path.length === 0) return null
+
+  const [head, ...rest] = path as [number, ...number[]]
+  const target = nodes[head]
+  if (!target) return null
+  if (rest.length === 0) return target
+
+  return findNodeAtPath(target.children, rest)
+}
+
 export function replaceNodeAtPath(
   nodes: SettingNode[],
   path: number[],
@@ -188,7 +277,7 @@ export function replaceNodeAtPath(
 ): SettingNode[] {
   if (path.length === 0) return nodes
 
-  const [head, ...rest] = path
+  const [head, ...rest] = path as [number, ...number[]]
   const target = nodes[head]
   if (target === undefined) return nodes
 

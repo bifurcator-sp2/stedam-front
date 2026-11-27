@@ -14,7 +14,7 @@ const props = withDefaults(
   defineProps<{
     course: CourseListItem
     taxonomyTree?: TaxonomyNode[]
-    emitOpenOn?: 'click' | 'dblclick'
+    emitOpenOn?: 'click' | 'dblclick' | 'none'
   }>(),
   {
     taxonomyTree: () => [],
@@ -54,7 +54,7 @@ const chain = computed(() => {
 
 const hasBreadcrumbs = computed(() => chain.value.length > 0)
 
-const openEvent = computed(() => props.emitOpenOn)
+const openEvent = computed(() => (props.emitOpenOn === 'none' ? undefined : props.emitOpenOn))
 
 function displayTitle(c: CourseListItem): string {
   const t = (c.title ?? '').trim()

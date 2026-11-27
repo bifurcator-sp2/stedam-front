@@ -1,6 +1,6 @@
 <!-- app/components/Education/CoursesSearch.vue -->
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, toValue, watch } from 'vue'
 import type { CourseListItem, CoursesPage } from '~/types/course'
 
 interface TaxonomyNode {
@@ -25,7 +25,9 @@ const router = useRouter()
 
 const emit = defineEmits<{
   (e: 'open-taxonomy', id: number): void
-  (e: 'select-course', id: number): void
+  (e: 'course-selected', course: CourseListItem): void
+  (e: 'course-unselected'): void
+  (e: 'open-course', course: CourseListItem): void
 }>()
 
 const currentTaxId = computed<number | undefined>(() => {
@@ -177,14 +179,25 @@ defineExpose({ refresh })
 const courses = computed<CourseListItem[]>(() => data.value?.data ?? [])
 const meta = computed(() => data.value?.meta ?? null)
 
-// ==================== Действия ====================
+// ==================== Выбранный курс ====================
+// Шаблон course-card рендерится в цикле; источник данных — всегда элемент списка.
 
-function openCourse(id: number) {
-  emit('select-course', id)
+function getCourse(id: any): CourseListItem | null {
+  const courseId = Number(toValue(id))
+  if (!Number.isFinite(courseId)) return null
+  return courses.value.find(c => c.id === courseId) ?? null
 }
 
-function openCourseInConstructor(id: number) {
-  router.push({ path: '/construct-course', query: { id: String(id) } })
+// Одиночный клик по курсу
+function onCourseClick(id: any) {
+  const course = getCourse(id)
+  if (course) emit('course-selected', course)
+}
+
+// Двойной клик по курсу
+function onCourseDblClick(id: any) {
+  const course = getCourse(id)
+  if (course) emit('open-course', course)
 }
 
 function onOpenTaxonomy(id: number) {
@@ -257,14 +270,23 @@ function goToPage(page: number) {
       <div v-else class="flex flex-col gap-5">
         <ul class="flex flex-col gap-2">
           <li v-for="c in courses" :key="c.id">
-            <EducationCourseListElement
-              :course="c"
-              :taxonomy-tree="resolvedTaxonomy"
-              emit-open-on="dblclick"
-              @open="openCourse"
-              @dblclick="openCourseInConstructor(c.id)"
-              @open-taxonomy="onOpenTaxonomy"
-            />
+            <div
+              role="button"
+              tabindex="0"
+              class="course-card w-full text-left cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ui-primary,#3b82f6)] rounded-lg"
+              :aria-label="`Выбрать курс: ${c.title || c.id}`"
+              @click="onCourseClick(c.id)"
+              @dblclick="onCourseDblClick(c.id)"
+              @keydown.enter.prevent="onCourseClick(c.id)"
+              @keydown.space.prevent="onCourseClick(c.id)"
+            >
+              <EducationCourseListElement
+                :course="c"
+                :taxonomy-tree="resolvedTaxonomy"
+                emit-open-on="none"
+                @open-taxonomy="onOpenTaxonomy"
+              />
+            </div>
           </li>
         </ul>
 

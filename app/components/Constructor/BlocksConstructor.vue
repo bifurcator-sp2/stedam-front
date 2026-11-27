@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import BlocksSettingsPanel from '~/components/Constructor/BlocksSettingsPanel.vue'
 import LoadingOverlay from '~/components/LoadingOverlay.vue'
 import ConstructPanels from '~/components/Constructor/ConstructPanels.vue'
+import BlockRenderer from '~/components/Constructor/BlockRenderer.vue'
 
 // ==================== Типы ====================
 
@@ -31,9 +32,12 @@ interface BlockItem {
 interface BlockResource {
   id: number
   code: string | null
+  name?: string | null
   title: string | null
   description: string | null
   settings: SettingNode | null
+  parent_block_index_ids?: number[] | null
+  published?: boolean | null
   is_test?: boolean | null
   is_proc?: boolean | null
   created_at: string
@@ -100,7 +104,85 @@ function iconOfSettings(settings: SettingNode | null | undefined): string {
 // ==================== Выбранный блок ====================
 
 const editingBlock = ref<BlockItem | null>(null)
+const previewBlock = ref<BlockItem | null>(null)
 const blockKey = ref(0)
+
+// id превью-блока для подсветки карточки (computed — без сужения типов в шаблоне)
+const previewId = computed(() => previewBlock.value?.id ?? null)
+
+const rightTitle = computed(() => (previewBlock.value ? 'Просмотр' : 'Свойства'))
+
+// ==================== Масштабирование превью (как в LessonsConstructor) ====================
+// Блок рендерится в виртуальной ширине VIRTUAL_WIDTH и зумится под фактическую
+// ширину контейнера правой панели — при ресайзе панели превью пересчитывается.
+
+const PREVIEW_VIRTUAL_WIDTH = 800
+
+const previewContainerRef = ref<HTMLElement | null>(null)
+const previewZoom = ref(1)
+
+let previewResizeObserver: ResizeObserver | null = null
+
+function updatePreviewZoom(width: number) {
+  if (width > 0) {
+    previewZoom.value = width / PREVIEW_VIRTUAL_WIDTH
+  }
+}
+
+function observePreviewContainer(el: Element | { $el?: unknown } | null) {
+  if (!(el instanceof HTMLElement)) {
+    previewContainerRef.value = null
+    previewResizeObserver?.disconnect()
+    return
+  }
+  if (previewContainerRef.value === el) return
+  previewContainerRef.value = el
+  previewResizeObserver?.disconnect()
+  previewResizeObserver?.observe(el)
+  updatePreviewZoom(el.clientWidth)
+}
+
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined') return
+
+  previewResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      updatePreviewZoom(entry.contentRect.width)
+    }
+  })
+
+  if (previewContainerRef.value) {
+    previewResizeObserver.observe(previewContainerRef.value)
+  }
+})
+
+onBeforeUnmount(() => {
+  previewResizeObserver?.disconnect()
+  previewResizeObserver = null
+})
+
+// ==================== Хелпер: блок из ресурса API ====================
+
+function toBlockItem(block: BlockResource, type: BlockType): BlockItem {
+  return {
+    id: block.id,
+    code: block.code ?? type.code,
+    title: block.title ?? '',
+    description: block.description ?? '',
+    icon: iconOfSettings(block.settings) || iconOf(type),
+    settings: block.settings ?? null,
+    parent_block_index_ids: block.parent_block_index_ids ?? [],
+    published: block.published ?? false,
+    is_test: block.is_test ?? false,
+    is_proc: block.is_proc ?? false,
+  }
+}
+
+async function fetchBlockItem(id: number, type: BlockType): Promise<BlockItem> {
+  const res = await api.get<{ data: BlockResource } | BlockResource>(`/blocks/${id}`)
+  const block = (res as { data?: BlockResource }).data ?? (res as BlockResource)
+  return toBlockItem(block, type)
+}
 
 // ==================== Создание блока ====================
 async function createBlockFromType(type: BlockType): Promise<BlockItem> {
@@ -231,7 +313,7 @@ watch(
     const numId = Number(id)
     if (!Number.isFinite(numId)) return
 
-    if (editingBlock.value?.id === numId) return
+    if (editingBlock.value?.id === numId || previewBlock.value?.id === numId) return
 
     try {
       const res = await api.get<{ data: BlockResource } | BlockResource>(`/blocks/${numId}`)
@@ -243,19 +325,9 @@ watch(
         return
       }
 
-      editingBlock.value = {
-        ...block,
-        id: block.id,
-        code: block.code ?? type.code,
-        title: block.title ?? '',
-        description: block.description ?? '',
-        icon: iconOfSettings(block.settings) || iconOf(type),
-        settings: block.settings ?? null,
-        parent_block_index_ids: block.parent_block_index_ids ?? [],
-        published: block.published ?? false,
-        is_test: block.is_test ?? false,
-        is_proc: block.is_proc ?? false,
-      }
+      // ?id — это просмотр (превью) блока в правой панели
+      editingBlock.value = null
+      previewBlock.value = toBlockItem(block, type)
     } catch (e) {
       console.error('[load block by id] failed', e)
     }
@@ -276,24 +348,69 @@ watch(
 
 // ==================== Переходы ====================
 
-function openTypeList(code: string) {
+function resetState() {
   editingBlock.value = null
+  previewBlock.value = null
+}
+
+function openTypeList(code: string) {
+  resetState()
   router.replace({
     query: { type: code, page: '1' },
   })
 }
 
 function showAllBlocks() {
-  editingBlock.value = null
+  resetState()
   router.replace({
     query: { page: '1' },
   })
 }
 
-function openBlock(id: number) {
+async function findBlockItem(id: number): Promise<BlockItem | null> {
+  const local = blocksPage.value?.data.find((b) => b.id === id)
+  const code = local?.code ?? previewBlock.value?.code ?? editingBlock.value?.code
+  const type = blockTypes.value?.find((t) => t.code === code)
+  if (!type) {
+    console.warn('[openBlock] block type not found:', code)
+    return null
+  }
+
+  return fetchBlockItem(id, type)
+}
+
+// Одиночный клик — превью блока (подсветка карточки)
+function preview(item: BlockResource) {
+  router.replace({
+    query: { id: String(item.id) },
+  })
+
+  const type = blockTypes.value?.find((t) => t.code === item.code)
+  if (!type) {
+    console.warn('[preview] block type not found:', item.code)
+    return
+  }
+
+  editingBlock.value = null
+  previewBlock.value = toBlockItem(item, type)
+}
+
+// Двойной клик — переход в редактирование
+async function openBlock(id: number) {
   router.replace({
     query: { id: String(id) },
   })
+
+  if (editingBlock.value?.id === id) return
+
+  try {
+    const block = await findBlockItem(id)
+    if (!block) return
+    editingBlock.value = block
+    previewBlock.value = null
+  } catch (e) {
+    console.error('[openBlock] failed', e)
+  }
 }
 
 function goToPage(page: number) {
@@ -479,7 +596,9 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
               :key="item.id"
               type="button"
               class="flex items-center gap-3 px-3.5 py-3 rounded-lg border border-default bg-default text-left cursor-pointer transition-colors hover:border-primary hover:shadow-sm"
-              @click="openBlock(item.id)"
+              :class="{ 'border-primary bg-elevated': previewId === item.id }"
+              @click="preview(item)"
+              @dblclick="openBlock(item.id)"
             >
               <UIcon
                 :name="iconOfSettings(item.settings)"
@@ -544,7 +663,7 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
     </template>
 
     <template #right-header>
-      <span>Свойства</span>
+      <span>{{ rightTitle }}</span>
       <UButton
         icon="i-lucide-save"
         size="xs"
@@ -560,7 +679,40 @@ function resolveBlockComponent(code: string | null | undefined): any | null {
 
     <template #right>
       <LoadingOverlay :loading="saving">
-        <div v-if="!editingBlock" class="p-8 text-center text-[13px] text-muted">
+        <!-- Превью выбранного блока (одиночный клик по карточке) -->
+        <div v-if="previewBlock" class="p-3">
+          <div class="mb-3 px-1">
+            <div class="text-sm font-medium text-highlighted truncate">
+              {{ previewBlock.title || `Блок №${previewBlock.id}` }}
+            </div>
+            <div class="mt-1 flex items-center gap-2">
+              <span v-if="previewBlock.code" class="inline-flex items-center px-2 py-px rounded-full bg-elevated text-[11px] font-medium text-muted">
+                {{ previewBlock.code }}
+              </span>
+              <span class="font-mono text-[11px] text-muted/70">#{{ previewBlock.id }}</span>
+            </div>
+          </div>
+
+          <div class="relative w-full" :ref="observePreviewContainer">
+            <div
+              class="pointer-events-none origin-top-left bg-default rounded-lg border border-default overflow-hidden"
+              :style="{ zoom: previewZoom, width: `${PREVIEW_VIRTUAL_WIDTH}px` }"
+            >
+              <BlockRenderer
+                :key="`preview-${previewBlock.id}`"
+                :code="previewBlock.code"
+                :id="previewBlock.id"
+                :is-test="previewBlock.is_test"
+                mode="body"
+                :show-to-delete-images="false"
+                :allow-drag-and-drop="false"
+                :settings="previewBlock.settings as any"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="!editingBlock" class="p-8 text-center text-[13px] text-muted">
           Выберите блок в центре.
         </div>
 

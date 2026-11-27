@@ -140,7 +140,7 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-6">
+  <div class="w-full flex flex-col gap-6">
     <UCard variant="subtle">
       <template #header>
         <div class="flex items-center gap-3">
@@ -342,5 +342,6 @@ async function onSubmit(event: FormSubmitEvent<typeof state>) {
     </UCard>
 
     <FormsDeviceAccessToggle v-if="hasRole('admin')" />
+    <FormsPushNotificationsToggle />
   </div>
 </template>

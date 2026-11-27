@@ -21,6 +21,23 @@ const DEFAULT_HEADERS: Record<string, string> = {
 const DEFAULT_CREDENTIALS: RequestCredentials = 'include'
 
 // ============================================================
+// Impersonation (см. ImpersonateFromHeader на бэкенде)
+// ============================================================
+// Смотровая вкладка хранит session-токен в sessionStorage (на вкладку),
+// все запросы шлют X-Impersonate-Token — middleware подменяет пользователя.
+const IMPERSONATION_STORAGE_KEY = 'impersonation_session'
+const IMPERSONATION_HEADER = 'X-Impersonate-Token'
+
+function readImpersonationToken(): string | null {
+  if (import.meta.server) return null
+  try {
+    return window.sessionStorage.getItem(IMPERSONATION_STORAGE_KEY) || null
+  } catch {
+    return null
+  }
+}
+
+// ============================================================
 // Справочник ошибок по HTTP-кодам
 // ============================================================
 interface ErrorMeta {
@@ -80,6 +97,10 @@ export const useApi = () => {
     const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
     const finalHeaders = { ...DEFAULT_HEADERS, ...headers }
     if (isFormData) delete finalHeaders['Content-Type']
+
+    // Смотровая вкладка: каждый запрос несёт токен подмены пользователя.
+    const impersonationToken = readImpersonationToken()
+    if (impersonationToken) finalHeaders[IMPERSONATION_HEADER] = impersonationToken
 
     try {
       return await $fetch<T>(url, {

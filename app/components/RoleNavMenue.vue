@@ -25,6 +25,9 @@ const activeRole = computed(() => getActiveRole())
 
 const navItemsShared: NavItem[] = [
   { label: 'Профиль', icon: 'i-lucide-circle-user', to: '/profile' },
+  { label: 'Заявки', icon: 'i-lucide-send', to: '/my-queries' },
+  { label: 'Уведомления', icon: 'i-lucide-bell-ring', to: '/notifications' },
+  { label: 'Сообщество', icon: 'i-lucide-users-round', to: '/community' },
   { label: t('privacy.title'), icon: 'i-lucide-cookie', to: '/privacy' },
 ]
 

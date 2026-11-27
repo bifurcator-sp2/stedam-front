@@ -41,8 +41,8 @@ const selected = ref<Record<string, boolean>>({})
 
 <template>
   <UContainer>
-    <div class="h-screen flex items-center justify-center px-4">
-      <div class="flex flex-col items-center gap-4">
+    <div class="py-8 flex justify-center">
+      <div class="w-full max-w-3xl flex flex-col gap-4">
         <UserDataForm />
       </div>
     </div>

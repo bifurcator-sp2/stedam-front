@@ -109,6 +109,17 @@ export default defineNuxtConfig({
     minify: true,
     // ★ Заголовки для SharedArrayBuffer в production (уже были у вас)
     routeRules: {
+      // Service Worker для Web Push. Приложение собирается под baseURL '/app/'
+      // (static publicDir = /home/stedam/public/app), поэтому public/sw.js
+      // доступен по '/app/sw.js' — регистрируем его со scope '/app/'.
+      '/app/sw.js': {
+        headers: {
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'Cross-Origin-Resource-Policy': 'same-origin',
+          'Service-Worker-Allowed': '/app/',
+          'Cache-Control': 'no-cache',
+        },
+      },
       '/**': {
         headers: {
           'Cross-Origin-Opener-Policy': 'same-origin',

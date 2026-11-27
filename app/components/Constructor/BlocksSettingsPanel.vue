@@ -3,17 +3,28 @@ import { computed } from 'vue'
 import BlocksSettingField from '~/components/Constructor/BlocksSettingField.vue'
 import {
   collectPublicSettingsWithPaths,
+  findNodeAtPath,
   replaceNodeAtPath,
   type PublicSettingRef,
 } from '~/utils/constructors'
 
-const id = defineModel<number | null>('id')
+const id = defineModel<any>('id')
 const title = defineModel<string | null>('title')
 const description = defineModel<string | null>('description')
+
+/** UInput/UTextarea ожидают string | undefined — отдаём безопасные прокси. */
+const titleText = computed({
+  get: () => title.value ?? '',
+  set: (v: string) => { title.value = v },
+})
+const descriptionText = computed({
+  get: () => description.value ?? '',
+  set: (v: string) => { description.value = v },
+})
 const isTest = defineModel<boolean>('isTest', { default: false })
 const isProc = defineModel<boolean>('isProc', { default: false })
-const settings = defineModel<SettingNode | null>('settings', { default: null })
-const parentBlockIndexIds = defineModel<number[] | null>('parent_block_index_ids', {
+const settings = defineModel<any>('settings', { default: null })
+const parentBlockIndexIds = defineModel<any>('parent_block_index_ids', {
   default: null,
 })
 
@@ -84,13 +95,39 @@ function updateItem(updated: SettingNode) {
   settings.value = updated
 }
 
-function updatePublicItem(path: number[], updated: SettingNode) {
+/** Публичная (read-only для админа) проекция узла: убираем children,
+ *  чтобы виджет не рисовал вложенные поля — показываем только сам элемент. */
+function asPublicField(item: SettingNode): SettingNode {
+  return { ...item, children: undefined, public: false }
+}
+
+function updatePublicItem(keyPath: string, updated: SettingNode) {
   if (!rootNode.value) return
-  const next = replaceNodeAtPath(rootAsList.value, path, () => updated)
+
+  // Актуальный узел ищем в свежем дереве (после прошлых правок)
+  const current = collectPublicSettingsWithPaths(rootAsList.value)
+    .find(r => r.keyPath === keyPath)
+  if (!current) return
+
+  const patched: SettingNode = {
+    ...findNodeAtPath(rootAsList.value, current.path)!,
+    default: updated.default,
+  }
+
+  const next = replaceNodeAtPath(rootAsList.value, current.path, () => patched)
   settings.value = next[0] ?? null
 }
 
 const published = defineModel<boolean>('published', { default: false })
+
+function setPublished(value: boolean) {
+  published.value = value
+}
+
+/** v-model:settings моста во внешний компонент (там SettingNode | null). */
+function setSettings(value: any) {
+  settings.value = value
+}
 </script>
 
 <template>
@@ -110,12 +147,13 @@ const published = defineModel<boolean>('published', { default: false })
         <div class="flex items-center gap-3">
           <div
             class="flex items-center gap-2 cursor-pointer select-none"
-            @click="published = !published"
+            @click="setPublished(!published)"
           >
             <USwitch
-              v-model="published"
+              :model-value="published"
               color="success"
               size="xs"
+              @update:model-value="setPublished"
             />
             <span
               class="text-[10px] font-bold uppercase tracking-widest transition-colors"
@@ -160,7 +198,7 @@ const published = defineModel<boolean>('published', { default: false })
           </label>
           <UInput
             id="block-name"
-            v-model="title"
+            v-model="titleText"
             size="xs"
             placeholder="Введите название"
             class="w-full"
@@ -173,7 +211,7 @@ const published = defineModel<boolean>('published', { default: false })
           </label>
           <UTextarea
             id="block-description"
-            v-model="description"
+            v-model="descriptionText"
             size="xs"
             :rows="3"
             autoresize
@@ -226,13 +264,15 @@ const published = defineModel<boolean>('published', { default: false })
 
         <div v-if="rootNode" class="flex flex-col gap-2">
           <BlocksSettingField
-            :model-value="rootNode"
+            :model-value="rootNode as any"
+            :full-node="settings"
             :block-id="blockId"
             :model-name="modelName"
             :mode="mode"
             :settings="settings"
             :max-images="computeMaxImages(rootNode)"
             :path="rootNode.key"
+            @update:full-node="setSettings($event)"
             @update:model-value="updateItem($event)"
           />
         </div>
@@ -254,18 +294,37 @@ const published = defineModel<boolean>('published', { default: false })
       </template>
 
       <template v-else>
+        <header class="relative flex items-center gap-1.5 pb-2 pl-2.5">
+          <span
+            class="absolute left-0 top-px bottom-2 w-0.5 rounded-full bg-gradient-to-b from-primary to-primary/15"
+          />
+          <span
+            class="absolute bottom-0 left-2.5 right-0 h-px bg-gradient-to-r from-default to-transparent"
+          />
+          <UIcon name="i-lucide-sliders-horizontal" class="size-3.5 text-muted"/>
+          <span class="flex-1 text-[10px] font-bold uppercase tracking-widest text-muted">
+            Настройки
+          </span>
+          <span
+            v-if="publicSettings.length"
+            class="inline-flex h-[18px] min-w-[22px] items-center justify-center rounded-full border border-primary/20 bg-primary/10 px-2 text-[10.5px] font-bold leading-none text-primary"
+          >
+            {{ publicSettings.length }}
+          </span>
+        </header>
+
         <div v-if="publicSettings.length" class="flex flex-col gap-2.5">
           <BlocksSettingField
             v-for="ref in publicSettings"
-            :key="ref.path.join('.')"
-            :model-value="ref.item"
+            :key="ref.keyPath"
+            :model-value="asPublicField(ref.item) as any"
             :block-id="blockId"
             :model-name="modelName"
             :mode="mode"
             :settings="settings"
             :max-images="computeMaxImages(ref.item)"
             :path="ref.keyPath"
-            @update:model-value="updatePublicItem(ref.path, $event)"
+            @update:model-value="updatePublicItem(ref.keyPath, $event)"
           />
         </div>
 

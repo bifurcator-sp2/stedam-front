@@ -20,6 +20,7 @@ import type {
   DraggedBlockSource,
 } from '~/types/lesson'
 import { createEmptyLesson } from '~/types/lesson'
+import { enrichSettingsWithSchema, stripSchemaMeta } from '~/utils/constructors'
 import { toRaw } from 'vue'
 
 // ==================== Зависимости ====================
@@ -100,9 +101,10 @@ function blocksFromResponse(rawBlocks: any[] | undefined | null): LessonBlockMod
   return (rawBlocks ?? []).map((b: any) => {
     const fallback = findBlockSettingsInTree(structItems.value, b.block_id)
     const rawSettings = b.settings
-    const settings = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
-      ? deepClone(rawSettings)
-      : deepClone(fallback)
+    const source = (rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings) && 'key' in rawSettings)
+      ? rawSettings
+      : fallback
+    const settings = enrichSettingsWithSchema(deepClone(source), fallback)
 
     return {
       localId: crypto.randomUUID(),
@@ -276,7 +278,7 @@ async function togglePublished() {
 
         for (const { latex, display } of formulas) {
           try {
-            katex.renderToString(latex.trim(), {
+            katex.renderToString(latex!.trim(), {
               displayMode: display,
               throwOnError: true,
               strict: false
@@ -312,7 +314,6 @@ async function togglePublished() {
         description: 'В уроке есть поломанные или нераспознанные формулы. Исправьте их перед публикацией.',
         color: 'error',
         icon: 'i-lucide-triangle-alert',
-        timeout: 5000,
       })
       return
     }
@@ -665,7 +666,7 @@ async function save() {
       taxonomy_ids: deepClone(lesson.value.taxonomy_ids ?? []),
       blocks: lesson.value.blocks.map((block) => ({
         id: block.id,
-        settings: deepClone(block.settings),
+        settings: stripSchemaMeta(deepClone(block.settings)),
         images: [],
         files: [],
       })),

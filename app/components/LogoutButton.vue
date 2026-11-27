@@ -25,6 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
 const { logout } = useSanctumAuth()
 const user = useSanctumUser()
 const toast = useToast()
+const { disablePush } = useBrowserPush()
 
 
 const isLoading = ref(false)
@@ -34,6 +35,10 @@ async function handleLogout() {
 
   isLoading.value = true
   try {
+    // Снимаем push-подписку этого устройства, чтобы уведомления не приходили
+    // на устройство после выхода (см. docs/browser-push-spec.md §4.3).
+    await disablePush().catch(() => {})
+
     await logout()
 
     // Явно сбрасываем состояние пользователя
