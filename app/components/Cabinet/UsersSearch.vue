@@ -38,11 +38,32 @@ interface UsersResponse {
 const props = withDefaults(defineProps<{
   /** Роли, которым должен соответствовать пользователь (users обязан иметь ВСЕ). */
   roles?: string[]
+  /** Связь пользователя (например, teacher / student). */
+  relation?: string
+  /** Роль второй стороны связи. */
+  counterpartRole?: string
+  /** Сразу загрузить первую страницу списка при монтировании. */
+  autoLoad?: boolean
+  /**
+   * Режим работы:
+   * - search — выбор пользователя (как раньше, через v-model);
+   * - list — только список; клик по элементу эмитит user-pressed, выбор не сохраняется.
+   */
+  mode?: 'search' | 'list'
   placeholder?: string
 }>(), {
   roles: () => [],
+  relation: undefined,
+  counterpartRole: undefined,
+  autoLoad: false,
+  mode: 'search',
   placeholder: 'Имя, фамилия, e-mail или ID',
 })
+
+const emit = defineEmits<{
+  /** Клик по пользователю в режиме list (объект целиком). */
+  userPressed: [user: UserListItem]
+}>()
 
 const selected = defineModel<UserListItem | null>({ default: null })
 
@@ -76,6 +97,8 @@ async function loadUsers(reset = false) {
       params: {
         search: searchInput.value.trim() || undefined,
         'roles[]': props.roles.length ? props.roles : undefined,
+        relation: props.relation || undefined,
+        counterpart_role: props.counterpartRole || undefined,
         page: page.value,
         per_page: 20,
       },
@@ -106,12 +129,22 @@ function loadMore() {
   loadUsers(false)
 }
 
+// Первую страницу грузим только по явному запросу (autoLoad).
+onMounted(() => {
+  if (props.autoLoad) loadUsers(true)
+})
+
 // Дебаунс ввода: поиск стартует только от 3 символов
 watch(searchInput, (val) => {
   if (debounceTimer) clearTimeout(debounceTimer)
   debounceTimer = setTimeout(() => {
     const term = val.trim()
     if (term.length < 3) {
+      // В режиме list сброс поиска возвращает к первой странице списка.
+      if (props.mode === 'list') {
+        loadUsers(true)
+        return
+      }
       // Сброс результата без запроса, если запрос уже был
       if (users.value.length || error.value) {
         requestSeq++
@@ -151,6 +184,11 @@ function roleLabels(user: UserListItem): string[] {
 }
 
 function selectUser(user: UserListItem) {
+  // В режиме list только сообщаем о нажатии, выбор не сохраняем.
+  if (props.mode === 'list') {
+    emit('userPressed', user)
+    return
+  }
   selected.value = user
 }
 
@@ -163,7 +201,7 @@ onBeforeUnmount(() => {
   <div class="flex flex-col gap-3">
     <!-- Выбранный пользователь -->
     <div
-      v-if="selected"
+      v-if="selected && mode !== 'list'"
       class="flex items-center gap-3 rounded-xl border border-[var(--ui-primary,#4f46e5)]/30 bg-[var(--ui-primary,#4f46e5)]/5 p-3"
     >
       <span class="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--ui-primary,#4f46e5)]/15 text-sm font-medium text-[var(--ui-primary,#4f46e5)]">
@@ -194,42 +232,37 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <!-- Поиск -->
-    <div v-else class="relative">
+    <!-- Поиск (в режиме list виден всегда) -->
+    <div v-if="!selected || mode === 'list'" class="relative">
       <UIcon
         name="i-lucide-search"
-        class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--ui-text-muted,#9ca3af)]"
+        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-[var(--ui-text-muted,#9ca3af)]"
       />
       <input
         v-model="searchInput"
         type="text"
         inputmode="search"
         :placeholder="placeholder"
-        class="w-full rounded-xl border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] py-2.5 pl-9 pr-9 text-sm text-[var(--ui-text-highlighted,#111827)] outline-none transition focus:border-[var(--ui-primary,#4f46e5)]"
+        class="w-full border-0 border-b border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] py-1 pl-7 pr-7 text-xs leading-4 text-[var(--ui-text-highlighted,#111827)] outline-none transition focus:border-b-[var(--ui-primary,#4f46e5)]"
       >
       <button
         v-if="searchInput"
         type="button"
-        class="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-[var(--ui-text-muted,#9ca3af)] hover:text-[var(--ui-text-highlighted,#111827)]"
+        class="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-0.5 text-[var(--ui-text-muted,#9ca3af)] hover:text-[var(--ui-text-highlighted,#111827)]"
         aria-label="Очистить"
         @click="clearSearch"
       >
-        <UIcon name="i-lucide-x" class="size-4" />
+        <UIcon name="i-lucide-x" class="size-3.5" />
       </button>
     </div>
 
     <!-- Список результатов -->
-    <div v-if="!selected" class="flex flex-col gap-1">
-      <div v-if="loading && !users.length" class="flex items-center justify-center gap-2 py-6 text-sm text-[var(--ui-text-muted,#6b7280)]">
-        <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
-        Загрузка…
-      </div>
-
-      <p v-else-if="error" class="py-4 text-center text-sm text-[var(--ui-color-error,#dc2626)]">
+    <LoadingOverlay v-if="!selected || mode === 'list'" :loading="loading" class="flex flex-col gap-1">
+      <p v-if="error" class="py-4 text-center text-sm text-[var(--ui-color-error,#dc2626)]">
         {{ error }}
       </p>
 
-      <p v-else-if="!users.length && searchInput.trim().length >= 3" class="py-4 text-center text-sm text-[var(--ui-text-muted,#6b7280)]">
+      <p v-else-if="!users.length && !loading && searchInput.trim().length >= 3" class="py-4 text-center text-sm text-[var(--ui-text-muted,#6b7280)]">
         Пользователи не найдены
       </p>
 
@@ -274,7 +307,7 @@ onBeforeUnmount(() => {
           @click="loadMore"
         />
       </template>
-    </div>
+    </LoadingOverlay>
   </div>
 </template>
 

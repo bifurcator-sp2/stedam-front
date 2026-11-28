@@ -39,7 +39,7 @@ function getFlagEmoji(code: string): string {
 </script>
 
 <template>
-  <UDropdownMenu :items="items" :content="{ align: 'end' }">
+  <UDropdownMenu :items="items" :content="{ align: 'end' }" :ui="{ content: 'z-[10000]' }">
     <UButton
       color="neutral"
       variant="ghost"

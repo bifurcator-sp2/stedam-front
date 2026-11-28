@@ -13,6 +13,13 @@ const props = defineProps<{
   item: FallbackNotification
 }>()
 
+const emit = defineEmits<{ read: [id: string] }>()
+
+// Уведомление пробыло видимым достаточно долго — сообщаем родителю.
+const { target: rootEl } = useWasRead({
+  onRead: () => emit('read', props.item.id),
+})
+
 const title = computed(() => {
   const value = props.item.data?.title
   return typeof value === 'string' && value ? value : 'Уведомление'
@@ -25,7 +32,7 @@ const text = computed(() => {
 </script>
 
 <template>
-  <div class="flex items-start gap-3">
+  <div ref="rootEl" class="flex items-start gap-3">
     <span
       class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--ui-primary,#4f46e5)]/10 text-[var(--ui-primary,#4f46e5)]"
     >

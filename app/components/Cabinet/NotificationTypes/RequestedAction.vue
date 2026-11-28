@@ -12,6 +12,8 @@ interface RequestedActionNotification {
   id: string
   type: string
   data: Record<string, unknown>
+  /** Локализованная дата уведомления («10 минут назад»). */
+  date?: string
 }
 
 interface FormField {
@@ -39,10 +41,18 @@ const props = defineProps<{
   actionTypes: Record<string, string>
 }>()
 
-const emit = defineEmits<{ decided: [id: string] }>()
+const emit = defineEmits<{
+  decided: [id: string]
+  read: [id: string]
+}>()
 
 const api = useApi()
 const toast = useToast()
+
+// Уведомление пробыло видимым достаточно долго — сообщаем родителю.
+const { target: rootEl } = useWasRead({
+  onRead: () => emit('read', props.item.id),
+})
 
 const title = computed(() => {
   const value = props.item.data?.title
@@ -54,10 +64,24 @@ const text = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 
-const actionTypeLabel = computed(() => {
-  const actionType = props.item.data?.type
-  if (typeof actionType !== 'string') return ''
-  return props.actionTypes[actionType] || ''
+/** Пользователь для подстановки вместо `$user` (data.user). */
+const notificationUser = computed(() =>
+  props.item.data?.user as { name?: unknown, [key: string]: unknown } | undefined,
+)
+
+const notificationDate = computed(() =>
+  typeof props.item.date === 'string' ? props.item.date : '',
+)
+
+/** Цвет заголовка: ошибка/отклонение — красный, принято — зелёный, иначе обычный. */
+const titleClass = computed(() => {
+  const status = props.item.data?.status
+  const decision = props.item.data?.decision
+  if (status === 'error' || decision === 'declined')
+    return 'text-[var(--ui-color-error,#dc2626)]'
+  if (decision === 'accepted')
+    return 'text-[var(--ui-color-success,#16a34a)]'
+  return 'text-[var(--ui-text-highlighted,#111827)]'
 })
 
 /** Приёмщику ждёт решения только по фазе `request`. */
@@ -170,24 +194,24 @@ async function submit(approve: boolean) {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between gap-2">
-      <span class="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--ui-text-muted,#6b7280)]">
+  <div ref="rootEl">
+    <div class="flex items-center gap-2">
+      <span class="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-[var(--ui-text-muted,#6b7280)]">
         <UIcon name="i-lucide-send" class="size-4" />
         Заявка
       </span>
+      <p class="min-w-0 flex-1 truncate text-[15px] font-medium leading-snug" :class="titleClass">
+        {{ title }}
+      </p>
       <span
-        v-if="actionTypeLabel"
-        class="shrink-0 rounded-full bg-[var(--ui-bg-elevated,#f3f4f6)] px-2 py-0.5 text-xs text-[var(--ui-text-muted,#6b7280)]"
+        v-if="notificationDate"
+        class="shrink-0 text-xs text-[var(--ui-text-muted,#6b7280)]"
       >
-        {{ actionTypeLabel }}
+        {{ notificationDate }}
       </span>
     </div>
-    <p class="mt-2 text-[15px] font-medium leading-snug text-[var(--ui-text-highlighted,#111827)]">
-      {{ title }}
-    </p>
     <p v-if="approveText" class="mt-1 text-sm leading-relaxed text-[var(--ui-text,#374151)]">
-      {{ approveText }}
+      <CabinetUserInfoLink :text="approveText" :user="notificationUser" />
     </p>
 
     <!-- Действие уже выполнено — вместо кнопок действий статус с решением -->

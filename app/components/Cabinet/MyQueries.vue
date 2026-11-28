@@ -84,6 +84,8 @@ interface ConsentForm {
   title?: FormField
   text?: FormField
   approve?: FormField
+  /** Пользователь, чьё имя подставляется вместо `$user` в тексте. */
+  user?: { id: number, name: string | null, [key: string]: unknown }
 }
 
 interface RequestResult {
@@ -223,10 +225,6 @@ function recipientLabel(recipient: RequestedActionRecipient): string {
   return recipient.name || recipient.email || `#${recipient.id}`
 }
 
-// «Смотреть как» доступно только администратору (см. Impersonate.vue).
-const { hasRole } = useAuth()
-const isAdmin = computed(() => hasRole('admin'))
-
 // Переключение между списком и кнопками запросов
 const isCreating = ref(false)
 
@@ -236,6 +234,8 @@ function startCreating() {
 
 function cancelCreating() {
   isCreating.value = false
+  // Возвращаемся к списку — подтягиваем актуальные данные.
+  loadRequestedActions(true)
 }
 
 const isOpen = ref(false)
@@ -247,6 +247,11 @@ function openQuery(query: QueryItem) {
   targetUser.value = null
   isOpen.value = true
 }
+
+// После закрытия модалки обновляем список — состояние заявок могло измениться.
+watch(isOpen, (open) => {
+  if (!open) loadRequestedActions(true)
+})
 
 const api = useApi()
 const toast = useToast()
@@ -260,14 +265,41 @@ const formRequestUrl = computed(() => {
 
 const formLoading = ref(false)
 const consent = ref<ConsentForm | null>(null)
+/** Ошибка формы согласия: сервер может ответить { message, user } вместо формы. */
+const formError = ref<{ text: string, user?: FormErrorResponse['user'] } | null>(null)
+
+interface FormErrorResponse {
+  /** Текст ошибки (старый формат). */
+  error?: string
+  /** Текст ошибки (текущий формат, может содержать `$user`). */
+  message?: string
+  code?: string
+  user?: { id: number, name: string | null, [key: string]: unknown }
+}
 
 watch(formRequestUrl, async (url) => {
   consent.value = null
+  formError.value = null
   if (!url) return
 
   formLoading.value = true
   try {
-    consent.value = await api.get<ConsentForm>(url)
+    // Ответ-ошибку вида { error, user } сервер может отдать и со статусом 200,
+    // поэтому разбираем тело как объединение формы и ошибки.
+    const data = await api.get<ConsentForm & FormErrorResponse>(url, { silent: true, refresh: true })
+    const errorText = data?.error || data?.message
+    if (data && typeof errorText === 'string' && errorText) {
+      // Например, «Вы уже являетесь учеником $user» — не даём отправить заявку.
+      formError.value = { text: errorText, user: data.user }
+      return
+    }
+    consent.value = data as ConsentForm
+  } catch (error: any) {
+    const data = error?.data as FormErrorResponse | undefined
+    formError.value = {
+      text: data?.error || data?.message || 'Не удалось получить форму заявки',
+      user: data?.user,
+    }
   } finally {
     formLoading.value = false
   }
@@ -310,7 +342,15 @@ async function submitRequest(close: () => void) {
   }
 }
 
+// Перезапрашиваем список при каждом открытии компонента: onMounted для обычного
+// монтирования, onActivated — при повторном показе страницы из <KeepAlive>.
+let activated = false
 onMounted(() => loadRequestedActions(true))
+onActivated(() => {
+  // Первая активация совпадает с onMounted — не дублируем запрос.
+  if (activated) loadRequestedActions(true)
+  activated = true
+})
 
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer)
@@ -447,11 +487,9 @@ onBeforeUnmount(() => {
                       :key="recipient.id"
                       class="flex items-center gap-1.5 text-sm leading-relaxed text-[var(--ui-text,#374151)]"
                     >
-                      <span class="truncate">{{ recipientLabel(recipient) }}</span>
-                      <CabinetImpersonate
-                        v-if="isAdmin"
-                        :user-id="recipient.id"
-                        :user-name="recipientLabel(recipient)"
+                      <CabinetUserInfoLink
+                        text="$user"
+                        :user="{ id: recipient.id, name: recipientLabel(recipient) }"
                       />
                     </div>
                   </div>
@@ -495,12 +533,20 @@ onBeforeUnmount(() => {
               Загрузка формы…
             </div>
 
+            <div
+              v-else-if="formError"
+              class="flex items-start gap-2 rounded-xl border border-[var(--ui-color-error,#dc2626)]/30 bg-[var(--ui-color-error,#dc2626)]/5 p-4 text-sm leading-relaxed text-[var(--ui-color-error,#dc2626)]"
+            >
+              <UIcon name="i-lucide-triangle-alert" class="mt-0.5 size-4 shrink-0" />
+              <span><CabinetUserInfoLink :text="formError.text" :user="formError.user" /></span>
+            </div>
+
             <div v-else-if="consent" class="rounded-xl border border-[var(--ui-border,#e5e7eb)] p-4">
               <h3 class="text-base font-semibold text-[var(--ui-text-highlighted,#111827)]">
                 {{ formTitle }}
               </h3>
               <p v-if="formText" class="mt-2 text-sm leading-relaxed text-[var(--ui-text,#374151)]">
-                {{ formText }}
+                <CabinetUserInfoLink :text="formText" :user="consent?.user" />
               </p>
             </div>
           </div>

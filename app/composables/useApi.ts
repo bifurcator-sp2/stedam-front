@@ -77,6 +77,13 @@ export const useApi = () => {
   const baseURL = config.public.apiBase
   const toast = useToast()
 
+  // Текущая локаль пользователя (i18n). Берём через nuxtApp, а не useI18n():
+  // useApi вызывается и из плагинов/middleware, где useI18n() падает (E1005).
+  const nuxtApp = useNuxtApp()
+  function currentLocale(): string {
+    return (nuxtApp.$i18n as any)?.locale?.value ?? 'ru'
+  }
+
   // Используем useState для SSR-совместимого кэша данных
   const apiCache = useState<Record<string, any>>('api-get-cache', () => ({}))
 
@@ -95,7 +102,7 @@ export const useApi = () => {
     } = options
 
     const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
-    const finalHeaders = { ...DEFAULT_HEADERS, ...headers }
+    const finalHeaders = { ...DEFAULT_HEADERS, 'Accept-Language': currentLocale(), ...headers }
     if (isFormData) delete finalHeaders['Content-Type']
 
     // Смотровая вкладка: каждый запрос несёт токен подмены пользователя.
@@ -140,7 +147,9 @@ export const useApi = () => {
 
   function get<T = any>(url: string, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
     const hasParams = options.params && Object.keys(options.params).length > 0
-    const key = hasParams ? `${url}?${JSON.stringify(options.params)}` : url
+    // Локаль входит в ключ: при смене языка кэш не отдаёт данные другого языка.
+    const base = hasParams ? `${url}?${JSON.stringify(options.params)}` : url
+    const key = `${currentLocale()}:${base}`
 
     // 1. Проверяем кэш данных (если не просят принудительно обновить)
     if (!options.refresh && apiCache.value[key] !== undefined) {

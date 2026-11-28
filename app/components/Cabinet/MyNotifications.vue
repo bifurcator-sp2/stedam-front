@@ -7,6 +7,8 @@ interface NotificationItem {
   id: string
   type: string
   data: Record<string, unknown>
+  /** Прочитано ли уведомление (с бэкенда). */
+  read?: boolean
 }
 
 interface NotificationsMeta {
@@ -24,15 +26,6 @@ interface NotificationsResponse {
   types: Record<string, string>
   /** Справочник типов действий (data.type): value => локализованное название. */
   action_types: Record<string, string>
-}
-
-/** Иконка по типу уведомления. */
-const TYPE_ICONS: Record<string, string> = {
-  request: 'i-lucide-inbox',
-  approved: 'i-lucide-circle-check',
-  rejected: 'i-lucide-circle-x',
-  done: 'i-lucide-check-check',
-  error: 'i-lucide-triangle-alert',
 }
 
 const api = useApi()
@@ -104,35 +97,54 @@ function clearSearch() {
   searchInput.value = ''
 }
 
-function typeLabel(item: NotificationItem): string {
-  // Локализованный тип действия из data.type (request/approved/...),
-  // иначе — тип уведомления (RequestedAction и т.п.).
-  const actionType = item.data?.type
-  if (typeof actionType === 'string') {
-    const label = actionTypesByName.value[actionType]
-    if (label) return label
+/** Прочитанные на клиенте, но ещё не отправленные на сервер id. */
+const pendingReadIds = new Set<string>()
+let readSyncInFlight = false
+
+/** Уведомление прочитано (показано на экране): помечаем и ставим в очередь отправки. */
+function onRead(id: string) {
+  const item = items.value.find(i => i.id === id)
+  if (!item) return
+  item.read = true
+  pendingReadIds.add(id)
+}
+
+/**
+ * Отправка очереди прочитанности пачкой: PATCH /notifications
+ * с notifications_ids[]. Успешные id убираем из очереди; при ошибке
+ * оставляем до следующей попытки.
+ */
+async function flushReads() {
+  if (readSyncInFlight || !pendingReadIds.size) return
+  readSyncInFlight = true
+  const ids = [...pendingReadIds]
+  try {
+    await api.patch('/notifications', {
+      notifications_ids: ids,
+    }, { silent: true })
+    ids.forEach(id => pendingReadIds.delete(id))
+  } catch {
+    // Оставим id в очереди — повторим на следующем тике.
+  } finally {
+    readSyncInFlight = false
   }
-  return typesByName.value[item.type] || item.type
 }
 
-function typeIcon(item: NotificationItem): string {
-  return TYPE_ICONS[item.type] || 'i-lucide-bell'
-}
+let readSyncTimer: ReturnType<typeof setInterval> | null = null
 
-function title(item: NotificationItem): string {
-  const value = item.data?.title
-  return typeof value === 'string' && value ? value : 'Уведомление'
-}
-
-function text(item: NotificationItem): string {
-  const value = item.data?.text ?? item.data?.message
-  return typeof value === 'string' ? value : ''
-}
-
-onMounted(() => loadNotifications(true))
+onMounted(() => {
+  loadNotifications(true)
+  readSyncTimer = setInterval(flushReads, 1000)
+})
 
 onBeforeUnmount(() => {
   if (debounceTimer) clearTimeout(debounceTimer)
+  if (readSyncTimer) {
+    clearInterval(readSyncTimer)
+    readSyncTimer = null
+  }
+  // Не теряем очередь при уходе со страницы.
+  flushReads()
 })
 </script>
 
@@ -191,7 +203,10 @@ onBeforeUnmount(() => {
             <article
               v-for="item in items"
               :key="item.id"
-              class="rounded-2xl border border-[var(--ui-border,#e5e7eb)] bg-[var(--ui-bg,#ffffff)] p-4"
+              class="rounded-2xl border bg-[var(--ui-bg,#ffffff)] p-4"
+              :class="item.read
+                ? 'border-[var(--ui-border,#e5e7eb)]'
+                : 'border-[var(--ui-primary,#4f46e5)]'"
             >
               <!-- Заявка на действие (RequestedAction) — отдельный шаблон -->
               <CabinetNotificationTypesRequestedAction
@@ -199,29 +214,15 @@ onBeforeUnmount(() => {
                 :item="item"
                 :action-types="actionTypesByName"
                 @decided="loadNotifications(true)"
+                @read="onRead"
               />
 
               <!-- Обычное уведомление -->
-              <template v-else>
-                <div class="flex items-start gap-3">
-                  <span
-                    class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--ui-primary,#4f46e5)]/10 text-[var(--ui-primary,#4f46e5)]"
-                  >
-                    <UIcon :name="typeIcon(item)" class="size-5" />
-                  </span>
-                  <div class="min-w-0 flex-1">
-                    <span class="block truncate text-[15px] font-medium text-[var(--ui-text-highlighted,#111827)]">
-                      {{ title(item) }}
-                    </span>
-                    <span class="mt-0.5 inline-block rounded-full bg-[var(--ui-bg-elevated,#f3f4f6)] px-2 py-0.5 text-xs text-[var(--ui-text-muted,#6b7280)]">
-                      {{ typeLabel(item) }}
-                    </span>
-                    <p v-if="text(item)" class="mt-1 text-sm leading-relaxed text-[var(--ui-text,#374151)]">
-                      {{ text(item) }}
-                    </p>
-                  </div>
-                </div>
-              </template>
+              <CabinetNotificationTypesFallback
+                v-else
+                :item="item"
+                @read="onRead"
+              />
             </article>
 
             <UButton
